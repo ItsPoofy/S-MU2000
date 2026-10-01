@@ -388,18 +388,33 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 
 #include <algorithm>
 
+// ---- picking the face -------------------------------------------------------
+//
+// cjk_families is a preference order, not a test: a distro can have a perfectly
+// good Japanese face under a name that is not on the list. So the question is
+// asked in languages rather than in names -- lang=ja for Japanese, lang=ja,en
+// for Japanese and Latin together. fontconfig intersects the tags, so naming
+// both asks for a face that covers both.
+//
+// That intersection is what keeps a CJK-only fallback out of the slot that
+// draws the whole UI. A fallback such as Droid Sans Fallback covers kana and
+// kanji and expects another font to supply the Latin, so putting it in the
+// program's one font draws the English labels as nothing at all -- not as tofu
+// boxes, because the glyphs it lacks are drawn from nowhere. It is the one case
+// the merge in add_cjk_ui_font() exists to mend, and the merge source is a
+// lang=ja query, which is happy to take a CJK-only face.
+//
+// A query has to be able to fail, which is why this is FcFontList and not
+// FcFontMatch. A match never fails: FcDefaultSubstitute fills a missing family
+// in with the closest thing the system has, so asking for a macOS face on Linux
+// answers with DejaVu, and every fullwidth bracket and kanji outside 0x00FF
+// comes out as a tofu box. An empty list is the honest answer.
+
 // The file for one family name, or nothing when the machine has no such family.
-// One family per call, so the walk takes the first that answers rather than
-// letting a missing family outrank a present one.
-//
-// FcFontList, not FcFontMatch: a match never fails, substituting the closest
-// font the system has, so a name that is not installed comes back as some other
-// face instead of nothing.
-//
-// The set comes back ranked, so asking for the wanted weight and taking the
-// first face is enough. A family that keeps its weights in separate files
-// resolves each to its own; one that does not answers the same face for both,
-// and the panel draws that at the bold slots.
+// One family per call, so the walk takes the first that answers. The set comes
+// back ranked, so asking for the wanted weight and taking the first face is
+// enough; a family that keeps its weights in separate files resolves each to
+// its own, and one that does not answers the same face for both.
 static std::string cjk_fontconfig_match(const char *family, bool bold)
 {
 	// A font's own family list holds its regional and weight names too, so
@@ -460,24 +475,19 @@ static std::string cjk_fontconfig_scan(std::initializer_list<const char *> langs
 	return found;
 }
 
-// The program's one font, so Latin as well as Japanese. fontconfig intersects
-// the tags, which is what keeps a CJK-only fallback out: a fallback covers kana
-// and kanji and expects another font to supply the Latin, so making it the one
-// font draws the English labels as nothing at all.
+// The program's one font, so it wants Latin as well as Japanese.
 static std::string cjk_fontconfig_any()
 {
 	return cjk_fontconfig_scan({ "ja", "en" });
 }
 
-// Japanese alone, for the merge source: a CJK-only fallback face is ideal here,
-// which is why en is left out.
+// Japanese alone, for the merge source, so a CJK-only face will do.
 static std::string cjk_fontconfig_japanese()
 {
 	return cjk_fontconfig_scan({ "ja" });
 }
 
-// The system's own sans, for a machine with no Japanese face installed. Not
-// pretty, but a real outline font beats ImGui's embedded default.
+// The system's own sans, for a machine with no Japanese face installed.
 static std::string cjk_fontconfig_sans()
 {
 	FcPattern *pat = FcPatternCreate();
@@ -500,12 +510,16 @@ static std::string cjk_fontconfig_sans()
 	return path;
 }
 
-// Whether the face the walk settles on can draw Japanese. Every named family is
-// a CJK face by construction and the coverage scan asks for kana and kanji, so
-// only the last-ditch sans fallback is Latin-only -- the one case
-// add_cjk_ui_font() has to mend.
+// Whether the face the walk settles on draws Japanese. Every named family is a
+// CJK face by construction and the lang query asks for it, so only the
+// last-ditch sans fallback is Latin-only.
+//
+// inline, not static: the panel and the editor windows are separate translation
+// units, and a static in a header gives each one its own copy. The panel's walk
+// then set its copy and left the editors' untouched, so the merge was skipped
+// and the Japanese text never arrived.
 #if !defined(_WIN32) && !defined(__APPLE__)
-static bool cjk_primary_covers_japanese = true;
+inline bool cjk_primary_covers_japanese = true;
 #endif
 
 inline void cjk_offers(bool bold, std::vector<face_offer> &out)
