@@ -462,8 +462,14 @@ static bool cjk_file_has(FT_Library lib, FcChar32 cp, const std::string &file)
 // ask for the glyph instead of the name.
 static std::string cjk_fontconfig_any()
 {
-	// Hiragana A and a common kanji: a face needs both to be usable here.
-	static const FcChar32 want[] = { 0x3042, 0x6F22 };
+	// Latin AND Japanese, all three required. The Latin is the part that is
+	// easy to leave out and fatal to leave out: a fallback face covers kana and
+	// kanji and expects a primary font to supply the Latin, so picking one for
+	// the whole program draws the English labels as nothing at all -- not even
+	// a tofu box, because the fallback glyph comes from the same empty face.
+	// DroidSansFallbackFull is exactly such a font and took the whole UI with
+	// it; Noto Sans CJK has both and is why installing it looked like a fix.
+	static const FcChar32 want[] = { 0x41 /* A */, 0x3042, 0x6F22 };
 	// One library for the whole scan: the list runs to thousands of entries
 	// and re-initialising FreeType per file would dominate the walk.
 	FT_Library lib = nullptr;
@@ -484,7 +490,10 @@ static std::string cjk_fontconfig_any()
 		if (std::find(tried.begin(), tried.end(), path) != tried.end())
 			continue;
 		tried.push_back(path);
-		if (cjk_file_has(lib, want[0], path) && cjk_file_has(lib, want[1], path)) {
+		bool all = true;
+		for (FcChar32 cp : want)
+			all = all && cjk_file_has(lib, cp, path);
+		if (all) {
 			FT_Done_FreeType(lib);
 			return path;
 		}
