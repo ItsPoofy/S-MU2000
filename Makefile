@@ -550,7 +550,11 @@ $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(LINUX_IO_OBJS) $(BUILD)/src
 # alongside libasound2-dev.
 
 LINUX_GUI_CFLAGS := $(shell pkg-config --cflags fontconfig 2>/dev/null)
-LINUX_GUI_LIBS := $(shell pkg-config --libs fontconfig 2>/dev/null)
+# freetype too: the Linux font lookup asks it whether a font file can draw
+# kana and kanji (src/ui/font_file.h), which is how the CJK face is found on
+# a distro whose family names are none of the ones we ask for by name. It is
+# already a hard dependency of fontconfig, so this adds no new package.
+LINUX_GUI_LIBS := $(shell pkg-config --libs fontconfig freetype2 2>/dev/null)
 LINUX_SDL_CFLAGS := $(shell pkg-config --cflags sdl3 2>/dev/null)
 LINUX_SDL_LIBS := $(shell pkg-config --libs sdl3 2>/dev/null)
 CXXFLAGS += $(LINUX_GUI_CFLAGS)

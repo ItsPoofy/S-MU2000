@@ -382,6 +382,9 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 #else
 
 #include <fontconfig/fontconfig.h>
+#include <fontconfig/fcfreetype.h>
+
+#include <algorithm>
 
 // One match for one family name: a single multi-valued query would rank the
 // families against each other and return one winner, losing the chance to skip
@@ -405,6 +408,107 @@ static std::string cjk_fontconfig_match(const char *family, bool bold)
 	FcResult res = FcResultNoMatch;
 	std::string path;
 	if (FcPattern *m = FcFontMatch(nullptr, pat, &res)) {
+		// **A match here does not mean the family exists.** FcDefaultSubstitute
+		// fills a missing family in with the closest thing the system has, so
+		// asking for a macOS face on Linux answers with DejaVu Sans and the walk
+		// stops there -- on a face with the Latin range and none of the CJK, so
+		// every fullwidth bracket and kanji outside 0x00FF came out as a tofu
+		// box. CoreText has no such substitution (a missing family yields no
+		// URL, which is why macOS was fine and this was not).
+		//
+		// So check who answered: keep the match only when the family fontconfig
+		// picked is the one we asked for. The requested name being the start of
+		// the answer is enough, which is what lets "Noto Sans CJK" accept
+		// "Noto Sans CJK JP" -- that is one family with regional files, not two.
+		// Otherwise report no match, and the walk moves on to the next family.
+		FcChar8 *got = nullptr;
+		const bool ours = FcPatternGetString(m, FC_FAMILY, 0, &got) == FcResultMatch
+		                  && got
+		                  && std::string(reinterpret_cast<const char *>(got))
+		                         .rfind(family, 0) == 0;
+		if (ours) {
+			FcChar8 *file = nullptr;
+			if (FcPatternGetString(m, FC_FILE, 0, &file) == FcResultMatch && file)
+				path = reinterpret_cast<const char *>(file);
+		}
+		FcPatternDestroy(m);
+	}
+	FcPatternDestroy(pat);
+	return path;
+}
+
+// Can this font file draw one of these characters at all? fontconfig will
+// happily hand back a face for a family it does not have, so the only way to
+// know a file is real Japanese is to read its charmap.
+static bool cjk_file_has(FT_Library lib, FcChar32 cp, const std::string &file)
+{
+	FT_Face face = nullptr;
+	if (FT_New_Face(lib, file.c_str(), 0, &face) != 0)
+		return false;
+	// 0 is "no glyph for this character", which is the answer we want.
+	const bool has = FcFreeTypeCharIndex(face, cp) != 0;
+	FT_Done_Face(face);
+	return has;
+}
+
+// Any installed face that can draw a kana and a kanji, found by asking
+// fontconfig what it has rather than by guessing names.
+//
+// The family list above is a preference order, not a coverage test, and it
+// goes stale per distro: a Debian install can have Droid Sans Fallback and
+// none of those families, which is what left the UI on ImGui's built-in
+// ProggyClean after the substitute-rejecting match stopped handing back
+// DejaVu. Whichever Japanese face a machine does have is better than none, so
+// ask for the glyph instead of the name.
+static std::string cjk_fontconfig_any()
+{
+	// Hiragana A and a common kanji: a face needs both to be usable here.
+	static const FcChar32 want[] = { 0x3042, 0x6F22 };
+	// One library for the whole scan: the list runs to thousands of entries
+	// and re-initialising FreeType per file would dominate the walk.
+	FT_Library lib = nullptr;
+	if (FT_Init_FreeType(&lib) != 0)
+		return {};
+	FcFontSet *set = FcConfigGetFonts(nullptr, FcSetSystem);
+	if (!set) {
+		FT_Done_FreeType(lib);
+		return {};
+	}
+	std::vector<std::string> tried;
+	for (int i = 0; i < set->nfont; i++) {
+		FcChar8 *file = nullptr;
+		if (FcPatternGetString(set->fonts[i], FC_FILE, 0, &file) != FcResultMatch
+		    || !file)
+			continue;
+		const std::string path = reinterpret_cast<const char *>(file);
+		if (std::find(tried.begin(), tried.end(), path) != tried.end())
+			continue;
+		tried.push_back(path);
+		if (cjk_file_has(lib, want[0], path) && cjk_file_has(lib, want[1], path)) {
+			FT_Done_FreeType(lib);
+			return path;
+		}
+	}
+	FT_Done_FreeType(lib);
+	return {};
+}
+
+// The system's own sans, for when no Japanese face is installed at all. Not
+// pretty, but a real outline font at the right size beats ImGui's embedded
+// default, which is what an empty walk used to land on.
+static std::string cjk_fontconfig_sans()
+{
+	FcPattern *pat = FcPatternCreate();
+	if (!pat)
+		return {};
+	FcPatternAddString(pat, FC_FAMILY,
+	                   reinterpret_cast<const FcChar8 *>("sans-serif"));
+	FcPatternAddDouble(pat, FC_SIZE, 16.0);
+	FcConfigSubstitute(nullptr, pat, FcMatchPattern);
+	FcDefaultSubstitute(pat);
+	FcResult res = FcResultNoMatch;
+	std::string path;
+	if (FcPattern *m = FcFontMatch(nullptr, pat, &res)) {
 		FcChar8 *file = nullptr;
 		if (FcPatternGetString(m, FC_FILE, 0, &file) == FcResultMatch && file)
 			path = reinterpret_cast<const char *>(file);
@@ -419,6 +523,18 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 	// No dedupe: repeats cost nothing, the walk stops at the first face.
 	for (const char *family : cjk_families)
 		if (std::string path = cjk_fontconfig_match(family, bold); !path.empty())
+			out.push_back({ std::move(path), {} });
+	// Nothing from the list: this machine simply has none of those families.
+	// A face that draws Japanese is still the right answer, so look for one by
+	// what it can render.
+	if (out.empty())
+		if (std::string path = cjk_fontconfig_any(); !path.empty())
+			out.push_back({ std::move(path), {} });
+	// And if it has no Japanese at all, a real Latin font beats the embedded
+	// default. Japanese text will be tofu either way, but the rest of the UI
+	// stops looking like a 1996 demo.
+	if (out.empty())
+		if (std::string path = cjk_fontconfig_sans(); !path.empty())
 			out.push_back({ std::move(path), {} });
 }
 
@@ -470,6 +586,10 @@ inline const void *cjk_face_data(bool bold, size_t &bytes, int &face, float &em)
 				break;
 			}
 		}
+		{ std::fprintf(stderr, "TEMP cjk bold=%d offers=%d chosen=%s\n",
+		    (int)bold, (int)offers.size(),
+		    kept[slot].data.empty() ? "NONE -> AddFontDefault" : "a face");
+		  std::fflush(stderr); }
 	}
 	bytes = kept[slot].data.size();
 	face = kept[slot].face;
