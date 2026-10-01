@@ -219,6 +219,14 @@ bool pc_window::route_event(const SDL_Event &ev)
 		}
 		return false;
 	}
+	// Every event the panel's pump handles for itself has to be claimed here
+	// when it belongs to an editor window, or the panel will act on it. SDL
+	// delivers one global queue, and the panel's switch has no windowID test:
+	// a WINDOW_RESIZED from the List window used to fall through to it and set
+	// the panel's own ww/wh to the List window's size, so the panel redrew its
+	// art to the wrong dimensions inside an unchanged window -- drawn small and
+	// pushed to one corner. FOCUS_LOST had the same shape: losing focus to an
+	// editor window made the panel drop its focus state.
 	Uint32 id = 0;
 	switch (ev.type) {
 	case SDL_EVENT_MOUSE_MOTION:      id = ev.motion.windowID; break;
@@ -228,6 +236,14 @@ bool pc_window::route_event(const SDL_Event &ev)
 	case SDL_EVENT_KEY_DOWN:
 	case SDL_EVENT_KEY_UP:            id = ev.key.windowID; break;
 	case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+	case SDL_EVENT_WINDOW_RESIZED:
+	case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+	case SDL_EVENT_WINDOW_EXPOSED:
+	case SDL_EVENT_WINDOW_MINIMIZED:
+	case SDL_EVENT_WINDOW_MAXIMIZED:
+	case SDL_EVENT_WINDOW_RESTORED:
+	case SDL_EVENT_WINDOW_FOCUS_GAINED:
+	case SDL_EVENT_WINDOW_FOCUS_LOST:
 		id = ev.window.windowID;
 		break;
 	default:
