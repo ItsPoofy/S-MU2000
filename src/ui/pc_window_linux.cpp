@@ -154,7 +154,7 @@ bool pc_window::create(std::string &err)
 
 	// The one shared font setup: ui/font_file.h asks fontconfig for a face,
 	// checks it can draw what the panel writes, and reads it once.
-	add_cjk_font(io.Fonts);
+	add_cjk_ui_font(io.Fonts);
 
 	std::lock_guard<std::mutex> hold(registry_mutex());
 	registry().push_back(this);
@@ -197,28 +197,6 @@ void pc_window::frame(xg::model &m, const xg_snapshot &ram, bridge &br)
 	// pump draws its frame between the same two calls.
 	imshell::sdl_begin(m_im);
 	m_view->draw(m, ram, br);
-	{ static bool once = false;
-	  if (!once) {
-	    once = true;
-	    ImFontAtlas *A = ImGui::GetIO().Fonts;
-	    std::fprintf(stderr, "TEMP editor atlas fonts=%d\n", (int)A->Fonts.Size);
-	    for (int i = 0; i < A->Fonts.Size; i++) {
-	      ImFont *f = A->Fonts[i];
-	      ImFontBaked *bk = f->GetFontBaked(f->LegacySize);
-	      std::fprintf(stderr,
-	          "TEMP  font[%d] size=%.1f indexlookup=%d loaded_kana=%d loaded_kanji=%d loaded_fw_paren=%d\n",
-	          i, f->LegacySize, (int)bk->IndexLookup.Size,
-	          (int)bk->IsGlyphLoaded(0x3042), (int)bk->IsGlyphLoaded(0x6F22),
-	          (int)bk->IsGlyphLoaded(0xFF08));
-	    }
-	    ImFont *cur = ImGui::GetFont();
-	    int idx = -1;
-	    for (int i = 0; i < A->Fonts.Size; i++)
-	      if (A->Fonts[i] == cur) { idx = i; break; }
-	    std::fprintf(stderr, "TEMP  current font is index %d of %d\n",
-	                  idx, (int)A->Fonts.Size);
-	    std::fflush(stderr);
-	  } }
 	xgui::drag_flush(br);          // マウスで動かしている値の、間引いた送信
 
 	imshell::sdl_present(m_im, m_win);

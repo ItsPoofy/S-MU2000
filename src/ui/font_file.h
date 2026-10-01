@@ -14,6 +14,8 @@
 
 #include "imgui.h"
 
+#include "ui/lang.h"      // get_lang(), so an English UI skips the merge below
+
 #include <cstddef>
 #include <cstdio>
 #include <functional>
@@ -502,6 +504,38 @@ static std::string cjk_fontconfig_any()
 	return {};
 }
 
+// The same scan without the Latin requirement, for merging: this one is
+// happy with a CJK-only fallback face, which is the whole point.
+static std::string cjk_fontconfig_japanese()
+{
+	FcChar32 want[] = { 0x3042, 0x6F22 };
+	FT_Library lib = nullptr;
+	if (FT_Init_FreeType(&lib) != 0)
+		return {};
+	FcFontSet *set = FcConfigGetFonts(nullptr, FcSetSystem);
+	if (!set) {
+		FT_Done_FreeType(lib);
+		return {};
+	}
+	std::vector<std::string> tried;
+	for (int i = 0; i < set->nfont; i++) {
+		FcChar8 *file = nullptr;
+		if (FcPatternGetString(set->fonts[i], FC_FILE, 0, &file) != FcResultMatch
+		    || !file)
+			continue;
+		const std::string path = reinterpret_cast<const char *>(file);
+		if (std::find(tried.begin(), tried.end(), path) != tried.end())
+			continue;
+		tried.push_back(path);
+		if (cjk_file_has(lib, want[0], path) && cjk_file_has(lib, want[1], path)) {
+			FT_Done_FreeType(lib);
+			return path;
+		}
+	}
+	FT_Done_FreeType(lib);
+	return {};
+}
+
 // The system's own sans, for when no Japanese face is installed at all. Not
 // pretty, but a real outline font at the right size beats ImGui's embedded
 // default, which is what an empty walk used to land on.
@@ -527,9 +561,20 @@ static std::string cjk_fontconfig_sans()
 	return path;
 }
 
+// Whether the face the walk settles on can draw Japanese. True for every
+// named family (they are CJK faces by construction) and for the coverage scan
+// (it asks for kana and kanji); only the last-ditch sans fallback is
+// Latin-only, and that is the one case add_cjk_ui_font() has to mend.
+inline bool &cjk_primary_covers_japanese()
+{
+	static bool v = true;
+	return v;
+}
+
 inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 {
 	// No dedupe: repeats cost nothing, the walk stops at the first face.
+	cjk_primary_covers_japanese() = true;
 	for (const char *family : cjk_families)
 		if (std::string path = cjk_fontconfig_match(family, bold); !path.empty())
 			out.push_back({ std::move(path), {} });
@@ -543,11 +588,14 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 	// default. Japanese text will be tofu either way, but the rest of the UI
 	// stops looking like a 1996 demo.
 	if (out.empty())
-		if (std::string path = cjk_fontconfig_sans(); !path.empty())
+		if (std::string path = cjk_fontconfig_sans(); !path.empty()) {
+			cjk_primary_covers_japanese() = false;
 			out.push_back({ std::move(path), {} });
+		}
 }
 
 #endif
+
 
 // ---- taking the first face that comes back ---------------------------------
 
@@ -588,10 +636,6 @@ inline const void *cjk_face_data(bool bold, size_t &bytes, int &face, float &em)
 		walked[slot] = true;
 		std::vector<face_offer> offers;
 		cjk_offers(bold, offers);
-		{ std::fprintf(stderr, "TEMP font bold=%d offers=%d\n", (int)bold, (int)offers.size());
-		  for (size_t q = 0; q < offers.size() && q < 4; q++)
-		    std::fprintf(stderr, "TEMP   offer[%d]=%s\n", (int)q, offers[q].path.c_str());
-		  std::fflush(stderr); }
 		for (face_offer &offer : offers) {
 			face_bytes got;
 			if (cjk_offer_bytes(offer, got)) {
@@ -599,10 +643,6 @@ inline const void *cjk_face_data(bool bold, size_t &bytes, int &face, float &em)
 				break;
 			}
 		}
-		{ std::fprintf(stderr, "TEMP cjk bold=%d offers=%d chosen=%s\n",
-		    (int)bold, (int)offers.size(),
-		    kept[slot].data.empty() ? "NONE -> AddFontDefault" : "a face");
-		  std::fflush(stderr); }
 	}
 	bytes = kept[slot].data.size();
 	face = kept[slot].face;
@@ -634,6 +674,32 @@ inline float cjk_face_em(bool bold)
 	return em;
 }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// A face that draws Japanese, whether or not it draws Latin -- the partner for
+// MergeMode below. DroidSansFallbackFull is the case that needs it: Japanese
+// yes, Latin no, so it cannot be the program's one font, but it is a fine
+// source for the Japanese glyphs to merge into a Latin one.
+inline const void *cjk_japanese_only_data(size_t &bytes, int &face, float &em)
+{
+	static bool walked = false;
+	static face_bytes kept;
+	if (!walked) {
+		walked = true;
+		if (std::string path = cjk_fontconfig_japanese(); !path.empty()) {
+			face_offer o;
+			o.path = path;
+			face_bytes got;
+			if (cjk_offer_bytes(o, got))
+				kept = std::move(got);
+		}
+	}
+	bytes = kept.data.size();
+	face = kept.face;
+	em = kept.em;
+	return kept.data.empty() ? nullptr : kept.data.data();
+}
+#endif
+
 // Put one CJK face into an atlas at a given size, or ImGui's built-in when the
 // machine has no Japanese font. The buffer stays ours (FontDataOwnedByAtlas =
 // false); `bold` without a bold face draws the regular one.
@@ -660,6 +726,55 @@ inline ImFont *add_cjk_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = fa
 			return font;
 	}
 	return atlas->AddFontDefault();
+}
+
+// The font for text the *user* reads -- the window's button strip and the
+// editor windows -- as opposed to the panel's own lettering, which comes from
+// panel.txt and is English on every platform.
+//
+// Same face as add_cjk_font(), except that a machine whose only Japanese-capable
+// font is a fallback (Droid Sans Fallback: kana and kanji, no Latin) gets that
+// one's glyphs merged into the Latin face. Without the merge the walk has to
+// choose, and either choice loses: the CJK-only face draws the English labels
+// as nothing at all, and a Latin face leaves （） and the kanji as tofu.
+//
+// Which glyphs to bring across. MergeMode rasterises every glyph in the range
+// it is handed, so the English case deliberately asks for much less.
+//
+// The English UI still needs this: overview.cpp's parameter captions are
+// formatted with fullwidth parentheses whatever the language -- "%s %s（%d-%d）"
+// is not behind UI_TEXT -- so an English panel on a box whose only Japanese
+// face is a CJK-only fallback would show tofu there. Halfwidth and Fullwidth
+// Forms is 240-odd glyphs and covers that. Japanese mode additionally wants
+// kana and kanji, and gets the standard Japanese range for it.
+//
+// Windows and macOS need none of this -- Yu Gothic UI and Hiragino Sans cover
+// both scripts, so the walk never reaches the Latin-only fallback and the merge
+// has nothing to do.
+inline ImFont *add_cjk_ui_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = false)
+{
+	ImFont *primary = add_cjk_font(atlas, px, bold);
+	if (!primary)
+		return primary;
+#if !defined(_WIN32) && !defined(__APPLE__)
+	if (cjk_primary_covers_japanese())
+		return primary;              // the face already has both scripts
+	size_t bytes = 0;
+	int face = 0;
+	float em = 1.0f;
+	const void *extra = cjk_japanese_only_data(bytes, face, em);
+	if (!extra)
+		return primary;
+	static ImWchar fullwidth[] = { 0xFF00, 0xFFEF, 0 };
+	ImFontConfig cfg;
+	cfg.FontDataOwnedByAtlas = false;
+	cfg.FontNo = face;
+	cfg.MergeMode = true;            // into the font added just above
+	cfg.GlyphRanges = ui::show_english() ? fullwidth
+	                                    : atlas->GetGlyphRangesJapanese();
+	atlas->AddFontFromMemoryTTF(const_cast<void *>(extra), int(bytes), px, &cfg);
+#endif
+	return primary;
 }
 
 #endif // S_MU2000_UI_FONT_FILE_H
