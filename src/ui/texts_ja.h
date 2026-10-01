@@ -428,6 +428,12 @@ inline const ui_texts &ja_texts()
 		.ps_fold_close_hint = "音色を選ぶ面を畳む\n分類・音色・バンク違いの列を左端に畳んで、その幅を右のタブに回す",
 		.ps_fold_char1 = "音",
 		.ps_fold_char2 = "色",
+		.cap_range_fmt = "%s %s（%d-%d）",
+		.cap_count_fmt = "%s（%d）",
+		.cap_bank_fmt = "%3d  %s（%d/%d）",
+		.cap_pgm_fmt = "（%02X pp %02X）",
+		.cap_pgm3_fmt = "（%02X %02X %02X）",
+		.cap_insertion_fmt = "%s（INSERTION → %s）",
 		.ov_silent = "（鳴っていない）",
 	};
 	return t;
