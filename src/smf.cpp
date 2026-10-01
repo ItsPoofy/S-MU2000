@@ -9,6 +9,14 @@
 #include <cctype>
 #include <cstring>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 namespace smf {
 
 int port_from_track_name(const std::string &raw)
@@ -177,8 +185,22 @@ bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std:
 // ファイルから読んで load_from_memory に渡す（既存の呼び出し側用）
 bool load(const std::string &path, std::vector<event> &out, std::string &err)
 {
-	std::FILE *f = std::fopen(path.c_str(), "rb");
-	if (!f) { err = "MIDI ファイルを開けない: " + path; return false; }
+#ifdef _WIN32
+    std::FILE *f = nullptr;
+    const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    if (n > 0) {
+        std::wstring w(size_t(n), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
+        f = _wfopen(w.c_str(), L"rb");
+    }
+    if (!f)
+#else
+    std::FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f)
+#endif
+    {
+        err = "MIDI ファイルを開けない: " + path; return false;
+    }
 	std::fseek(f, 0, SEEK_END);
 	std::vector<u8> d(size_t(std::ftell(f)));
 	std::fseek(f, 0, SEEK_SET);
