@@ -579,6 +579,10 @@ inline const void *cjk_face_data(bool bold, size_t &bytes, int &face, float &em)
 		walked[slot] = true;
 		std::vector<face_offer> offers;
 		cjk_offers(bold, offers);
+		{ std::fprintf(stderr, "TEMP font bold=%d offers=%d\n", (int)bold, (int)offers.size());
+		  for (size_t q = 0; q < offers.size() && q < 4; q++)
+		    std::fprintf(stderr, "TEMP   offer[%d]=%s\n", (int)q, offers[q].path.c_str());
+		  std::fflush(stderr); }
 		for (face_offer &offer : offers) {
 			face_bytes got;
 			if (cjk_offer_bytes(offer, got)) {
