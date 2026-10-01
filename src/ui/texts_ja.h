@@ -429,6 +429,7 @@ inline const ui_texts &ja_texts()
 		.ps_fold_char1 = "音",
 		.ps_fold_char2 = "色",
 		.cap_range_fmt = "%s %s（%d-%d）",
+		.cap_range1_fmt = "%s（%d-%d）",
 		.cap_count_fmt = "%s（%d）",
 		.cap_bank_fmt = "%3d  %s（%d/%d）",
 		.cap_pgm_fmt = "（%02X pp %02X）",
