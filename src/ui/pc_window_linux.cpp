@@ -1,6 +1,6 @@
 // license:BSD-3-Clause
 //
-// Linux pc_window: one SDL3 window + renderer per ImGui view.
+// Linux pc_window: one SDL3 window + SDL_gpu swapchain per ImGui view.
 //
 // Event routing needs a window-ID lookup because SDL events are global:
 // every live window registers itself, and route_event() feeds the owner.
@@ -9,8 +9,6 @@
 #include "pc_window_linux.h"
 
 #include "imgui.h"
-#include "backends/imgui_impl_sdl3.h"
-#include "backends/imgui_impl_sdlrenderer3.h"
 
 #include "ui/font_file.h"   // the fontconfig lookup lives in there
 
@@ -86,7 +84,7 @@ pc_window::~pc_window()
 
 bool pc_window::show(std::string &err)
 {
-	if ((!m_win || !m_ren || !m_imgui) && !create(err))
+	if ((!m_win || !m_im.ctx) && !create(err))
 		return false;
 	SDL_ShowWindow(m_win);
 	SDL_RaiseWindow(m_win);
@@ -130,23 +128,26 @@ bool pc_window::create(std::string &err)
 		err = SDL_GetError();
 		return false;
 	}
-	m_ren = SDL_CreateRenderer(m_win, nullptr);
-	if (!m_ren) {
-		err = SDL_GetError();
+	m_id = SDL_GetWindowID(m_win);
+
+	// The same bring-up the main window uses, on this window's own swapchain
+	// over the one shared device (ui/imgui_shell_sdl.h). sdl_start() makes
+	// the ImGui context, so everything that needs one comes after it.
+	if (!imshell::sdl_start(m_im, m_win)) {
+		err = "ImGui SDL_gpu backends failed to start";
 		destroy();
 		return false;
 	}
-	m_id = SDL_GetWindowID(m_win);
+	m_imgui = m_im.ctx;
 
-	m_imgui = ImGui::CreateContext();
 	ImGui::SetCurrentContext(m_imgui);
 	ImGuiIO &io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.IniFilename = nullptr;       // no imgui.ini littered into the working folder
 
-	// The same look the other four windows get (pc_window.cpp, pc_window_mac.mm).
-	// This copy of the setup was missing it, so the editor windows were the only
-	// ones in ImGui's default light style with square frames.
+	// The same look the other four windows get (pc_window.cpp,
+	// pc_window_mac.mm). Without this the editor windows were the only ones
+	// in ImGui's default light style with square frames.
 	ImGui::StyleColorsDark();
 	ImGuiStyle &st = ImGui::GetStyle();
 	st.FrameRounding = 3;
@@ -155,17 +156,6 @@ bool pc_window::create(std::string &err)
 	// checks it can draw what the panel writes, and reads it once.
 	add_cjk_font(io.Fonts);
 
-	if (!ImGui_ImplSDL3_InitForSDLRenderer(m_win, m_ren)) {
-		err = "ImGui SDL3 backend failed to start";
-		destroy();
-		return false;
-	}
-	if (!ImGui_ImplSDLRenderer3_Init(m_ren)) {
-		err = "ImGui renderer backend failed to start";
-		destroy();
-		return false;
-	}
-
 	std::lock_guard<std::mutex> hold(registry_mutex());
 	registry().push_back(this);
 	return true;
@@ -173,16 +163,15 @@ bool pc_window::create(std::string &err)
 
 void pc_window::destroy()
 {
-	if (m_imgui) {
-		ImGui::SetCurrentContext(m_imgui);
-		ImGui_ImplSDLRenderer3_Shutdown();
-		ImGui_ImplSDL3_Shutdown();
-		ImGui::DestroyContext(m_imgui);
+	if (m_im.ctx) {
+		// sdl_stop() drops the panel's textures and destroys the context.
+		// Unclaiming the window afterwards takes its swapchain with it; the
+		// order matters, the swapchain outlives the ImGui context.
+		SDL_Window *w = m_win;
+		imshell::sdl_stop(m_im);
 		m_imgui = nullptr;
-	}
-	if (m_ren) {
-		SDL_DestroyRenderer(m_ren);
-		m_ren = nullptr;
+		if (w && imshell::gpu_device())
+			SDL_ReleaseWindowFromGPUDevice(imshell::gpu_device(), w);
 	}
 	if (m_win) {
 		SDL_DestroyWindow(m_win);
@@ -203,17 +192,14 @@ void pc_window::frame(xg::model &m, const xg_snapshot &ram, bridge &br)
 		return;
 	ImGui::SetCurrentContext(m_imgui);
 
-	ImGui_ImplSDLRenderer3_NewFrame();
-	ImGui_ImplSDL3_NewFrame();
-	ImGui::NewFrame();
+	// One window, one frame: sdl_begin() opens it and sdl_present() closes it
+	// (Render() and the swapchain submit live in there). The main window's
+	// pump draws its frame between the same two calls.
+	imshell::sdl_begin(m_im);
 	m_view->draw(m, ram, br);
 	xgui::drag_flush(br);          // マウスで動かしている値の、間引いた送信
-	ImGui::Render();
 
-	SDL_SetRenderDrawColor(m_ren, 26, 26, 28, 255);
-	SDL_RenderClear(m_ren);
-	ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_ren);
-	SDL_RenderPresent(m_ren);
+	imshell::sdl_present(m_im, m_win);
 	// no wait: gui's timer (30 frames a second) decides the pace
 }
 

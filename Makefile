@@ -576,10 +576,13 @@ $(BUILD)/imgui/%.o: %.cpp
 
 IMGUI_OBJS := $(IMGUI_CORE:%.cpp=$(BUILD)/imgui/%.o)
 
-# Dear ImGui SDL3 backends for the PC editor windows.
+# Dear ImGui SDL3 backends: the platform one plus SDL_gpu as the renderer.
 # Vendored unmodified from the matching ImGui release, like the rest.
+# Upstream prefers SDL_gpu over SDL_Renderer where both exist
+# (docs/BACKENDS.md), which is also what keeps the LCD's per-frame texture
+# upload off the CPU blitter.
 IMGUI_SDL_BACKENDS := third_party/imgui/backends/imgui_impl_sdl3.cpp \
-                      third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp
+                      third_party/imgui/backends/imgui_impl_sdlgpu3.cpp
 IMGUI_SDL_OBJS := $(IMGUI_SDL_BACKENDS:%.cpp=$(BUILD)/imgui/%.o)
 
 LINUX_GUI_SRCS := src/ui/panel.cpp src/ui/layout.cpp src/ui/svg.cpp \

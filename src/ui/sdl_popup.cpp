@@ -96,13 +96,13 @@ int message_box(SDL_Window *win, const char *title, const char *text,
 
 // The menu through an ImDrawList. Same geometry, colors, hit-testing,
 // keyboard and cancel semantics on every platform.
-int run(SDL_Window *win, SDL_Renderer *ren, ImGuiContext *ctx,
+int run(SDL_Window *win, imshell::sdl_state &st, ImGuiContext *ctx,
               const im::fonts &fonts, int ww, int wh,
               std::function<void(ImDrawList *)> behind, std::atomic<bool> &quit,
               const std::vector<item> &items, int x, int y, int &sub_chosen)
 {
 	sub_chosen = -1;
-	if (!ctx || !ren)
+	if (!ctx || !st.ctx)
 		return -1;
 	ImGui::SetCurrentContext(ctx);
 
@@ -181,7 +181,7 @@ int run(SDL_Window *win, SDL_Renderer *ren, ImGuiContext *ctx,
 				    ImVec2(float(x + PAD_X + 2), float(ry + ROW_H / 2 - 4)),
 				    ImVec2(float(x + PAD_X + 10), float(ry + ROW_H / 2 + 4)), col_check);
 		}
-		imshell::sdl_present(ren);
+		imshell::sdl_present(st, win);
 	};
 	auto at = [&](int mx, int my) {
 		if (mx < x || mx >= x + mw || my < y)
