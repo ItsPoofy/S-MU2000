@@ -701,6 +701,12 @@ void sampling_editor::assign_pane(bridge &br)
 		m_pan = cur.pan;
 		m_coarse = cur.coarse;
 		m_fine = cur.fine;
+		m_attack = cur.attack;
+		m_decay1 = cur.decay1;
+		m_decay2 = cur.decay2;
+		m_release = cur.release;
+		m_level1 = cur.level1;
+		m_level2 = cur.level2;
 		m_dirty = false;
 	}
 
@@ -778,6 +784,61 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::SliderInt("##fine", &m_fine, -64, 63, "%+d"))
 		m_dirty = true;
 
+	// エンベロープ。速さは大きいほど速く 0 は動かない、レベルは 127 が最大。左に形の目安、右に値
+	ImGui::Spacing();
+	ImGui::TextDisabled("%s", UI_TEXT(smp_env, "Envelope"));
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_env_tip, "Rates run 0-63 (higher is faster, 0 stays put); levels 0-127. A key goes up at the attack rate, falls at decay 1 to level 1, then at decay 2 to level 2 and stays there while held (with the loop on, the sound keeps going). Release fades it out after the key is let go."));
+	{
+		const float gw = fs * 9, gh = ImGui::GetFrameHeightWithSpacing() * 6 - ImGui::GetStyle().ItemSpacing.y;
+		const ImVec2 g0 = ImGui::GetCursorScreenPos();
+		ImGui::Dummy(ImVec2(gw, gh));
+		ImDrawList *dl = ImGui::GetWindowDrawList();
+		dl->AddRectFilled(g0, ImVec2(g0.x + gw, g0.y + gh), IM_COL32(16, 20, 26, 255));
+		// 形の目安: 区間の幅は (64 - 速さ) に比べる（0 は動かないので長い平らな区間）、高さはレベル（dB を直線に）
+		auto seg = [](int rate) { return rate <= 0 ? 0.0f : float(64 - rate) + 2.0f; };
+		auto lv = [](int level) { return std::clamp(1.0f - float(127 - level) * 0.77f / 48.0f, 0.0f, 1.0f); };
+		const float hold = 24.0f;
+		const float wa = seg(m_attack), w1 = m_decay1 ? seg(m_decay1) : hold, w2 = m_decay2 ? seg(m_decay2) : 0.0f, wr = seg(m_release);
+		const float l1 = m_decay1 ? lv(m_level1) : 1.0f, l2 = m_decay1 && m_decay2 ? lv(m_level2) : l1;
+		const float total = (m_attack ? wa : hold) + w1 + w2 + hold + (m_release ? wr : hold);
+		const float sx = (gw - 8) / total, top = g0.y + 4, bot = g0.y + gh - 4, hh = bot - top;
+		float x = g0.x + 4;
+		std::vector<ImVec2> pts = { ImVec2(x, bot) };
+		x += (m_attack ? wa : hold) * sx;
+		pts.push_back(ImVec2(x, m_attack ? top : bot));
+		const float peak = m_attack ? 1.0f : 0.0f;
+		x += w1 * sx;
+		pts.push_back(ImVec2(x, bot - hh * peak * l1));
+		x += w2 * sx;
+		pts.push_back(ImVec2(x, bot - hh * peak * l2));
+		x += hold * sx;
+		pts.push_back(ImVec2(x, bot - hh * peak * l2));
+		const float xoff = x;
+		x += (m_release ? wr : hold) * sx;
+		pts.push_back(ImVec2(x, m_release ? bot : bot - hh * peak * l2));
+		dl->AddPolyline(pts.data(), int(pts.size()), IM_COL32(110, 200, 255, 255), 0, 2.0f);
+		dl->AddLine(ImVec2(xoff, g0.y), ImVec2(xoff, g0.y + gh), IM_COL32(255, 210, 90, 160));
+		ImGui::SameLine();
+		ImGui::BeginGroup();
+		const float lab2 = fs * 8;
+		auto rate = [&](const char *name, const char *id, int &v, int max) {
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(name);
+			ImGui::SameLine(lab2);   // BeginGroup の中ではまとまりの左端から
+			ImGui::SetNextItemWidth(-1);
+			if (ImGui::SliderInt(id, &v, 0, max))
+				m_dirty = true;
+		};
+		rate(UI_TEXT(smp_env_attack, "Attack"), "##ar", m_attack, 63);
+		rate(UI_TEXT(smp_env_decay1, "Decay 1"), "##d1r", m_decay1, 63);
+		rate(UI_TEXT(smp_env_level1, "Level 1"), "##d1l", m_level1, 127);
+		rate(UI_TEXT(smp_env_decay2, "Decay 2"), "##d2r", m_decay2, 63);
+		rate(UI_TEXT(smp_env_level2, "Level 2 (sustain)"), "##d2l", m_level2, 127);
+		rate(UI_TEXT(smp_env_release, "Release"), "##rr", m_release, 63);
+		ImGui::EndGroup();
+	}
+
 	ImGui::Spacing();
 	if (ImGui::Button(UI_TEXT(smp_apply, "Apply"), ImVec2(fs * 7, 0))) {
 		sp::voice v;
@@ -788,6 +849,12 @@ void sampling_editor::assign_pane(bridge &br)
 		v.pan = m_pan;
 		v.coarse = m_coarse;
 		v.fine = m_fine;
+		v.attack = m_attack;
+		v.decay1 = m_decay1;
+		v.decay2 = m_decay2;
+		v.release = m_release;
+		v.level1 = m_level1;
+		v.level2 = m_level2;
 		std::string done = UI_TEXT(smp_voice_set_fmt, "Wrote Bank# %d, program %d");
 		const int bank = m_bank, pgm = m_pgm;
 		br.post([slot, v, done, bank, pgm](mu2000 &mu) {

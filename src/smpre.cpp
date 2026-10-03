@@ -257,6 +257,67 @@ int main(int argc, char **argv)
 				std::printf("  %5zums rms %.4f  440 %.4f 660 %.4f\n", i * 1000 / RATE, std::sqrt(sum / double(w)),
 				            tone(seg, 440), tone(seg, 660));
 			}
+		} else if (cmd == "loop") {
+			// loop <番号> <0|1> [ループの頭]
+			int n = 0, on = 0;
+			u32 at = 0;
+			ss >> n >> on >> at;
+			std::printf("loop   %d %s\n", n, g.mu.sampling_loop(n, on != 0, at) ? "ok" : "無い");
+		} else if (cmd == "scan") {
+			// scan <16 進の番地> <16 進の長さ> <値…>: 1 バイトずつ値を書いて PGM001 の鍵 60 を押し、音量の移り変わりを出して戻す。
+			// 押して 5・20・50・150・400・900ms、離して 30・150・400ms の大きさ（その前後 10ms の rms）
+			std::string a, l, h;
+			ss >> a >> l;
+			const u32 start = u32(std::strtoul(a.c_str(), nullptr, 16)), len = u32(std::strtoul(l.c_str(), nullptr, 16));
+			std::vector<u8> vals;
+			while (ss >> h)
+				vals.push_back(u8(std::strtoul(h.c_str(), nullptr, 16)));
+			auto rms_at = [&](u32 ms) {
+				const size_t c = size_t(ms) * RATE / 1000, w = RATE / 100;
+				double sum = 0;
+				size_t k = 0;
+				for (size_t i = c >= w / 2 ? c - w / 2 : 0; i < c + w / 2 && i < g.out.size(); i++, k++)
+					sum += g.out[i] * g.out[i];
+				return k ? std::sqrt(sum / double(k)) : 0.0;
+			};
+			auto probe = [&]() {
+				for (u8 b : { 0xb0, 0x78, 0x00, 0xc0, 0x01 })
+					g.mu.midi_in(b, 0);
+				g.pump(50);
+				for (u8 b : { 0xc0, 0x00 })
+					g.mu.midi_in(b, 0);
+				g.pump(150);
+				g.out.clear();
+				g.collect = true;
+				for (u8 b : { 0x90, 0x3c, 0x64 })
+					g.mu.midi_in(b, 0);
+				g.pump(1000);
+				for (u8 b : { 0x80, 0x3c, 0x40 })
+					g.mu.midi_in(b, 0);
+				g.pump(500);
+				g.collect = false;
+				g.pump(1500);   // 長い余韻が次へ残らないように
+				std::string s;
+				char buf[16];
+				for (u32 ms : { 5u, 20u, 50u, 100u, 200u, 400u, 700u, 990u, 1020u, 1060u, 1120u, 1250u, 1490u }) {
+					std::snprintf(buf, sizeof(buf), " %5.2f", rms_at(ms) * 100);
+					s += buf;
+				}
+				return s;
+			};
+			std::printf("scan   基準         %s\n", probe().c_str());
+			for (u32 i = 0; i < len; i++) {
+				const u32 at = start + i;
+				const u8 orig = g.mu.dram()[at - 0x1000000];
+				for (u8 v : vals) {
+					if (v == orig)
+						continue;
+					g.mu.poke(at, v);
+					std::printf("  %x %02x→%02x %s\n", at, orig, v, probe().c_str());
+				}
+				g.mu.poke(at, orig);
+				std::fflush(stdout);
+			}
 		} else if (cmd == "lcd") {
 			std::printf("lcd    [%s]\n", g.lcd().c_str());
 		} else {

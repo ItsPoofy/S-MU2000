@@ -534,6 +534,14 @@ struct ui_texts {
 	const char *smp_loop;
 	const char *smp_loop_tip;
 	const char *smp_loop_at;
+	const char *smp_env;
+	const char *smp_env_tip;
+	const char *smp_env_attack;
+	const char *smp_env_decay1;
+	const char *smp_env_level1;
+	const char *smp_env_decay2;
+	const char *smp_env_level2;
+	const char *smp_env_release;
 };
 
 // Each language file defines one of these (never included directly).

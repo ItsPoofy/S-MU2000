@@ -75,6 +75,8 @@ private:
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;
+	// エンベロープ（sp::voice の attack・decay1・decay2・release・level1・level2）
+	int m_attack = 63, m_decay1 = 0, m_decay2 = 0, m_release = 63, m_level1 = 127, m_level2 = 127;
 };
 
 } // namespace ui

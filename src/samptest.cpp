@@ -685,6 +685,51 @@ int main(int argc, char **argv)
 			const bool still = k.mu.preview_number() == n5;
 			k.mu.preview_stop();
 			check(still, "ループ: 試聴も止めるまで続く", std::to_string(k.mu.preview_pos()));
+
+			// エンベロープ（ループの入った PGM003 で）。押して 0.8 秒あとと離して 0.15 秒あとの大きさを、既定と比べる
+			auto env = [&](double &held, double &after, double &first) {
+				for (u8 b : pc3)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.out.clear();
+				k.collect = true;
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(1000);
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.collect = false;
+				k.pump(1500);
+				auto rms = [&](u32 ms) {
+					const size_t c = size_t(ms) * RATE / 1000;
+					double s = 0;
+					for (size_t i = c - RATE / 200; i < c + RATE / 200; i++)
+						s += k.out[i] * k.out[i];
+					return std::sqrt(s / double(RATE / 100));
+				};
+				first = rms(20);
+				held = rms(800);
+				after = rms(1150);
+			};
+			double h0, a0, f0, h1, a1, f1;
+			env(h0, a0, f0);
+			sp::voice e;
+			k.mu.sampling_voice(2, e);
+			e.attack = 24;    // ゆっくり立ち上がる（0.4 秒ほど）
+			e.decay1 = 63;
+			e.level1 = 96;    // すぐ -24dB ほどへ
+			e.release = 16;   // 離しても長く残る
+			k.mu.sampling_set_voice(2, e, err);
+			sp::voice eb;
+			k.mu.sampling_voice(2, eb);
+			env(h1, a1, f1);
+			const double db = 20 * std::log10(h1 / h0);
+			check(eb.attack == 24 && eb.decay1 == 63 && eb.level1 == 96 && eb.release == 16 && f1 < 0.2 * f0 &&
+			      db < -18 && db > -30 && a1 > 0.5 * h1 && a0 < 0.1 * h0,
+			      "エンベロープ: アタック・レベル・リリース",
+			      "頭 " + std::to_string(f1 / f0) + "、押している間 " + std::to_string(db) + " dB、離した後 " +
+			      std::to_string(a1 / h1) + "（既定 " + std::to_string(a0 / h0) + "）");
 		}
 	}
 

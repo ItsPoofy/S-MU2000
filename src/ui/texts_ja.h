@@ -500,6 +500,14 @@ inline const ui_texts &ja_texts()
 		.smp_loop = "ループ",
 		.smp_loop_tip = "鍵盤を押しているあいだ、ループの頭からサンプルの終わりまでをくり返す。切ると 1 度だけ鳴らす",
 		.smp_loop_at = "ループの頭",
+		.smp_env = "エンベロープ",
+		.smp_env_tip = "速さは 0-63（大きいほど速く、0 は動かない）、レベルは 0-127。押すとアタックの速さで最大へ、ディケイ 1 でレベル 1 へ、ディケイ 2 でレベル 2 へ下がり、押しているあいだはそこに留まる（ループを入れておけば鳴り続ける）。離すとリリースの速さで消える",
+		.smp_env_attack = "アタック",
+		.smp_env_decay1 = "ディケイ 1",
+		.smp_env_level1 = "レベル 1",
+		.smp_env_decay2 = "ディケイ 2",
+		.smp_env_level2 = "レベル 2（サステイン）",
+		.smp_env_release = "リリース",
 	};
 	return t;
 }

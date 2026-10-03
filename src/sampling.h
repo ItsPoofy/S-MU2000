@@ -68,6 +68,10 @@ struct voice
 	int pan = 7;             // 0 = L7、7 = C、14 = R7、15 = Scaling
 	int coarse = 0;          // 半音（-24〜+24）
 	int fine = 0;            // セント（-64〜+63）
+	// 音量のエンベロープ（AWM の形）。速さは 0-63 で大きいほど速く、0 は動かない。レベルは 0-127（1 でおよそ 0.77dB）。
+	// 押すと attack で最大へ、decay1 で level1 へ、decay2 で level2 へ（押しているあいだはそこに留まる）、離すと release で 0 へ
+	int attack = 63, decay1 = 0, decay2 = 0, release = 63;
+	int level1 = 127, level2 = 127;
 };
 
 // 録音で入力のどれを録るか（firmware の InputSrc と同じ並び）

@@ -500,6 +500,14 @@ inline const ui_texts &en_texts()
 		.smp_loop = "Loop",
 		.smp_loop_tip = "While a key is held, repeat from the loop point to the end of the sample. Off plays the sample once.",
 		.smp_loop_at = "Loop point",
+		.smp_env = "Envelope",
+		.smp_env_tip = "Rates run 0-63 (higher is faster, 0 stays put); levels 0-127. A key goes up at the attack rate, falls at decay 1 to level 1, then at decay 2 to level 2 and stays there while held (with the loop on, the sound keeps going). Release fades it out after the key is let go.",
+		.smp_env_attack = "Attack",
+		.smp_env_decay1 = "Decay 1",
+		.smp_env_level1 = "Level 1",
+		.smp_env_decay2 = "Decay 2",
+		.smp_env_level2 = "Level 2 (sustain)",
+		.smp_env_release = "Release",
 	};
 	return t;
 }

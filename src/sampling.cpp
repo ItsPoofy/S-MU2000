@@ -328,6 +328,12 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 	out.pan = m_dram[o + 0x51];
 	out.coarse = int(m_dram[o + 0x1d]) - 0x40;
 	out.fine = int(m_dram[o + 0x1e]) - 0x40;
+	out.attack = m_dram[o + 0x55] & 0x3f;
+	out.decay1 = m_dram[o + 0x56] & 0x3f;
+	out.decay2 = m_dram[o + 0x57] & 0x3f;
+	out.release = m_dram[o + 0x58] & 0x3f;
+	out.level1 = m_dram[o + 0x59] & 0x7f;
+	out.level2 = m_dram[o + 0x5a] & 0x7f;
 	return true;
 }
 
@@ -361,6 +367,12 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 	m_dram[o + 0x51] = u8(std::clamp(v.pan, 0, 15));
 	m_dram[o + 0x1d] = u8(0x40 + std::clamp(v.coarse, -24, 24));
 	m_dram[o + 0x1e] = u8(0x40 + std::clamp(v.fine, -64, 63));
+	m_dram[o + 0x55] = u8(std::clamp(v.attack, 0, 63));
+	m_dram[o + 0x56] = u8(std::clamp(v.decay1, 0, 63));
+	m_dram[o + 0x57] = u8(std::clamp(v.decay2, 0, 63));
+	m_dram[o + 0x58] = u8(std::clamp(v.release, 0, 63));
+	m_dram[o + 0x59] = u8(std::clamp(v.level1, 0, 127));
+	m_dram[o + 0x5a] = u8(std::clamp(v.level2, 0, 127));
 	return true;
 }
 
