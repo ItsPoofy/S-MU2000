@@ -94,6 +94,7 @@ struct ui_texts {
 	const char *menu_stop_fmt;        // %s: the song playing
 	const char *menu_fold34;
 	const char *menu_drop34;
+	const char *menu_thin_bends;
 	const char *menu_out_title;
 	const char *menu_out_digital;
 	const char *menu_out_analog;

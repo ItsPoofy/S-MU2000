@@ -67,6 +67,7 @@ inline const ui_texts &ja_texts()
 		.menu_stop_fmt = "止める（%s）",
 		.menu_fold34 = "口 3・4 を A・B に重ねて鳴らす（DIN の口のとき）",
 		.menu_drop34 = "口 3・4 は鳴らさない（DIN の口のとき）",
+		.menu_thin_bends = "詰まったピッチベンドを間引く（実機とは違う鳴り方）",
 		.menu_out_title = "音の出口",
 		.menu_out_digital = "デジタル（S/PDIF。DPCM の直流も残る）",
 		.menu_out_analog = "アナログ（LINE OUT・PHONES。直流を切る）",
