@@ -269,6 +269,7 @@ public:
 	// 前面のカードの差し込み口（SmartMedia）。create / load で差し、eject で抜く。
 	// 中身は状態の保存に入れないので、使う側がファイルに書き出す（take_dirty_blocks / write_blocks）
 	smu2000::smartmedia &card() { return m_card; }
+	bool card_inserted() const { return m_card.inserted(); }
 	// サンプリング RAM（4MB）。確かめる用
 	const std::vector<u8> &sample_ram() const { return m_sampram; }
 	// サンプリングの管理情報（サンプルの一覧・音色）を見るため

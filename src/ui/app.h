@@ -728,16 +728,15 @@ public:
 		return true;
 	}
 
-	// An empty card, in the physical layout a new one comes in. It has to
-	// be formatted by the machine (UTIL -> CARD -> Format) before it holds
-	// anything
+	// A new card, already formatted the way the machine's UTIL -> CARD ->
+	// Format leaves it (smartmedia::format), so it can be saved to at once
 	void new_card(u32 megabytes)
 	{
 		const std::string path = ask_card_save_path();
 		if (path.empty())
 			return;
 		smu2000::smartmedia card;
-		if (!card.create(megabytes)) {
+		if (!card.create(megabytes) || !card.format()) {
 			std::fprintf(stderr, "%s\n", UI_TEXT(dlg_card_create_fail, "Cannot create the SmartMedia image"));
 			return;
 		}
@@ -748,8 +747,8 @@ public:
 			return;
 		}
 		if (insert_card(path))
-			menu_note(UI_TEXT(dlg_fresh_card, "Inserted a blank SmartMedia image.\n"
-			                                  "Before use, format it on the machine: UTIL → CARD → Format."));
+			menu_note(UI_TEXT(dlg_fresh_card, "Inserted a new SmartMedia image.\n"
+			                                  "It is already formatted (as UTIL → CARD → Format leaves it), so it can be saved to right away."));
 	}
 
 	void do_card_open()

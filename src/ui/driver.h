@@ -403,6 +403,7 @@ public:
 		s.contrast = u8(mu.lcd_contrast());
 		s.voices_master = u8(mu.swpm().sounding_voices());
 		s.voices_slave  = u8(mu.swps().sounding_voices());
+		s.card   = mu.card_inserted();
 		s.ready  = ready;
 		if (!ready && message)
 			std::snprintf(s.message, sizeof(s.message), "%s", message);
