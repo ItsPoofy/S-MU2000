@@ -3,27 +3,29 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  iOS entitlements for the AUv3 extension.
+	  iOS entitlements for the AUv3 extension: deliberately EMPTY.
 
-	  Deliberately no application-groups. Working without a paid account means free
-	  provisioning, which does not support App Groups, so the extension cannot reach
-	  the app's files through a shared container. The ROMs are therefore baked into
-	  the extension bundle instead (make ios-auv3 IOS_ROMS=roms), which the engine
-	  already finds: engine.cpp searches module_dir()/../Resources/roms, and that is
-	  correct for both layouts - macOS puts the binary in Contents/MacOS and iOS is
-	  flat, so in both cases the bundle's Resources is one level up from the binary.
+	  Two keys used to live here and both were wrong:
+	  - com.apple.security.app-sandbox is a macOS entitlement, copied over with
+	    the file. Meaningless on iOS, and a device install may reject it.
+	  - com.apple.security.cs.allow-jit does nothing on iOS (no JIT write
+	    protection API, interpreter compiled in instead - see
+	    src/compat/exec_mem.h and the SMU2000_SH2_JIT switch).
 
-	  "import ROMs" from inside the app can come later; it would write into this same
+	  Deliberately no application-groups either. Working without a paid account
+	  means free provisioning, which does not support App Groups, so the
+	  extension cannot reach the app's files through a shared container. The
+	  ROMs are therefore baked into the extension bundle instead
+	  (make ios-auv3 IOS_ROMS=roms), which the engine finds beside the binary
+	  (candidate 3b in src/vst3/engine.cpp).
+
+	  "import ROMs" from inside the app can come later; it would write into the
 	  bundle-adjacent directory or, once there is a paid account, into a group
 	  container.
 
-	  allow-jit: kept for completeness. It does nothing on iOS, where
-	  pthread_jit_write_protect_np is unavailable (src/compat/exec_mem.h gates it on
-	  !TARGET_OS_IPHONE) and the engine runs the interpreter, which is fully working.
+	  If background audio is ever needed (playing while another app is front),
+	  that is UIBackgroundModes=audio in the *app's* Info.plist, not an
+	  entitlement here.
 	-->
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.cs.allow-jit</key>
-	<true/>
 </dict>
 </plist>

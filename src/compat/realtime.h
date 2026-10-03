@@ -2,11 +2,19 @@
 //
 // The platform's real-time audio workgroup, behind one small class.
 //
-// Only macOS has workgroups (Apple's parallel real-time threads pattern:
+// Only macOS hands over a group (Apple's parallel real-time threads pattern:
 // a persistent helper renders in sync with the I/O thread, so it joins the
-// I/O unit's group instead of floating). Everywhere else this is an empty
-// class with the same API, so the engine loop carries no #ifdefs and the
-// join/leave logic is reviewed once, here.
+// I/O unit's group instead of floating). iOS compiles the same path -
+// os/workgroup.h exists there and the QoS raise below applies - but no iOS
+// backend can produce a handle: AVAudioEngine exposes no output-unit accessor
+// to read kAudioOutputUnitProperty_OSWorkgroup from, and the HAL it would come
+// from (kAudioDevicePropertyIOThreadOSWorkgroup) is not in any iOS header. So
+// on iOS reset() only ever sees nullptr and the slave stays out, correctly.
+// The render block itself needs no join: it already runs on the engine's own
+// real-time thread, which Apple puts in the deadline group itself.
+//
+// Everywhere else this is an empty class with the same API, so the engine loop
+// carries no #ifdefs and the join/leave logic is reviewed once, here.
 //
 // The handle stays void* throughout: only macOS front ends set it, and only
 // this file knows it is an os_workgroup_t.

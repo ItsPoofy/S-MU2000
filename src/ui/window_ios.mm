@@ -216,19 +216,95 @@
 }
 
 // The app-verb half of a press: panel.press/drag through mouse_down/mouse_drag,
-// and the menu flag macOS turns into an NSMenu. There is no native menu on iOS
-// yet (UIContextMenuInteraction or an action sheet), so a requested menu is
-// logged rather than dropped silently - dropping it would look exactly like the
-// tap doing nothing, which is what sent us here.
-- (void)pressAt:(CGPoint)p right:(BOOL)right
+// and the menu flag macOS turns into an NSMenu. On iOS it becomes an action
+// sheet (showMenuAt:below), so a requested menu opens rather than being logged.
+// Returns what the press did, so the caller can fall through to the other button
+// when this one was inert (touchesBegan below).
+- (ui::mouse_out)pressAt:(CGPoint)p right:(BOOL)right
 {
+	ui::mouse_out o;
 	if (!self->app)
-		return;
-	ui::mouse_out o = self->app->mouse_down((int)p.x, (int)p.y, right ? true : false);
+		return o;
+	o = self->app->mouse_down((int)p.x, (int)p.y, right ? true : false);
 	if (o.show_menu)
-		std::fprintf(stderr, "[ios] menu requested at %.0f,%.0f (no native menu yet)\n",
-		             p.x, p.y);
-	(void)o;
+		[self showMenuAt:p];
+	return o;
+}
+
+// The context menu, from the same menu_groups the desktop renders into HMENU
+// and NSMenu, acted on through the same menu_chosen(id).
+//
+// An action sheet is the honest iOS mapping, with three documented flattenings
+// where sheets cannot do what menus do:
+//   titled groups have no submenus on a sheet, so the title goes in as a
+//     disabled header action and the items follow at top level (macOS nests
+//     them: the four MIDI ports live under their titles there);
+//   separators have no equivalent and are skipped;
+//   checked items get a "✓ " prefix (macOS has a real checkmark state).
+// The shortcut hint keeps macOS's （...） shape so both read the same.
+//
+// iPad popover anchoring is load-bearing, not cosmetic: presenting an action
+// sheet on iPad without sourceView/sourceRect crashes. The tap point anchors it.
+- (void)showMenuAt:(CGPoint)p
+{
+	ui::gui_app *theApp = self->app;
+	if (!theApp)
+		return;
+	std::vector<ui::menu_group> groups = theApp->context_menu((int)p.x, (int)p.y);
+	if (groups.empty())
+		return;
+
+	UIAlertController *sheet = [UIAlertController
+		alertControllerWithTitle:nil
+		                 message:nil
+		          preferredStyle:UIAlertControllerStyleActionSheet];
+	for (const ui::menu_group &g : groups) {
+		if (!g.title.empty()) {
+			NSString *head = [NSString stringWithUTF8String:g.title.c_str()];
+			UIAlertAction *h = [UIAlertAction actionWithTitle:head
+			                                            style:UIAlertActionStyleDefault
+			                                          handler:nil];
+			h.enabled = NO;
+			[sheet addAction:h];
+		}
+		for (const ui::menu_item &item : g.items) {
+			if (item.separator)
+				continue;
+			NSString *title = [NSString stringWithUTF8String:item.label.c_str()];
+			if (!item.shortcut.empty()) {
+				NSString *hint = [NSString stringWithUTF8String:item.shortcut.c_str()];
+				title = [[title stringByAppendingString:@"（"] stringByAppendingString:hint];
+				title = [title stringByAppendingString:@"）"];
+			}
+			if (item.checked)
+				title = [@"✓ " stringByAppendingString:title];
+			const int itemId = item.id;
+			const BOOL enabled = item.enabled ? YES : NO;
+			UIAlertAction *a = [UIAlertAction
+				actionWithTitle:title
+				          style:UIAlertActionStyleDefault
+				        handler:^(UIAlertAction *act) {
+					        (void)act;
+					        theApp->menu_chosen(itemId);
+				        }];
+			a.enabled = enabled;
+			[sheet addAction:a];
+		}
+	}
+	[sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+	                                          style:UIAlertActionStyleCancel
+	                                        handler:nil]];
+
+	UIViewController *vc = self.window.rootViewController;
+	if (!vc)
+		return;
+	UIPopoverPresentationController *pop = sheet.popoverPresentationController;
+	if (pop) {
+		pop.sourceView = vc.view;
+		pop.sourceRect = CGRectMake(p.x, p.y, 1, 1);
+		pop.permittedArrowDirections = UIPopoverArrowDirectionAny;
+	}
+	[vc presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
@@ -243,7 +319,16 @@
 		if (!self->leftTouch) {
 			self->leftTouch = t;
 			[self pushTouch:t down:YES right:NO];
-			[self pressAt:p right:NO];
+			// A tap where the left button does nothing falls through to the
+			// right button: on desktop the jacks already open their menus on
+			// plain left-click, and a two-finger tap is hard to land on small
+			// buttons. Only when the left press was fully inert (no control
+			// pressed, no window, no menu) - a pressed button must not also
+			// pop a menu. The left press happened first but did nothing
+			// observable, and its release below clears it.
+			ui::mouse_out o = [self pressAt:p right:NO];
+			if (!o.panel_pressed && !o.opened_window && !o.show_menu)
+				[self pressAt:p right:YES];
 		} else if (!self->rightTouch && t != self->leftTouch) {
 			self->rightTouch = t;
 			[self pushTouch:t down:YES right:YES];

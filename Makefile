@@ -1335,6 +1335,11 @@ clean:
 # ヘッダだけ直したときは .o が作り直されず、rm -rf build-ios しないと直らない
 # ように見えた。 simulator/ と device/ の両方が build-ios の下なので、文字通りの
 # build-ios で両方拾う（変数にすると定義順の罠 - $(IOS_ROOT) はこの行より後で定義）。
+#
+# 1 つだけ手で払う場合: ソースを改名・削除したとき、古い .d が残って消えた
+# .cpp を指し続ける ("No rule to make target ... audio_ios.cpp")。audio_ios.cpp →
+# .mm の改名で実際に踏んだ。find build-ios -name '*.d' -delete で直る（次に
+# 付く .o が .d を作り直す）。改名は稀なので、仕掛けにはしない。
 -include $(shell find $(BUILD) build-ios -name '*.d' 2>/dev/null)
 
 .PHONY: all clean regen check test test-update vst3 install-vst3 probe clap install-clap vsti install-vsti vsti-probe au install-au au-probe check-au
@@ -1424,6 +1429,7 @@ IOS_CXXFLAGS := $(filter-out -mmacosx-version-min=% -O3,$(CXXFLAGS)) $(IOS_OPTFL
 # CTFontDescriptorCreateWithAttributes / CTFontDescriptorCopyAttribute to find the CJK
 # face. The header compiles on iOS; it is the link that needs the framework.
 IOS_FW := -framework Foundation -framework AudioToolbox -framework AVFoundation \
+          -framework AVFAudio \
           -framework CoreAudio -framework CoreMIDI -framework UIKit -framework Metal \
           -framework QuartzCore -framework CoreGraphics -framework CoreText
 
@@ -1560,24 +1566,27 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
 # variants are all declared there - so these two compile as they are. They are plain
 # C++ with no #if and no Objective-C, so they need no -ObjC++ either.
 #
-# Audio: NOT portable, and src/ui/audio_ios.cpp is a stub instead. This corrects an
-# earlier claim of mine that CoreAudio is "the same API on iOS", which is true for
-# CoreMIDI and false for CoreAudio: iOS ships CoreAudio.framework with only three
-# headers (AudioHardwareBase.h, AudioServerPlugIn.h, CoreAudioTypes.h) and no
-# umbrella, and AudioObjectGetPropertyData appears in no public header - only in the
-# link stub CoreAudio.tbd. So the AudioHardware HAL that audio_out_mac.cpp and
+# Audio: NOT portable, and src/ui/audio_ios.mm is written from scratch instead.
+# This corrects an earlier claim of mine that CoreAudio is "the same API on iOS",
+# which is true for CoreMIDI and false for CoreAudio: iOS ships
+# CoreAudio.framework with only three headers (AudioHardwareBase.h,
+# AudioServerPlugIn.h, CoreAudioTypes.h) and no umbrella, and
+# AudioObjectGetPropertyData appears in no public header - only in the link stub
+# CoreAudio.tbd. So the AudioHardware HAL that audio_out_mac.cpp and
 # audio_in_mac.cpp are built on does not exist in public form on iOS, and they fail
-# to compile on "CoreAudio/CoreAudio.h file not found". iOS needs AVAudioSession +
-# AVAudioEngine written from scratch against the same class interfaces.
+# to compile on "CoreAudio/CoreAudio.h file not found". iOS gets AVAudioSession +
+# AVAudioEngine against the same class interfaces instead: a source node whose
+# render block calls the stored fill_fn, ui::resampler when the device rate is not
+# 44100. Audio in stays a stub (RemoteIO next); only the symbols app.h needs.
 IOS_APPLE_PORT_SRCS := src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp
-IOS_AUDIO_STUB_SRCS := src/ui/audio_ios.cpp
+IOS_AUDIO_SRCS := src/ui/audio_ios.mm
 
 IOS_GUI_OBJS := $(IOS_GUI_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_GUI_OBJS := $(IOS_GUI_OBJS:%.mm=$(IOS_BUILD)/%.o)
 
 IOS_APPLE_PORT_OBJS := $(IOS_APPLE_PORT_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 
-IOS_AUDIO_STUB_OBJS := $(IOS_AUDIO_STUB_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+IOS_AUDIO_OBJS := $(IOS_AUDIO_SRCS:%.mm=$(IOS_BUILD)/%.o)
 
 # PC editor: the same view files as macOS and Windows, built once.
 IOS_PC_OBJS := $(IOS_PC_SRCS:%.cpp=$(IOS_BUILD)/%.o)
@@ -1613,7 +1622,7 @@ $(IOS_BUILD)/src/ui/app_ios.o: src/ui/app_ios.cpp
 # Deliberately NOT $(IOS_BIN): that is the appex *executable*, and linking one gives
 # "ld: unsupported mach-o filetype (only MH_OBJECT and MH_DYLIB can be linked)". The
 # two ship in one bundle and do not share a binary.
-$(IOS_STANDALONE): $(IOS_GUI_OBJS) $(IOS_APPLE_PORT_OBJS) $(IOS_AUDIO_STUB_OBJS) \
+$(IOS_STANDALONE): $(IOS_GUI_OBJS) $(IOS_APPLE_PORT_OBJS) $(IOS_AUDIO_OBJS) \
                    $(IOS_PC_OBJS) \
                    $(IOS_IMGUI_OBJS) $(IOS_ENGINE_OBJS) \
                    $(IOS_BUILD)/src/mu2000.o $(IOS_BUILD)/src/smf.o

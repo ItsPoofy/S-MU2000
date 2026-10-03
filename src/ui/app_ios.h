@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "app.h"
 
@@ -39,15 +40,35 @@ public:
 
 	// ---- audio
 	//
-	// Nothing yet, on purpose: make_audio is called from the boot thread once
-	// the firmware is up, and wiring AVAudioSession + a CoreAudio output unit is
-	// the next step, not this one. audio_out_mac.cpp is the reference and is
-	// nearly reusable - mach_absolute_time and os/workgroup.h both exist on iOS
-	// (verified against the iPhoneSimulator SDK).
+	// Nothing yet was the state when there was no backend; now make_audio above
+	// works like app_mac.cpp, and AVAudioEngine is the device (audio_ios.mm).
+	// The mac file is not reusable after all - iOS has no AudioHardware HAL -
+	// but mach_absolute_time and os/workgroup.h do both exist on iOS (verified
+	// against the iPhoneSimulator SDK).
 
-	void make_audio() override {}
-	void say_audio_opened(bool) override {}
-	void say_audio_running() override {}
+	void make_audio() override
+	{
+		// Static, like app_mac.cpp: the render block captures the impl raw, so
+		// the object must outlive everything, and a static trivially does. This
+		// only creates the objects and points out/ain at them; opening waits for
+		// booted firmware (start_audio, called from app.mm).
+		static audio_out dev_out;
+		static audio_in dev_in;
+		out = &dev_out;
+		ain = &dev_in;
+		std::fprintf(stderr, "[ios] audio objects made (not yet opened)\n");
+	}
+	void say_audio_opened(bool) override
+	{
+		std::fprintf(stderr, "[ios] audio opened: %s\n",
+		             out ? out->device_name().c_str() : "(no device)");
+	}
+	void say_audio_running() override
+	{
+		std::fprintf(stderr, "[ios] audio running: %u-frame buffer%s\n",
+		             out ? out->buffer_frames() : 0,
+		             out && out->mmcss() ? ", real-time thread" : "");
+	}
 	u64 audio_drops() override { return 0; }
 	void print_audio_details() override {}
 	bool open_main_window(const char *, int, int) override { return true; }
@@ -73,27 +94,43 @@ public:
 	// (AUDIO_RATE/30 at 30 Hz tick = real time), discarding the audio.
 	//
 	// Without this the machine freezes one step past boot: boot() only runs until
-	// mu.midi_ready(), and on desktop the audio callback keeps calling run_sample
+	// mu.midi_ready(), and on desktop the audio callback keeps the machine alive
 	// forever after. The LCD then shows whatever was last drawn (起動中...) because
-	// the main-screen redraw happens in firmware ticks that never execute. The
-	// display link calls this before every paint, so the panel shows a living
-	// machine rather than a paused one.
+	// the main-screen redraw happens in firmware ticks that never execute.
 	//
-	// Only once booted (state == 1): running samples through an unbooted machine is
-	// harmless but pointless, and on a missing-ROM launch eng exists without ever
-	// having booted.
+	// Through engine::fill(), not mu.run_sample() directly: fill() is what pumps
+	// the bridge (drv.publish) at the end, and the panel only ever reads the
+	// bridge. Calling run_sample alone advances the SH2 but the display keeps
+	// showing the boot-time snapshot - which is exactly the "stuck at 起動中
+	// forever" that survived the first version of this method. fill() also drains
+	// MIDI and applies panel buttons, so touch will already have somewhere to go.
 	//
-	// All on the main thread today: boot ran here, the tick runs here, and there is
-	// no audio thread yet. When AVAudioEngine lands this moves into its fill
-	// callback - same samples, same rate, different thread - and this method goes
-	// away rather than being kept as a second path.
+	// Only once booted (state == 1): fill() on any other state zeroes the buffer
+	// and returns, so this guard is documentation rather than load-bearing - but
+	// explicit is better when the next reader is deciding where audio goes.
+	//
+	// All on the main thread here; the audio callback pumps on the engine's
+	// real-time thread once it runs. Both go through the same eng->fill under the
+	// same card_lock, so they are mutually excluded - this method simply stops
+	// being called once produced() goes non-zero (above), and resumes if audio
+	// never starts. No second path to maintain: one call, two drivers.
 	void pump_realtime()
 	{
 		if (!eng || !state || state->load() != 1)
 			return;
-		s32 l, r;
-		for (u32 i = 0; i < AUDIO_RATE / 30; i++)
-			eng->mu.run_sample(l, r);
+		// Stand down once the audio device produces: its callback pumps through
+		// the same eng->fill under the same card_lock, so overlap would only
+		// double-advance the machine (a pitch blip, self-correcting) rather than
+		// corrupt it - but there is no reason to pay for it. produced() stays
+		// non-zero once audio has run, so this is a one-way handoff; if the
+		// device ever stops, the machine freezes until audio returns, which is
+		// device management's problem (future work) rather than this one's.
+		if (out && out->produced() > 0)
+			return;
+		// One frame of stereo s16, repurposed every tick. Static so it never
+		// reallocates; the audio backend will own a buffer like this when it lands.
+		static std::vector<s16> scratch(size_t(AUDIO_RATE) / 30 * 2);
+		eng->fill(scratch.data(), AUDIO_RATE / 30);
 	}
 
 	// ---- dialogs: UIAlertController and UIDocumentPickerViewController

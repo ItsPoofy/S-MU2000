@@ -107,10 +107,13 @@ std::string rom_dir()
 	static ui::gui_app gui(br, midi_ports, mout, mout_b, mout_mu);
 	ui::g_gui = &gui;
 	gui.eng = nullptr;
+	// Creates the audio objects now (needs no firmware); opening them waits for
+	// boot below. Without this out stays null and start_audio refuses - which is
+	// exactly the silence with no log line, since nothing ever tried.
+	gui.make_audio();
 
-	// The panel needs no audio to draw, so this boots the firmware and leaves it
-	// at that. No audio device is opened (app_ios.h's make_audio is a stub), so
-	// nothing makes a sound yet - that is the next step, not a bug here.
+	// The panel needs no audio to draw, so this boots the firmware first; the
+	// audio device opens afterwards below, once the firmware is up.
 	const std::string dir = rom_dir();
 	std::fprintf(stderr, "[ios] ROM dir: %s\n", dir.c_str());
 
@@ -159,6 +162,20 @@ std::string rom_dir()
 	ui::window_options win_opts;
 	gui.setup_for_window(a, win_opts, false);
 
+	// What run()'s boot thread does after boot: open the audio device now that
+	// the firmware is up. a.latency is the shared default (30 ms); exclusive
+	// would ask for hog mode, which does not exist on iOS. On failure the shared
+	// code parks the engine (state 2) and says why - silence with a reason beats
+	// silence without one. start_ad (recording input) is skipped: there is no
+	// input backend yet.
+	if (gui.start_audio(a.latency, false)) {
+		gui.say_audio_opened(false);
+		gui.say_audio_running();
+	} else {
+		std::fprintf(stderr, "[ios] audio start failed; panel runs silent\n");
+	}
+	gui.audio_ready.store(true);
+
 	// The window system: a UIView with a CAMetalLayer and a 30 Hz CADisplayLink.
 	const CGRect b = [UIScreen mainScreen].bounds;
 	UIView *panel_view = ui::make_ios_view(gui, (int)b.size.width, (int)b.size.height);
@@ -167,9 +184,20 @@ std::string rom_dir()
 		return;
 	}
 	// The view has to be in the hierarchy or it draws nothing, and nothing says so.
-	// Making it the controller's root view is what makes UIKit lay it out and, on
-	// rotation, resize it - autoresizing is then UIKit's problem rather than ours.
-	vc.view = panel_view;
+	// As a pinned subview, not as the root view: a manually assigned root view
+	// keeps the fixed frame it was created with (UIScreen bounds at launch), so
+	// in a smaller Stage Manager window it overflowed right and bottom while the
+	// scale was computed for fullscreen - the "resize broken" that kept the panel
+	// cut off. Anchors make the view track the window on rotation and resize, and
+	// layoutSubviews refits the panel from the real size every time.
+	panel_view.translatesAutoresizingMaskIntoConstraints = NO;
+	[vc.view addSubview:panel_view];
+	[NSLayoutConstraint activateConstraints:@[
+		[panel_view.leadingAnchor constraintEqualToAnchor:vc.view.leadingAnchor],
+		[panel_view.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor],
+		[panel_view.topAnchor constraintEqualToAnchor:vc.view.topAnchor],
+		[panel_view.bottomAnchor constraintEqualToAnchor:vc.view.bottomAnchor],
+	]];
 
 // Touch works now (one finger = mouse, held second finger = right button), so
 // the panel can be operated; keyboard and audio are still missing.

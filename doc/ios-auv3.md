@@ -162,7 +162,12 @@ parts that are simply unknown.
     make ios-auv3 IOS_ROMS=roms        # ROMs baked into S-MU2000AU.appex/Resources/roms
 
 Resulting binary: `Mach-O 64-bit executable arm64`, `LC_BUILD_VERSION platform 2` (iOS),
-`minos 14.0`, `sdk 27.2`, ad-hoc signed, identifier `com.tarboh.smu2000.auv3.au.ios`.
+`minos 17.0`, ad-hoc signed, identifier `com.tarboh.smu2000.ios.auv3`.
+
+(17.0, not 14.0: the AUv3 only needs 14 for UMP, but the current Xcode's libc++
+no longer supports 14 as a deployment target. The extension id must prefix-extend
+the containing app's - `com.tarboh.smu2000.ios.auv3` under `com.tarboh.smu2000.ios`
+- or iOS refuses the install with "Mismatched bundle IDs".)
 
 **Zero compile errors.** Every iOS problem encountered was one of two things, and neither
 was "this API does not exist on iOS":
@@ -171,10 +176,10 @@ was "this API does not exist on iOS":
    which the macOS rule passes separately.
 2. **Guarded** - three things, in this order of discovery:
    - `pthread_jit_write_protect_np` is marked unavailable in the iOS SDK.
-     `exec_mem.h` now gates the MAP_JIT write-protection dance on `!TARGET_OS_IPHONE`.
-     iOS has no per-thread toggle, so the pages stay writable. The interpreter path never
-     touches `exec_mem` and is fully working, so this is a compile fix, not a capability
-     loss.
+     `exec_mem.h` gates it on `!TARGET_OS_IPHONE` - and without the toggle a
+     MAP_JIT mapping succeeds but the first store faults with
+     KERN_PROTECTION_FAILURE, so both JITs (SH2, SWP30) are compiled out on iOS
+     and the interpreter runs. This is a fallback, not a capability loss.
    - `audio_unit.mm`'s AppKit: `<Cocoa/Cocoa.h>`, `<CoreAudioKit/CoreAudioKit.h>` and
      `"view_controller.h"`; `requestViewControllerWithCompletionHandler:`; and
      `supportedViewConfigurations:` (`AUAudioUnitViewConfiguration`). All three behind
@@ -189,11 +194,12 @@ back to `com.apple.AudioUnit-UI` means deleting the three guards and adding
 `view_controller_ios` + `panel_uiview`.
 
 **No paid account, so no App Groups.** Free provisioning does not support them, so the
-extension cannot reach the app's files through a shared container. This turned out to cost
-nothing: `engine.cpp` already searches `module_dir()/../Resources/roms`, and that is correct
-for both layouts - macOS puts the binary in `Contents/MacOS`, iOS is flat, so the bundle's
-`Resources` is one level up either way. ROMs are baked in for development; "import ROMs"
-from the app can come later.
+extension cannot reach the app's files through a shared container. ROMs are baked
+in beside the binary (`<bundle>/roms/`, engine candidate 3b) for the same reason
+art goes to `<bundle>/art/real/` (layout step 4): subdirectories under the app's
+`Resources/` break ad-hoc codesign ("bundle format unrecognized"), so the macOS
+`Resources/roms` layout cannot be reused on iOS. "import ROMs" from the app can
+come later.
 
 ### Next: it needs a containing app
 
@@ -202,6 +208,104 @@ next step is a deliberately thin host app: embed the `.appex`, let it register, 
 pull audio. That also settles the open question of whether an iOS app can host its own
 extension in-process (`doc/ios-auv3.md`, "A design decision worth making deliberately"),
 and it is worth finding out with a 60-line app rather than the full standalone.
+
+## Build and install workflows
+
+One bundle, two front ends, two SDKs. `CFBundleExecutable` switches between the
+front ends and each target re-signs, so `ios-app` after `ios-standalone` (or the
+reverse) just works - no deletion needed.
+
+### Build options
+
+| variable | default | alternatives |
+|---|---|---|
+| target | — | `ios-app` (smoke-test host), `ios-standalone` (the synth), `ios-auv3` (extension alone) |
+| `IOS_SDK_NAME` | `iphoneos` (device, `build-ios/device/`) | `iphonesimulator` (`build-ios/simulator/`) - a different platform ID, not interchangeable |
+| `IOS_ROMS` | empty (no ROMs) | `roms` (baked beside the binary: `<bundle>/roms/`, `<appex>/roms/`) |
+| `IOS_DEBUG` | `1` (`-Og`, symbols) | `0` (`-O3`, for the interpreter-speed measurement) |
+| `CODESIGN_ID` | `-` (ad-hoc: simulator only) | `"Apple Development: …"` (device) |
+
+```bash
+# Simulator standalone with ROMs (the usual test loop)
+rm -rf build-ios/simulator/S-MU2000.app   # only needed after renames; header edits rebuild via depfiles
+make ios-standalone IOS_SDK_NAME=iphonesimulator IOS_ROMS=roms
+
+# Device build (needs a real signing identity + provisioning profile, below)
+make ios-standalone TEAM_ID=ABCDE12345 IOS_ROMS=roms
+```
+
+Header edits rebuild their dependents (iOS depfiles are `-include`d); a source
+rename/delete leaves a stale `.d` pointing at the ghost - `find build-ios -name
+'*.d' -delete` fixes that one case. `codesign` runs last in every target, after
+binaries, plist, artwork and ROMs: signing earlier signs contents about to change.
+
+### Simulator install and run
+
+```bash
+IPHONE=$(xcrun simctl list devices booted -j | /usr/bin/python3 -c \
+  'import json,sys;print(next(d["udid"] for d in json.load(sys.stdin)["devices"].values() for d in d if "iPhone" in d["name"]))')
+
+xcrun simctl install $IPHONE build-ios/simulator/S-MU2000.app
+xcrun simctl launch --console-pty $IPHONE com.tarboh.smu2000.ios
+xcrun simctl io $IPHONE screenshot /tmp/panel.png   # second shell: pixels without logs
+```
+
+Name the device: with two simulators booted, `booted` is ambiguous and installs
+to the wrong one. The id is `com.tarboh.smu2000.ios` (the bare
+`com.tarboh.smu2000` predates the plist settling). `--console-pty` puts stdout,
+stderr and crashes on one stream with no predicate to get wrong.
+
+Success looks like this, in order (each step logs before the next runs, so a
+failure names itself):
+
+```
+[ios] scene willConnectToSession
+[ios] ROM dir: .../S-MU2000.app/roms
+[ios] layout: .../S-MU2000.app/art/real/panel.txt
+MIDI は USB の口（A-D の 64 パート）
+Booted from snapshot ... / [ios] booted
+配置: .../art/real/panel.txt
+[ios] audio objects made (not yet opened)
+[ios] audio opened: iOS 44100 Hz
+[ios] audio running: 512-frame buffer, real-time thread
+[ios] running: tap to press, hold a second finger for menus
+```
+
+(`audio running: 0-frame buffer` on the first line is normal: it prints before
+the first render callback stores a count. The live numbers are on the status
+line - `worst_ms` there is the interpreter-speed measurement.)
+
+### Device install
+
+```bash
+xcrun devicectl list devices
+xcrun devicectl device install app --device <UDID> build-ios/device/S-MU2000.app
+```
+
+Prerequisites `make` cannot create: an `embedded.mobileprovision` covering both
+bundle IDs (`com.tarboh.smu2000.ios`, `com.tarboh.smu2000.ios.auv3`), the team,
+and the device UDID (one Xcode pass with the same IDs, or the developer portal;
+zero profiles are installed by default). The appex entitlements are deliberately
+empty - `app-sandbox` is macOS-only and `allow-jit` is meaningless where the JIT
+is compiled out. If the install fails, the message decides the fix (profile
+mismatch vs claimed IDs vs free-provisioning limits).
+
+### Troubleshooting (every one earned)
+
+| symptom | cause | fix |
+|---|---|---|
+| `Mismatched bundle IDs` at install | appex id must prefix-extend the app's | `com.tarboh.smu2000.ios.auv3` under `com.tarboh.smu2000.ios` |
+| `does not contain code ... iOS-simulator` | device build on a simulator | per-SDK trees; `IOS_SDK_NAME=iphonesimulator` |
+| SIGTRAP `NoSceneLifecycleAdoption` | scene lifecycle mandatory | manifest + nil app delegate + scene delegate from plist |
+| black screen, no log, no crash | `UISceneDelegateClassName` names a missing class | match it to the delegate; the marker `fprintf` first line tells called from never-called |
+| `bundle format unrecognized` | any subdir under the app's `Resources/` (even empty, even `en.lproj`) | top-level `roms/`, `art/` - both verified signing |
+| `invalid Info.plist` from codesign | stale plist beside a fresh binary | plists are separate make targets the sign depends on |
+| `Missing bundle ID` | unreadable extension (above) or installing mid-build | fix the above; never inspect/install under `-j8` |
+| `make` does nothing after edits | header deps (fixed) or stale `.d` after renames | depfiles included; `find build-ios -name '*.d' -delete` on renames |
+| `-10863` instantiating the AUv3 | unexplained; note the appex ROMs used to sit where the engine never searches | retest with `appex/roms/` before assuming deeper |
+| LCD frozen at 起動中 | nothing pumps post-boot (no audio yet) | display-link pump via `eng->fill` (pumps the bridge too, not just samples) |
+| taps do nothing | panel hears app verbs, not `io` | `mouse_down/drag/up` like `window_mac.mm`; `io` only serves widgets |
+| silence, no log | `make_audio` empty / `start_audio` never called | mirror `run()`; status `Starting...` means `!(out && produced())` |
 
 ## Open questions for the owner
 
