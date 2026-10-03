@@ -39,7 +39,7 @@
 		<string>iPhoneOS</string>
 	</array>
 	<key>MinimumOSVersion</key>
-	<string>14.0</string>
+	<string>17.0</string>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
@@ -75,8 +75,18 @@
 				<dict>
 					<key>UISceneConfigurationName</key>
 					<string>Default Configuration</string>
+					<!--
+					  SMUAppDelegate is the standalone's scene delegate (src/ios/app.mm).
+					  This was SmokeDelegate, the name of the self-test host in the same
+					  file's place - and a stale name here fails completely silently: UIKit
+					  resolves the class, finds nothing, never calls
+					  scene:willConnectToSession:options:, and the app shows a black screen
+					  with no log line and no crash. It is not worth a comment how long
+					  that took to see: the app was running, UIKit was fully initialised in
+					  the log, and the only symptom was that nothing of ours had happened.
+					-->
 					<key>UISceneDelegateClassName</key>
-					<string>SmokeDelegate</string>
+					<string>SMUAppDelegate</string>
 				</dict>
 			</array>
 		</dict>

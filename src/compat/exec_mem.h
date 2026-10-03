@@ -115,13 +115,14 @@ inline void flush_code(void *, size_t) {}
 //
 // **iOS has no per-thread JIT write protection.** pthread_jit_write_protect_np
 // is marked unavailable in the iOS SDK, so it cannot be called there at all - the
-// first iOS build failed on exactly this. On macOS arm64 a MAP_JIT region is
-// execute-only to the writing thread until the toggle lifts it; on iOS there is
-// no toggle, so the pages stay writable and the stores are ordinary.
-//
-// That is only a JIT feature. The interpreter path does not use exec_mem at all
-// and is fully working, so iOS builds and runs without the JIT; see
-// doc/ios-auv3.md.
+// first iOS build failed on exactly this. And without the toggle the pages do NOT
+// stay writable, whatever an earlier version of this comment claimed: a MAP_JIT
+// mapping succeeds but the first store faults with KERN_PROTECTION_FAILURE inside
+// copy_code (seen on the simulator on first boot). So on iOS the JITs are compiled
+// out entirely - SMU2000_SH2_JIT and SMU2000_MEG_JIT are forced to 0 in sh2_jit.cpp
+// and swp30_jit.cpp - and the interpreter runs instead, which needs none of this
+// file. The write_begin/write_end below are therefore never reached on iOS; they
+// remain for macOS, where the toggle is what makes MAP_JIT pages writable.
 #if defined(__aarch64__) && defined(__APPLE__) && defined(SMU2000_JIT_WRITE_PROTECT)
 inline void write_begin() { pthread_jit_write_protect_np(0); }
 inline void write_end()   { pthread_jit_write_protect_np(1); }

@@ -15,9 +15,12 @@
                                 com.tarboh.smu2000.auv3.au.ios, because the app is
                                 com.tarboh.smu2000.ios
 
-  MinimumOSVersion is 14.0 because the AUv3 speaks MIDI 1.0 UMP - AUMIDIEventList with
-  64-bit words - which arrived in iOS 14. Dropping to 9.3 would only be possible by
-  giving up UMP, and the four virtual MIDI cables the real machine has want it.
+  MinimumOSVersion is 17.0. The AUv3 itself only needs 14 - AUMIDIEventList with
+  64-bit words (MIDI 1.0 UMP), which the four virtual MIDI cables want, arrived
+  there. The floor is 17 because the current Xcode's libc++ no longer supports 14
+  as a deployment target ("The selected platform is no longer supported by
+  libc++"); same floor as the Makefile's IOS_MIN and the app's plist, so the
+  three can never disagree.
 
   The bundle layout is flat on iOS (PlugIns/S-MU2000AU.appex/S-MU2000AU, no Contents and
   no MacOS subdirectory), so CFBundleExecutable stays "S-MU2000AU" and the Makefile
@@ -50,7 +53,7 @@
 		<string>iPhoneOS</string>
 	</array>
 	<key>MinimumOSVersion</key>
-	<string>14.0</string>
+	<string>17.0</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

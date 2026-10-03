@@ -14,6 +14,15 @@
 
 #include <string>
 
+// This whole header is Windows-only: to_wide/to_utf8 call MultiByteToWideChar and
+// WideCharToMultiByte, and dlg_filter builds the UTF-16 form a Win32 file dialog
+// wants. It used to be included unconditionally and happened to work on macOS only
+// because every file that reached it there (midi_in.cpp, midi_out.cpp,
+// pc_window.cpp) is itself Windows-only, including <mmsystem.h> and <d3d11.h>.
+// iOS reached it through a shared file and failed on "windows.h file not found".
+//
+// So the guard belongs here, where the dependency is, rather than in each caller.
+#ifdef _WIN32
 #include <windows.h>
 
 namespace ui {
@@ -67,5 +76,7 @@ inline std::wstring dlg_filter(const char *desc1, const char *pat1,
 }
 
 } // namespace ui
+
+#endif // _WIN32
 
 #endif // S_MU2000_UI_TEXT_H
