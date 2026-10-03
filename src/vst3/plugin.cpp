@@ -778,7 +778,8 @@ public:
 	{
 		if (name && std::strcmp(name, ViewType::kEditor) != 0)
 			return nullptr;
-		return new smu2000::vst3::plug_view(m_engine);
+		// 画面は本体の参照を持つ（ホストが本体を先に手放しても、画面が消えるまで engine を残す）
+		return new smu2000::vst3::plug_view(m_engine, static_cast<IEditController *>(this));
 	}
 
 	// 音量は bridge が 1 つだけ持つ。Output パラメータも画面のつまみも同じ値
