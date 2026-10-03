@@ -299,6 +299,9 @@ public:
 	// サンプルの波形を gain 倍する（サンプリング RAM を書き換える。はみ出したら 16bit で止める）。
 	// 変えた後の最大の絶対値か、そのサンプルが無ければ -1
 	int sampling_gain(int number, double gain);
+	// [from, to) のサンプル（44.1kHz の位置）だけを残す。縮めて空いた所は詰める（後ろにあるサンプルを前へずらし、
+	// 表の番地も書き直す）。できなければ false（理由は err）
+	bool sampling_trim(int number, u32 from, u32 to, std::string &err);
 	// 見取り図: 波形を buckets 個に分けた、それぞれの最小と最大
 	bool sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const;
 	// まだ録れるサンプル数（44.1kHz）

@@ -482,6 +482,11 @@ inline const ui_texts &en_texts()
 		.smp_gain_apply = "Change volume",
 		.smp_gain_done_fmt = "Sample %03d: peak now %.1f dB",
 		.smp_gain_note = "Rewrites the sample in place. Turning it down and up again loses detail, and turning it up past full scale clips.",
+		.smp_trim_auto = "Select without silence",
+		.smp_trim = "Trim",
+		.smp_trim_clear = "Select all",
+		.smp_trimmed_fmt = "Sample %03d trimmed to %.2f s",
+		.smp_trim_tip = "Drag across the waveform to choose what to keep",
 	};
 	return t;
 }

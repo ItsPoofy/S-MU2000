@@ -516,6 +516,11 @@ struct ui_texts {
 	const char *smp_gain_apply;
 	const char *smp_gain_done_fmt;
 	const char *smp_gain_note;
+	const char *smp_trim_auto;
+	const char *smp_trim;
+	const char *smp_trim_clear;
+	const char *smp_trimmed_fmt;
+	const char *smp_trim_tip;
 };
 
 // Each language file defines one of these (never included directly).

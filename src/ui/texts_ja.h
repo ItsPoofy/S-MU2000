@@ -482,6 +482,11 @@ inline const ui_texts &ja_texts()
 		.smp_gain_apply = "音量を変える",
 		.smp_gain_done_fmt = "サンプル %03d: 最大が %.1f dB になりました",
 		.smp_gain_note = "サンプルそのものを書き換えます。下げてから上げ直すと細部が失われ、満杯を超えて上げると頭が切れます（波形の赤い所）。",
+		.smp_trim_auto = "前後の無音を除いて選ぶ",
+		.smp_trim = "トリム",
+		.smp_trim_clear = "全体を選ぶ",
+		.smp_trimmed_fmt = "サンプル %03d を %.2f 秒にトリムしました",
+		.smp_trim_tip = "波形の上をドラッグして、残す所を選ぶ",
 	};
 	return t;
 }

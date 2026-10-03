@@ -366,15 +366,93 @@ void sampling_editor::wave_pane(bridge &br)
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_gain_note, "Rewrites the sample in place. Turning it down and up again loses detail, and turning it up past full scale clips."));
 
+	// トリム。波形をドラッグして残す所を選ぶ。選んだサンプルが替わったら全体に戻す
+	if (m_trim_for != num) {
+		m_trim_for = num;
+		m_trim0 = 0.0f;
+		m_trim1 = 1.0f;
+		m_trim_drag = false;
+	}
+	const bool have_wave = m_view.wave_number == num && !m_view.wave_hi.empty();
+	const double secs = double(sel->frames()) / sp::SAMPLE_RATE;
+	const bool partial = m_trim0 > 0.0f || m_trim1 < 1.0f;
+	ImGui::BeginDisabled(busy || !have_wave);
+	if (ImGui::Button(UI_TEXT(smp_trim_auto, "Select without silence"))) {
+		// 見取り図で、最大から 40 dB 下を超える最初と最後の区切りを選ぶ
+		const int nb = int(m_view.wave_hi.size());
+		int top = 0;
+		for (int b = 0; b < nb; b++)
+			top = std::max({ top, int(m_view.wave_hi[size_t(b)]), -int(m_view.wave_lo[size_t(b)]) });
+		const int thr = std::max(1, top / 100);
+		int first = -1, last = -1;
+		for (int b = 0; b < nb; b++)
+			if (m_view.wave_hi[size_t(b)] >= thr || -int(m_view.wave_lo[size_t(b)]) >= thr) {
+				if (first < 0)
+					first = b;
+				last = b;
+			}
+		if (first >= 0) {
+			m_trim0 = float(first) / float(nb);
+			m_trim1 = float(last + 1) / float(nb);
+		}
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!partial);
+	if (ImGui::Button(UI_TEXT(smp_trim, "Trim"))) {
+		const u32 f0 = u32(std::lround(double(m_trim0) * sel->frames()));
+		const u32 f1 = u32(std::lround(double(m_trim1) * sel->frames()));
+		std::string trimmed = UI_TEXT(smp_trimmed_fmt, "Sample %03d trimmed to %.2f s");
+		br.post([num, f0, f1, trimmed](mu2000 &mu) {
+			std::string e;
+			if (!mu.sampling_trim(num, f0, f1, e))
+				return e;
+			char buf[120];
+			std::snprintf(buf, sizeof(buf), trimmed.c_str(), num, double(f1 - f0) / sp::SAMPLE_RATE);
+			return std::string(buf);
+		});
+		m_trim_for = 0;              // 次の写しで全体に戻す
+	}
+	ImGui::SameLine();
+	if (ImGui::Button(UI_TEXT(smp_trim_clear, "Select all"))) {
+		m_trim0 = 0.0f;
+		m_trim1 = 1.0f;
+	}
+	ImGui::EndDisabled();
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2f - %.2f s (%.2f s)", double(m_trim0) * secs, double(m_trim1) * secs,
+	                    double(m_trim1 - m_trim0) * secs);
+
 	// 波形。窓の幅の 1 列ごとに、見取り図の最小と最大を縦の線で
 	const ImVec2 p = ImGui::GetCursorScreenPos();
 	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(ImGui::GetContentRegionAvail().y, fs * 3));
+	ImGui::InvisibleButton("##wave", sz);
+	if (have_wave && !busy) {
+		const float fx = std::clamp((ImGui::GetIO().MousePos.x - p.x) / sz.x, 0.0f, 1.0f);
+		static float anchor = 0.0f;
+		if (ImGui::IsItemActivated()) {
+			anchor = fx;
+			m_trim_drag = true;
+		}
+		if (m_trim_drag && ImGui::IsItemActive()) {
+			m_trim0 = std::min(anchor, fx);
+			m_trim1 = std::max(anchor, fx);
+		}
+		if (m_trim_drag && !ImGui::IsItemActive()) {
+			m_trim_drag = false;
+			if (m_trim1 - m_trim0 < 0.002f) {        // クリックだけなら全体に戻す
+				m_trim0 = 0.0f;
+				m_trim1 = 1.0f;
+			}
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_trim_tip, "Drag across the waveform to choose what to keep"));
+	}
 	ImDrawList *dl = ImGui::GetWindowDrawList();
 	dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255));
 	const float mid = p.y + sz.y * 0.5f, half = sz.y * 0.5f - 2.0f;
 	dl->AddLine(ImVec2(p.x, mid), ImVec2(p.x + sz.x, mid), IM_COL32(80, 90, 110, 255));
-	const bool have = m_view.wave_number == num && !m_view.wave_hi.empty();
-	if (have) {
+	if (have_wave) {
 		const int nb = int(m_view.wave_hi.size());
 		const int cols = std::max(1, int(sz.x));
 		for (int x = 0; x < cols; x++) {
@@ -389,8 +467,15 @@ void sampling_editor::wave_pane(bridge &br)
 			dl->AddLine(ImVec2(p.x + float(x) + 0.5f, y0), ImVec2(p.x + float(x) + 0.5f, std::max(y1, y0 + 1.0f)),
 			            clip ? IM_COL32(235, 80, 70, 255) : IM_COL32(110, 200, 255, 255));
 		}
+		// 残さない所を暗く、境目に線
+		if (m_trim0 > 0.0f || m_trim1 < 1.0f) {
+			const float x0 = p.x + sz.x * m_trim0, x1 = p.x + sz.x * m_trim1;
+			dl->AddRectFilled(p, ImVec2(x0, p.y + sz.y), IM_COL32(0, 0, 0, 150));
+			dl->AddRectFilled(ImVec2(x1, p.y), ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(0, 0, 0, 150));
+			dl->AddLine(ImVec2(x0, p.y), ImVec2(x0, p.y + sz.y), IM_COL32(255, 210, 90, 255), 2.0f);
+			dl->AddLine(ImVec2(x1, p.y), ImVec2(x1, p.y + sz.y), IM_COL32(255, 210, 90, 255), 2.0f);
+		}
 	}
-	ImGui::Dummy(sz);
 }
 
 void sampling_editor::assign_pane(bridge &br)

@@ -533,6 +533,23 @@ int main(int argc, char **argv)
 		      "音量を変える・見取り図",
 		      std::to_string(before) + " → " + std::to_string(doubled) + " → " + std::to_string(clipped) +
 		      "、見取り図の最大 " + std::to_string(wmax));
+
+		// トリム。サンプル 1 の [1000, 1000 + 0.25 秒) だけを残す。後ろのサンプル 2・3 は前へ詰まり、空きが増える。
+		// サンプル 3 を使う PGM002 は、この後の確認で 880Hz のまま鳴る
+		{
+			const auto l0 = k.mu.sampling_list();
+			const u32 free0 = k.mu.sampling_free_frames();
+			const u32 keep = RATE / 4;
+			const bool ok = k.mu.sampling_trim(1, 1000, 1000 + keep, err);
+			const auto l1 = k.mu.sampling_list();
+			const u32 freed = l0[0].end - l1[0].end;
+			check(ok && l1.size() == 3 && l1[0].frames() == (keep + 1) / 2 * 2 && l1[1].start == l1[0].end &&
+			      l1[2].start == l1[1].end && l1[2].frames() == l0[2].frames() &&
+			      k.mu.sampling_free_frames() == free0 + freed * 2,
+			      "トリム: 残して後ろを詰める",
+			      std::to_string(l0[0].frames()) + " → " + std::to_string(l1[0].frames()) + " フレーム、空き +" +
+			      std::to_string(k.mu.sampling_free_frames() - free0));
+		}
 		const u8 pc2[] = { 0xc0, 0x01 };
 		for (u8 b : pc2)
 			k.mu.midi_in(b, 0);

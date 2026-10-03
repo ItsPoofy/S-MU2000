@@ -102,6 +102,61 @@ int mu2000::sampling_gain(int number, double gain)
 	return -1;
 }
 
+bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
+{
+	const std::vector<sp::sample> list = sampling_list();
+	const sp::sample *s = nullptr;
+	for (const sp::sample &x : list)
+		if (x.number == number)
+			s = &x;
+	if (!s) {
+		err = "no such sample";
+		return false;
+	}
+	to = std::min(to, s->frames());
+	if (from >= to || to - from < 8) {
+		err = "the trimmed sample would be too short";
+		return false;
+	}
+	const u32 start = s->start, old_end = s->end;
+	const u32 frames = to - from;
+	const u32 new_end = start + (frames + 1) / 2;
+	// 残す所を頭へ（前へ写すので重なっても前から順に写せばよい）。奇数なら最後の半語は 0
+	u8 *ram = m_sampram.data();
+	std::memmove(ram + size_t(start) * 4, ram + (size_t(start) * 2 + from) * 2, size_t(frames) * 2);
+	if (frames & 1) {
+		ram[(size_t(start) * 2 + frames) * 2] = 0;
+		ram[(size_t(start) * 2 + frames) * 2 + 1] = 0;
+	}
+	auto set_range = [&](int n, u32 st, u32 en) {
+		const u32 p = play_rec(n), o = sample_rec(n);
+		wr32(m_dram, p, (en - st) * 2 - 4);
+		wr32(m_dram, p + 4, st | WORD_FLAG);
+		wr32(m_dram, o + 16, st | WORD_FLAG);
+		wr32(m_dram, o + 20, en | WORD_FLAG);
+	};
+	set_range(number, start, new_end);
+	// 後ろにあるものを前へ詰める（番地の若い順に）
+	const u32 gap = old_end - new_end;
+	if (gap) {
+		std::vector<sp::sample> later;
+		for (const sp::sample &x : list)
+			if (x.number != number && x.start >= old_end)
+				later.push_back(x);
+		std::sort(later.begin(), later.end(), [](const sp::sample &a, const sp::sample &b) { return a.start < b.start; });
+		for (const sp::sample &x : later) {
+			std::memmove(ram + size_t(x.start - gap) * 4, ram + size_t(x.start) * 4, size_t(x.end - x.start) * 4);
+			set_range(x.number, x.start - gap, x.end - gap);
+		}
+		const u32 next = rd32(m_dram, sp::NEXT_FREE - DRAM) & 0xffffff;
+		if (next >= gap) {
+			std::memset(ram + size_t(next - gap) * 4, 0, size_t(gap) * 4);
+			wr32(m_dram, sp::NEXT_FREE - DRAM, (next - gap) | WORD_FLAG);
+		}
+	}
+	return true;
+}
+
 bool mu2000::sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const
 {
 	lo.clear();
