@@ -10,10 +10,14 @@
 // REC の InputSrc（AD2 / AD1+2）で録るものが変わるかを見る。
 // 食い違えば 1 を返す。
 #include "mu2000.h"
+#include "ui/bridge.h"
+#include "ui/driver.h"
+#include "wav_in.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -342,6 +346,175 @@ int main(int argc, char **argv)
 	g.press(B::enter);
 	g.sine_amp = 0;
 	g.pump(300);
+
+	// パネルを通さない道（src/sampling.cpp）。新しい機械で、A/D INPUT から直に録って firmware の表に足し、
+	// 音色に割り当てる。firmware がそれを自分のサンプルとして扱う（一覧・試聴・REC の続き・音色として鳴る）かを見る
+	{
+		namespace sp = smu2000::sampling;
+		static rig k;
+		if (!k.mu.load_program(dir + "/mu2000_flash.bin") || !k.mu.load_wave(dir + "/dump")) {
+			std::fprintf(stderr, "%s\n", k.mu.error().c_str());
+			return 1;
+		}
+		k.verbose = g.verbose;
+		k.mu.load_sintab(dir + "/standin/sin-table.bin");
+		k.mu.reset();
+		for (u32 i = 0; i < 30 * RATE && !k.mu.midi_ready(); i += RATE / 100)
+			k.pump(10);
+		k.pump(1500);
+		auto check = [&](bool ok, const char *what, const std::string &detail) {
+			std::printf("%s %-28s %s\n", ok ? "合" : "NG", what, detail.c_str());
+			if (!ok)
+				bad++;
+		};
+
+		// 引き金つきで録る。300ms は無音なので待ち、正弦が来てから録り始める
+		k.mu.rec_start(sp::source::ad1, 4000, 10 * RATE);
+		k.pump(300);
+		const bool waited = k.mu.rec_state() == 1 && k.mu.rec_frames() == 0;
+		k.sine_amp = 12000;
+		k.pump(1000);
+		k.sine_amp = 0;
+		std::vector<s16> pcm = k.mu.rec_take();
+		check(waited && pcm.size() > RATE * 9 / 10 && pcm.size() < RATE * 11 / 10 && std::abs(pcm[0]) >= 4000,
+		      "直の録音: 引き金を待って録る", std::to_string(pcm.size()) + " サンプル、頭 " + std::to_string(pcm[0]));
+		std::string err;
+		const int n = k.mu.sampling_add(pcm.data(), pcm.size(), "", err);
+		const auto list = k.mu.sampling_list();
+		check(n == 1 && list.size() == 1 && list[0].name == "take001" && list[0].frames() >= pcm.size(),
+		      "直の録音: firmware の表に足す", err.empty() ? (list.empty() ? std::string() : list[0].name) : err);
+
+		// firmware の SAMPLE の画面に出て、試聴が 440Hz
+		k.press(B::sampling_mode);
+		k.press(B::enter);
+		k.press(B::enter);
+		check(k.lcd().find("SMPL001 take001") != std::string::npos, "直の録音: SAMPLE の画面に出る", k.lcd());
+		k.out.clear();
+		k.collect = true;
+		k.mu.set_button(B::audition, true);
+		k.pump(800);
+		k.mu.set_button(B::audition, false);
+		k.collect = false;
+		check(tone(k.out, 440) > 0.005 && tone(k.out, 440) > 10 * tone(k.out, 660),
+		      "直の録音: 試聴が 440Hz", std::to_string(tone(k.out, 440)));
+
+		// 続けてパネルで録ると、空きの続き（直に足したものの後ろ）に 2 つ目ができる
+		k.press(B::exit);
+		k.press(B::exit);
+		for (int i = 0; i < 3; i++)
+			k.press(B::select_right);
+		k.press(B::enter);
+		check(k.lcd().find("Sp=002") != std::string::npos, "直の録音: REC は Sp=002 から", k.lcd());
+		k.sine_amp = 12000;
+		k.pump(200);
+		k.press(B::enter);
+		k.pump(600);
+		k.press(B::enter);
+		k.sine_amp = 0;
+		k.pump(300);
+		k.press(B::exit);
+		k.press(B::enter);                  // Keep Sample 002?
+		k.press(B::exit);
+		k.press(B::exit);
+		const auto list2 = k.mu.sampling_list();
+		check(list2.size() == 2 && list2[1].start == list2[0].end,
+		      "直の録音: パネルの録音がその後ろに続く",
+		      list2.size() == 2 ? std::to_string(list2[0].end) + " / " + std::to_string(list2[1].start) : std::string());
+
+		// 音色に割り当てて、バンク 16 の PGM001 で鳴らす
+		sp::voice v;
+		v.assigned = true;
+		v.sample = 1;
+		v.name = "Direct";
+		v.level = 127;
+		v.pan = 7;
+		const bool set = k.mu.sampling_set_voice(0, v, err);
+		sp::voice back;
+		k.mu.sampling_voice(0, back);
+		check(set && back.assigned && back.sample == 1 && back.name == "Direct", "直の割り当て: 読み戻せる", back.name);
+		k.press(B::play);
+		const u8 pc[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x00 };
+		for (u8 b : pc)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+		check(k.lcd().find("Direct") != std::string::npos, "直の割り当て: 音色の名前が出る", k.lcd());
+		k.out.clear();
+		k.collect = true;
+		const u8 on[] = { 0x90, 0x3c, 0x64 };
+		for (u8 b : on)
+			k.mu.midi_in(b, 0);
+		k.pump(600);
+		k.collect = false;
+		check(tone(k.out, 440) > 0.005 && tone(k.out, 440) > 10 * tone(k.out, 660),
+		      "直の割り当て: ノート 60 が 440Hz", std::to_string(tone(k.out, 440)));
+		const u8 off[] = { 0x80, 0x3c, 0x40 };
+		for (u8 b : off)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+
+		// 窓の道（bridge::post → driver::sampling_tick）と WAV の取り込み。48kHz・2ch の WAV
+		// （左 660Hz、右 880Hz）を作り、AD2（右）を 44.1kHz に直して足し、PGM002 に割り当てて鳴らす
+		std::vector<u8> wav;
+		{
+			const u32 rate = 48000, frames = rate / 2;
+			auto put32 = [&](u32 v) { for (int i = 0; i < 4; i++) wav.push_back(u8(v >> (8 * i))); };
+			auto put16 = [&](u32 v) { wav.push_back(u8(v)); wav.push_back(u8(v >> 8)); };
+			wav.insert(wav.end(), { 'R', 'I', 'F', 'F' });
+			put32(36 + frames * 4);
+			wav.insert(wav.end(), { 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ' });
+			put32(16); put16(1); put16(2); put32(rate); put32(rate * 4); put16(4); put16(16);
+			wav.insert(wav.end(), { 'd', 'a', 't', 'a' });
+			put32(frames * 4);
+			for (u32 i = 0; i < frames; i++) {
+				put16(u16(s16(std::lround(12000 * std::sin(2 * PI * 660.0 * i / rate)))));
+				put16(u16(s16(std::lround(12000 * std::sin(2 * PI * 880.0 * i / rate)))));
+			}
+		}
+		smu2000::wav_data w;
+		const bool parsed = smu2000::parse_wav(wav, w, err);
+		const std::vector<s16> right = smu2000::wav_for_sampling(w, sp::source::ad2, RATE * 10);
+		std::vector<double> rd(right.begin(), right.end());
+		check(parsed && right.size() > RATE / 2 - 10 && right.size() <= RATE / 2 &&
+		      tone(rd, 880) > 10 * tone(rd, 660),
+		      "WAV: 48kHz の右を 44.1kHz に", std::to_string(right.size()) + " サンプル");
+		ui::bridge br;
+		ui::driver drv;
+		auto pcm2 = std::make_shared<std::vector<s16>>(right);
+		br.post([pcm2](mu2000 &mu) {
+			std::string e;
+			const int num = mu.sampling_add(pcm2->data(), pcm2->size(), "wav880", e);
+			return num ? "added " + std::to_string(num) : e;
+		});
+		sp::voice v2;
+		v2.assigned = true;
+		v2.sample = 3;
+		v2.name = "Wav880";
+		br.post([v2](mu2000 &mu) {
+			std::string e;
+			return mu.sampling_set_voice(1, v2, e) ? std::string("voice") : e;
+		});
+		drv.pump_midi(k.mu, br);
+		ui::bridge::sampling_view view;
+		br.get_sampling(view);
+		check(view.samples.size() == 3 && view.samples[2].name == "wav880" && view.voices[1].name == "Wav880" &&
+		      view.message == "voice",
+		      "窓の道: 仕事を渡して表を読む", view.message);
+		const u8 pc2[] = { 0xc0, 0x01 };
+		for (u8 b : pc2)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+		k.out.clear();
+		k.collect = true;
+		for (u8 b : on)
+			k.mu.midi_in(b, 0);
+		k.pump(400);
+		k.collect = false;
+		for (u8 b : off)
+			k.mu.midi_in(b, 0);
+		check(tone(k.out, 880) > 0.005 && tone(k.out, 880) > 10 * tone(k.out, 660),
+		      "窓の道: PGM002 が 880Hz", std::to_string(tone(k.out, 880)));
+		k.pump(300);
+	}
 
 	std::printf("サンプリング: 食い違い %d\n", bad);
 	return bad ? 1 : 0;

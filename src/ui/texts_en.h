@@ -86,6 +86,7 @@ inline const ui_texts &en_texts()
 		              "        [--fx-window] also open the insertion setup window (double-click an insertion cell in the list)\n"
 		              "        [--shapes-window] also open the part voice window (double-click a VIB picture etc. in the list)\n"
 		              "        [--master-window] also open the master window (double-click the master row)\n"
+		              "        [--sampling-window] also open the sampling window\n"
 		              "        [--lang ja|en] language (else lang= in editor.ini, else the locale: Japanese iff it says ja)\n"
 		              "        [--help]      show this help\n"
 		              "        gui --dump-layout panel.txt   write out the current layout\n"
@@ -433,6 +434,46 @@ inline const ui_texts &en_texts()
 		.ps_fold_char1 = "V",
 		.ps_fold_char2 = "o",
 		.ov_silent = "(silent)",
+		.bar_sampling = "Sampling",
+		.dlg_wav_desc = "WAV audio",
+		.smp_not_ready = "Waiting for the MU2000 to start...",
+		.smp_input = "Input",
+		.smp_device = "Recording device",
+		.smp_device_none = "(none)",
+		.smp_device_host = "Recording comes from the host's A/D Input bus.",
+		.smp_source = "Record from",
+		.smp_trigger = "Trigger",
+		.smp_trigger_off = "Off (start at once)",
+		.smp_record = "Record",
+		.smp_name = "Name",
+		.smp_record_start = "Record",
+		.smp_stop = "Stop",
+		.smp_nothing = "Nothing was recorded",
+		.smp_added_fmt = "Added sample %03d (%.1f s)",
+		.smp_waiting = "Waiting for the trigger...",
+		.smp_recording_fmt = "Recording %.1f s",
+		.smp_free_fmt = "%.1f s free",
+		.smp_wav_note = "A WAV file can be imported instead: the channel picked under \"Record from\" is taken and converted to 44.1 kHz.",
+		.smp_wav = "Import WAV...",
+		.smp_wav_path = "WAV file path",
+		.smp_wav_load = "Import",
+		.smp_wav_fail = "Could not read the WAV file",
+		.smp_samples = "Samples",
+		.smp_none = "No samples yet",
+		.smp_col_no = "No.",
+		.smp_col_len = "Length",
+		.smp_assign = "Voice assignment",
+		.smp_pgm = "Program",
+		.smp_sample = "Sample",
+		.smp_sample_none = "(none)",
+		.smp_voice_name = "Voice name",
+		.smp_level = "Level",
+		.smp_pan = "Pan",
+		.smp_pan_scaling = "Scaling",
+		.smp_apply = "Apply",
+		.smp_voice_set_fmt = "Wrote Bank# %d, program %d",
+		.smp_select_part1 = "Select on part 1",
+		.smp_play_hint_fmt = "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again.",
 	};
 	return t;
 }

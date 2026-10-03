@@ -18,8 +18,11 @@
 
 #include <atomic>
 #include <cstring>
+#include <array>
 #include <deque>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace ui {
@@ -281,7 +284,84 @@ public:
 		m_seq.fetch_add(1, std::memory_order_release);
 	}
 
+	// ---- サンプリングの窓（src/ui/sampling_editor.cpp）
+	// 窓は音源に触らない。音源の表を読み書きする仕事は post で音を作る糸へ渡し、その糸が
+	// driver::sampling_tick で実行して、結果（一言）と表の写しを返す
+	using sampling_job = std::function<std::string(mu2000 &)>;
+	struct sampling_view
+	{
+		std::vector<smu2000::sampling::sample> samples;
+		std::array<smu2000::sampling::voice, smu2000::sampling::MAX_VOICES> voices{};
+		u32 free_frames = 0;
+		int rec_state = 0;            // mu2000::rec_state
+		u32 rec_frames = 0;
+		s32 peak[2] = {};             // A/D INPUT のピーク（16bit の絶対値）
+		std::string message;          // 直前の仕事の結果
+		u64 serial = 0;               // 写しを作るたびに 1 増える
+		bool ready = false;           // 音源が起動を終えた
+	};
+	void post(sampling_job job)
+	{
+		std::lock_guard<std::mutex> lock(m_job_lock);
+		m_jobs.push_back(std::move(job));
+	}
+	// 音を作る糸から。待たずに取れた分だけ
+	bool take_job(sampling_job &out)
+	{
+		std::unique_lock<std::mutex> lock(m_job_lock, std::try_to_lock);
+		if (!lock.owns_lock() || m_jobs.empty())
+			return false;
+		out = std::move(m_jobs.front());
+		m_jobs.pop_front();
+		return true;
+	}
+	void put_sampling(sampling_view &v)
+	{
+		std::unique_lock<std::mutex> lock(m_view_lock, std::try_to_lock);
+		if (!lock.owns_lock())
+			return;                     // 窓が読んでいる最中なら次の回に
+		v.serial = m_view.serial + 1;
+		std::swap(m_view, v);
+	}
+	void get_sampling(sampling_view &out) const
+	{
+		std::lock_guard<std::mutex> lock(m_view_lock);
+		out = m_view;
+	}
+	// 録音デバイスの選択（gui の A/D INPUT。プラグインではホストのバスなので使わない）。
+	// 名前の一覧と今の名前は gui が置き、窓が選んだ番号（-1 = 無し）を gui が拾って開き直す
+	void set_ain_devices(std::vector<std::string> names, std::string current)
+	{
+		std::lock_guard<std::mutex> lock(m_ain_lock);
+		m_ain_names = std::move(names);
+		m_ain_current = std::move(current);
+		m_ain_known = true;
+	}
+	bool ain_devices(std::vector<std::string> &names, std::string &current) const
+	{
+		std::lock_guard<std::mutex> lock(m_ain_lock);
+		names = m_ain_names;
+		current = m_ain_current;
+		return m_ain_known;
+	}
+	void request_ain(int dev) { m_ain_want.store(dev, std::memory_order_relaxed); }
+	// gui から。選ばれていれば番号（-1 = 無し）、無ければ -2
+	int take_ain_request() { return m_ain_want.exchange(-2, std::memory_order_relaxed); }
+	void request_ain_list() { m_ain_list_want.store(true, std::memory_order_relaxed); }
+	bool take_ain_list_request() { return m_ain_list_want.exchange(false, std::memory_order_relaxed); }
+
 private:
+	mutable std::mutex m_job_lock;
+	std::deque<sampling_job> m_jobs;
+	mutable std::mutex m_view_lock;
+	sampling_view m_view;
+	mutable std::mutex m_ain_lock;
+	std::vector<std::string> m_ain_names;
+	std::string m_ain_current;
+	bool m_ain_known = false;
+	std::atomic<int> m_ain_want{-2};
+	std::atomic<bool> m_ain_list_want{false};
+
 	// 読み手 1 本の輪。put はメッセージを書き終えてから 1 回で位置を進める
 	class ring
 	{

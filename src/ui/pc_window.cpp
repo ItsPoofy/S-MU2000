@@ -32,16 +32,19 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	wchar_t path[MAX_PATH * 4] = {};
 	if (ask == xgui::file_ask::save)
 		wcscpy_s(path, L"S-MU2000.syx");
+	const bool wav = ask == xgui::file_ask::open && xgui::file_ask_is_wav();
 	// Bound here: the dialog reads the filter while it runs.
-	const std::wstring filter = dlg_filter(UI_TEXT(dlg_sysex_desc, "SysEx"), "*.syx",
-	                                       UI_TEXT(dlg_all_files, "All files"), "*.*");
+	const std::wstring filter = wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio"), "*.wav",
+	                                             UI_TEXT(dlg_all_files, "All files"), "*.*")
+	                                 : dlg_filter(UI_TEXT(dlg_sysex_desc, "SysEx"), "*.syx",
+	                                              UI_TEXT(dlg_all_files, "All files"), "*.*");
 	OPENFILENAMEW o{};
 	o.lStructSize = sizeof(o);
 	o.hwndOwner   = owner;
 	o.lpstrFilter = filter.c_str();
 	o.lpstrFile   = path;
 	o.nMaxFile    = DWORD(std::size(path));
-	o.lpstrDefExt = L"syx";
+	o.lpstrDefExt = wav ? L"wav" : L"syx";
 	if (ask == xgui::file_ask::save) {
 		o.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
 		if (!GetSaveFileNameW(&o))
@@ -62,7 +65,9 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	if (std::FILE *f = _wfopen(path, L"rb")) {
 		u8 buf[65536];
 		size_t n;
-		while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0 && in.size() < (16u << 20))
+		// WAV はサンプリング RAM（約 48 秒）の 2ch・浮動小数でも収まる大きさまで
+		const size_t cap = wav ? (64u << 20) : (16u << 20);
+		while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0 && in.size() < cap)
 			in.insert(in.end(), buf, buf + n);
 		std::fclose(f);
 		xgui::give_opened_file(std::move(in));

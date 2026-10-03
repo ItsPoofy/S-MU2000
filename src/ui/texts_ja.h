@@ -86,6 +86,7 @@ inline const ui_texts &ja_texts()
 		              "        [--fx-window] インサーションの設定の窓も開く（一覧でインサーションの欄をダブルクリック）\n"
 		              "        [--shapes-window] パートの音色の窓も開く（一覧で VIB などの絵をダブルクリック）\n"
 		              "        [--master-window] マスターの窓も開く（一覧でマスターの行をダブルクリック）\n"
+		              "        [--sampling-window] サンプリングの窓も開く\n"
 		              "        [--lang ja|en] 言葉（無ければ editor.ini の lang=、さらに無ければロケール: 日本語なら日本語、ほかは英語）\n"
 		              "        [--help]      この説明を出す\n"
 		              "        gui --dump-layout panel.txt   いまの配置を書き出す\n"
@@ -433,6 +434,46 @@ inline const ui_texts &ja_texts()
 		.ps_fold_char1 = "音",
 		.ps_fold_char2 = "色",
 		.ov_silent = "（鳴っていない）",
+		.bar_sampling = "サンプリング",
+		.dlg_wav_desc = "WAV の音",
+		.smp_not_ready = "MU2000 の起動を待っています…",
+		.smp_input = "入力",
+		.smp_device = "録音デバイス",
+		.smp_device_none = "（無し）",
+		.smp_device_host = "録音はホストの A/D Input バスから入ります。",
+		.smp_source = "録る入力",
+		.smp_trigger = "引き金",
+		.smp_trigger_off = "なし（すぐ録る）",
+		.smp_record = "録音",
+		.smp_name = "名前",
+		.smp_record_start = "録音",
+		.smp_stop = "止める",
+		.smp_nothing = "何も録れていません",
+		.smp_added_fmt = "サンプル %03d を足しました（%.1f 秒）",
+		.smp_waiting = "引き金を待っています…",
+		.smp_recording_fmt = "録音中 %.1f 秒",
+		.smp_free_fmt = "残り %.1f 秒",
+		.smp_wav_note = "WAV ファイルから取り込むこともできます。「録る入力」で選んだチャンネルを、44.1kHz に直して取り込みます。",
+		.smp_wav = "WAV を取り込む…",
+		.smp_wav_path = "WAV ファイルの場所",
+		.smp_wav_load = "取り込む",
+		.smp_wav_fail = "WAV ファイルを読めませんでした",
+		.smp_samples = "サンプル",
+		.smp_none = "まだサンプルがありません",
+		.smp_col_no = "番号",
+		.smp_col_len = "長さ",
+		.smp_assign = "音色への割り当て",
+		.smp_pgm = "番号",
+		.smp_sample = "サンプル",
+		.smp_sample_none = "（無し）",
+		.smp_voice_name = "音色の名前",
+		.smp_level = "音量",
+		.smp_pan = "パン",
+		.smp_pan_scaling = "Scaling",
+		.smp_apply = "書き込む",
+		.smp_voice_set_fmt = "Bank# %d の %d 番に書き込みました",
+		.smp_select_part1 = "パート 1 で選ぶ",
+		.smp_play_hint_fmt = "バンク MSB 16、LSB %d、プログラム %d で鳴ります。書き込んだ値は、音色を選び直したときに効きます。",
 	};
 	return t;
 }

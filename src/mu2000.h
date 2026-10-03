@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "sampling.h"
 #include "smartmedia.h"
 #include "state.h"
 #include "xg/native_driver.h"
@@ -270,6 +271,48 @@ public:
 	smu2000::smartmedia &card() { return m_card; }
 	// サンプリング RAM（4MB）。確かめる用
 	const std::vector<u8> &sample_ram() const { return m_sampram; }
+	// サンプリングの管理情報（サンプルの一覧・音色）を見るため
+	const std::vector<u8> &dram() const { return m_dram; }
+	const std::vector<u8> &work_ram() const { return m_ram; }
+	// CPU から見た番地で、ワーク RAM か DRAM に直に書く（外れたら false）。音の処理と同じ糸から呼ぶこと
+	bool poke(u32 addr, u8 v)
+	{
+		if (addr >= 0x400000 && addr < 0x400000 + m_ram.size()) { m_ram[addr - 0x400000] = v; return true; }
+		if (addr >= 0x1000000 && addr < 0x1000000 + m_dram.size()) { m_dram[addr - 0x1000000] = v; return true; }
+		return false;
+	}
+	// サンプリング RAM に直に書く（バイトの位置）
+	bool poke_sample(u32 off, u8 v)
+	{
+		if (off >= m_sampram.size())
+			return false;
+		m_sampram[off] = v;
+		return true;
+	}
+
+	// ---- サンプリング（src/sampling.h、doc/sampling-ram.md）。パネルを通さず firmware の表を読み書きする。
+	// どれも音を作る糸（run_sample と同じ糸）から呼ぶこと
+	// firmware の表にあるサンプルの一覧
+	std::vector<smu2000::sampling::sample> sampling_list() const;
+	// まだ録れるサンプル数（44.1kHz）
+	u32 sampling_free_frames() const;
+	// 16bit・44.1kHz の波形をサンプリング RAM の空きへ書き、firmware の表に足す。足したサンプルの番号（1 から）か、
+	// 足せなければ 0（理由は err）
+	int sampling_add(const s16 *pcm, size_t frames, const std::string &name, std::string &err);
+	// サンプル音色（slot 0-255。Bank# 0 の PGM001 が 0）
+	bool sampling_voice(int slot, smu2000::sampling::voice &out) const;
+	bool sampling_set_voice(int slot, const smu2000::sampling::voice &v, std::string &err);
+	// 録音。A/D INPUT（set_audio_input に入る値）を、選んだ入力から 16bit で集める。
+	// trigger は 0 なら押してすぐ、ほかはその大きさ（16bit の絶対値）を超えたら録り始める
+	void rec_start(smu2000::sampling::source src, int trigger, u32 max_frames);
+	void rec_stop() { m_rec_state = 0; }
+	// 0 = 止まっている、1 = 引き金を待っている、2 = 録っている
+	int rec_state() const { return m_rec_state; }
+	u32 rec_frames() const { return u32(m_rec_buf.size()); }
+	// 録れたものを取り出す（録音は止まる）
+	std::vector<s16> rec_take();
+	// A/D INPUT のピーク（16bit の絶対値。ゆっくり下がる）。レベルメーター用
+	s32 ad_peak(int i) const { return m_ad_peak[i & 1]; }
 
 	// ---- S-MU2000: パートの音（画面のスペクトラム用）
 	// 声（2 つのチップで 128）の出力を、混ぜる前に拾ってパートごとに足す。見たいパートを
@@ -873,6 +916,12 @@ private:
 	std::vector<u8>  m_iram;        // CPU 内蔵    0xfffff000-0xffffffff
 	smu2000::smartmedia m_card;     // 前面のカードの差し込み口（SmartMedia）
 	std::vector<u8>  m_sampram;     // SWP30 のサンプリング RAM（4MB、SWP30 から見て 0x1000000 語目から）
+	// 録音（rec_start）。状態は rec_state と同じ、引き金は 16bit の絶対値
+	int m_rec_state = 0;
+	smu2000::sampling::source m_rec_src = smu2000::sampling::source::ad1;
+	s32 m_rec_trigger = 0;
+	u32 m_rec_max = 0;
+	std::vector<s16> m_rec_buf;
 	s32 m_ad_in[2] = {};            // A/D INPUT（set_audio_input）
 	s32 m_ad_peak[2] = {};          // A/D INPUT のピーク（レベルメーター、AN0 / AN2）。状態の保存には入れない
 	u16 ad_level_adc(int i) const

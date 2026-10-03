@@ -467,6 +467,47 @@ struct ui_texts {
 	const char *ps_fold_char2;
 	// Spectrum backdrop fallback (overview.cpp).
 	const char *ov_silent;
+	// Sampling window (sampling_editor.cpp) and its toolbar button.
+	const char *bar_sampling;
+	const char *dlg_wav_desc;
+	const char *smp_not_ready;
+	const char *smp_input;
+	const char *smp_device;
+	const char *smp_device_none;
+	const char *smp_device_host;
+	const char *smp_source;
+	const char *smp_trigger;
+	const char *smp_trigger_off;
+	const char *smp_record;
+	const char *smp_name;
+	const char *smp_record_start;
+	const char *smp_stop;
+	const char *smp_nothing;
+	const char *smp_added_fmt;
+	const char *smp_waiting;
+	const char *smp_recording_fmt;
+	const char *smp_free_fmt;
+	const char *smp_wav_note;
+	const char *smp_wav;
+	const char *smp_wav_path;
+	const char *smp_wav_load;
+	const char *smp_wav_fail;
+	const char *smp_samples;
+	const char *smp_none;
+	const char *smp_col_no;
+	const char *smp_col_len;
+	const char *smp_assign;
+	const char *smp_pgm;
+	const char *smp_sample;
+	const char *smp_sample_none;
+	const char *smp_voice_name;
+	const char *smp_level;
+	const char *smp_pan;
+	const char *smp_pan_scaling;
+	const char *smp_apply;
+	const char *smp_voice_set_fmt;
+	const char *smp_select_part1;
+	const char *smp_play_hint_fmt;
 };
 
 // Each language file defines one of these (never included directly).

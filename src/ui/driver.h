@@ -22,6 +22,8 @@ namespace ui {
 
 class driver
 {
+	bridge::sampling_view m_samp;     // sampling_tick の写し（入れ替えて渡す）
+	int m_samp_tick = 0;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
 	void apply_buttons(mu2000 &mu, const bridge &br)
@@ -35,11 +37,37 @@ public:
 		m_applied = want;
 	}
 
+	// サンプリングの窓からの仕事を実行し、表の写しを返す（bridge::post）。
+	// 写しは 8 ブロックに 1 回（512 サンプルのブロックで 90ms ほど）と、仕事をした直後と、録音中は毎回
+	void sampling_tick(mu2000 &mu, bridge &br)
+	{
+		bridge::sampling_job job;
+		bool did = false;
+		while (br.take_job(job)) {
+			m_samp.message = job(mu);
+			did = true;
+		}
+		if (!did && mu.rec_state() == 0 && ++m_samp_tick < 8)
+			return;
+		m_samp_tick = 0;
+		m_samp.ready = mu.midi_ready();
+		m_samp.samples = mu.sampling_list();
+		for (int i = 0; i < smu2000::sampling::MAX_VOICES; i++)
+			mu.sampling_voice(i, m_samp.voices[size_t(i)]);
+		m_samp.free_frames = mu.sampling_free_frames();
+		m_samp.rec_state = mu.rec_state();
+		m_samp.rec_frames = mu.rec_frames();
+		m_samp.peak[0] = mu.ad_peak(0);
+		m_samp.peak[1] = mu.ad_peak(1);
+		br.put_sampling(m_samp);
+	}
+
 	// エディタから送られた MIDI を音源へ。echo には MIDI 出力の口を渡す
 	// （実機の THRU と同じで、画面から出したものも外へ出る）
 	template <typename F>
 	void pump_midi(mu2000 &mu, bridge &br, F &&echo)
 	{
+		sampling_tick(mu, br);
 		serve_defaults(mu, br);
 		u8 b;
 		while (br.take_midi(b)) {

@@ -3493,6 +3493,21 @@ void mu2000::run_sample(s32 &left, s32 &right)
 		const s32 a = std::min(std::abs(m_ad_in[i]), 32767);
 		m_ad_peak[i] = a >= m_ad_peak[i] ? a : m_ad_peak[i] - ((m_ad_peak[i] >> 12) + 1);
 	}
+	// 録音（パネルを通さない道。src/sampling.cpp の rec_start）
+	if (m_rec_state) {
+		using smu2000::sampling::source;
+		const s32 v = m_rec_src == source::ad1 ? m_ad_in[0]
+		            : m_rec_src == source::ad2 ? m_ad_in[1]
+		            : std::clamp(m_ad_in[0] + m_ad_in[1], -32768, 32767);
+		if (m_rec_state == 1 && std::abs(v) >= m_rec_trigger)
+			m_rec_state = 2;
+		if (m_rec_state == 2) {
+			if (m_rec_buf.size() < m_rec_max)
+				m_rec_buf.push_back(s16(std::clamp(v, -32768, 32767)));
+			else
+				m_rec_state = 0;
+		}
+	}
 
 	// スピーカーに出るのはマスタの DAC だけ。
 	// スレーブの DAC はどこにも繋がっていない

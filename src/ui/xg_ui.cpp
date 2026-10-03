@@ -764,13 +764,17 @@ bool g_file_dialogs = false;
 file_ask g_file_ask = file_ask::none;
 std::vector<u8> g_file_out, g_file_in;
 bool g_file_in_ready = false;
+// 頼みと読んだ中身が .syx か WAV か。窓ごとに取り違えないように（マスターの窓とサンプリングの窓）
+bool g_file_ask_wav = false, g_file_in_wav = false;
 std::string g_file_note;
 }
 
 void set_file_dialogs(bool on) { g_file_dialogs = on; }
 bool file_dialogs() { return g_file_dialogs; }
 void ask_save_file(std::vector<u8> bytes) { g_file_out = std::move(bytes); g_file_ask = file_ask::save; }
-void ask_open_file() { g_file_ask = file_ask::open; }
+void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; }
+void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; }
+bool file_ask_is_wav() { return g_file_ask_wav; }
 file_ask take_file_ask(std::vector<u8> &bytes)
 {
 	const file_ask a = g_file_ask;
@@ -780,10 +784,19 @@ file_ask take_file_ask(std::vector<u8> &bytes)
 	g_file_out.clear();
 	return a;
 }
-void give_opened_file(std::vector<u8> bytes) { g_file_in = std::move(bytes); g_file_in_ready = true; }
+void give_opened_file(std::vector<u8> bytes) { g_file_in = std::move(bytes); g_file_in_ready = true; g_file_in_wav = g_file_ask_wav; }
+bool take_opened_wav(std::vector<u8> &bytes)
+{
+	if (!g_file_in_ready || !g_file_in_wav)
+		return false;
+	bytes = std::move(g_file_in);
+	g_file_in.clear();
+	g_file_in_ready = false;
+	return true;
+}
 bool take_opened_file(std::vector<u8> &bytes)
 {
-	if (!g_file_in_ready)
+	if (!g_file_in_ready || g_file_in_wav)
 		return false;
 	bytes = std::move(g_file_in);
 	g_file_in.clear();
