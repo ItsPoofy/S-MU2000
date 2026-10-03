@@ -534,6 +534,22 @@ int main(int argc, char **argv)
 		      std::to_string(before) + " → " + std::to_string(doubled) + " → " + std::to_string(clipped) +
 		      "、見取り図の最大 " + std::to_string(wmax));
 
+		// 拡大した部分（request_detail）。狭い範囲なら 1 サンプルに 1 つで、波形そのもの
+		{
+			br.request_detail(2, 1, 3000, 3100);
+			drv.pump_midi(k.mu, br);
+			br.get_sampling(view);
+			const auto &d = view.details[2];
+			const sp::sample s1 = k.mu.sampling_list()[0];
+			bool same = d.number == 1 && d.from == 3000 && d.to == 3100 && d.lo.size() == 100;
+			for (size_t i = 0; same && i < d.lo.size(); i++) {
+				const size_t o = (size_t(s1.start) * 2 + 3000 + i) * 2;
+				same = d.lo[i] == d.hi[i] && d.lo[i] == s16(k.mu.sample_ram()[o] | k.mu.sample_ram()[o + 1] << 8);
+			}
+			check(same, "窓の道: 拡大した部分の波形", std::to_string(d.lo.size()) + " 点");
+			br.request_detail(2, 0, 0, 0);
+		}
+
 		// トリム。サンプル 1 の [1000, 1000 + 0.25 秒) だけを残す。後ろのサンプル 2・3 は前へ詰まり、空きが増える。
 		// サンプル 3 を使う PGM002 は、この後の確認で 880Hz のまま鳴る
 		{

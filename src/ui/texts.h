@@ -535,6 +535,11 @@ struct ui_texts {
 	const char *smp_loop_tip;
 	const char *smp_loop_at;
 	const char *smp_trim_note;
+	const char *smp_det_start;
+	const char *smp_det_end;
+	const char *smp_det_loop;
+	const char *smp_det_loop_off;
+	const char *smp_det_tip;
 	const char *smp_snap;
 	const char *smp_snap_tip;
 	const char *smp_match;

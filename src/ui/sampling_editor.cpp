@@ -69,6 +69,48 @@ void meter(const char *label, s32 peak, s32 trigger)
 		ImGui::TextUnformatted("  -inf");
 }
 
+// 拡大した部分の波形を [v0, v1)（サンプルの位置）の枠に描く。shift だけずらして置く（つなぎ目の向こう側を重ねるとき）
+void draw_slice(ImDrawList *dl, ImVec2 p, ImVec2 sz, double v0, double v1, const bridge::sampling_view::slice &s,
+                double shift, ImU32 col)
+{
+	const int nb = int(s.hi.size());
+	if (nb <= 0 || s.to <= s.from)
+		return;
+	const double span = v1 - v0, per = double(s.to - s.from) / double(nb);
+	const float mid = p.y + sz.y * 0.5f, half = sz.y * 0.5f - 2.0f;
+	auto x_of = [&](double f) { return p.x + float((f - v0) / span * double(sz.x)); };
+	auto y_of = [&](int v) { return mid - half * float(v) / 32768.0f; };
+	const double px_per_bucket = per / span * double(sz.x);
+	if (px_per_bucket < 1.0) {
+		// 1 列に区切りが 1 つ以上: 列ごとに最小と最大の縦線
+		const int cols = std::max(1, int(sz.x));
+		for (int x = 0; x < cols; x++) {
+			const double fa = v0 + double(x) / double(sz.x) * span - shift, fb = v0 + double(x + 1) / double(sz.x) * span - shift;
+			const int b0 = std::max(0, int(std::floor((fa - s.from) / per))), b1 = std::min(nb, int(std::ceil((fb - s.from) / per)));
+			if (b1 <= b0)
+				continue;
+			int lo = 32767, hi = -32768;
+			for (int b = b0; b < b1; b++) {
+				lo = std::min(lo, int(s.lo[size_t(b)]));
+				hi = std::max(hi, int(s.hi[size_t(b)]));
+			}
+			dl->AddLine(ImVec2(p.x + float(x) + 0.5f, y_of(hi)), ImVec2(p.x + float(x) + 0.5f, std::max(y_of(lo), y_of(hi) + 1.0f)), col);
+		}
+		return;
+	}
+	// 1 サンプルが何列にもなる: 点を線でつなぎ、広ければ点も打つ
+	ImVec2 prev;
+	for (int b = 0; b < nb; b++) {
+		const double f = double(s.from) + (double(b) + 0.5) * per + shift;
+		const ImVec2 pt(x_of(f), y_of((int(s.lo[size_t(b)]) + int(s.hi[size_t(b)])) / 2));
+		if (b)
+			dl->AddLine(prev, pt, col, 1.5f);
+		if (px_per_bucket > 6.0)
+			dl->AddCircleFilled(pt, 2.0f, col);
+		prev = pt;
+	}
+}
+
 s32 trigger_level(int trigger_db)
 {
 	return trigger_db >= 0 ? 0 : s32(std::lround(32768.0 * std::pow(10.0, trigger_db / 20.0)));
@@ -125,7 +167,7 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	ImGui::EndChild();
 	ImGui::SameLine();
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
-		const float h = ImGui::GetContentRegionAvail().y * 0.5f;
+		const float h = ImGui::GetContentRegionAvail().y * 0.64f;
 		if (ImGui::BeginChild("wave", ImVec2(0, h), ImGuiChildFlags_Borders))
 			wave_pane(br);
 		ImGui::EndChild();
@@ -334,6 +376,8 @@ void sampling_editor::wave_pane(bridge &br)
 		heading(UI_TEXT(smp_wave, "Waveform"));
 		ImGui::TextDisabled("%s", UI_TEXT(smp_wave_pick, "Pick a sample in the list"));
 		br.request_overview(0);
+		for (int i = 0; i < bridge::DETAIL_SLOTS; i++)
+			br.request_detail(i, 0, 0, 0);
 		return;
 	}
 	const int num = sel->number;
@@ -369,7 +413,7 @@ void sampling_editor::wave_pane(bridge &br)
 	};
 	// 音源の側でそろえた S・E・L が届いたら窓へ（吸い付けや E を合わせるで動いた分）
 	if (m_points && m_points->done.load(std::memory_order_acquire)) {
-		if (m_points->number == num && !m_drag) {
+		if (m_points->number == num && !m_drag && m_det_drag < 0) {
 			m_start = m_points->from;
 			m_end = m_points->to;
 			m_loop_at = m_points->loop_from;
@@ -628,11 +672,12 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::SameLine();
 	ImGui::TextDisabled("%.3f - %.3f s  (x%.0f)", m_view0 / rate, m_view1 / rate, double(frames) / (m_view1 - m_view0));
 
-	// ---- 波形
+	// ---- 全体の波形（下に始点・終点・ループの頭の拡大を 3 つ並べる）
 	const bool zoomed = m_view1 - m_view0 < double(frames) - 0.5;
 	const float bar_h = zoomed ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
+	const float det_h = std::max(fs * 6, ImGui::GetContentRegionAvail().y * 0.45f);
 	const ImVec2 p = ImGui::GetCursorScreenPos();
-	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(ImGui::GetContentRegionAvail().y - bar_h, fs * 3));
+	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(ImGui::GetContentRegionAvail().y - bar_h - det_h, fs * 3));
 	ImGui::InvisibleButton("##wave", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
 	                                     ImGuiButtonFlags_MouseButtonMiddle);
 	const double span = m_view1 - m_view0;
@@ -769,6 +814,105 @@ void sampling_editor::wave_pane(bridge &br)
 			m_view1 = m_view0 + span;
 			clamp_view();
 		}
+	}
+
+	// ---- 始点・終点・ループの頭の拡大。それぞれ左クリック（ドラッグ）でその点を置く。ホイールで拡大・縮小。
+	// 終点の枠には戻った後に鳴る L の後ろを、ループの頭の枠には戻る前に鳴る E の手前を薄く重ねる（つなぎ目の形）
+	const float gap = ImGui::GetStyle().ItemSpacing.x;
+	const float dw = (ImGui::GetContentRegionAvail().x - gap * 2) / 3.0f;
+	auto clamp_req = [&](double a, double b, u32 &ra, u32 &rb) {
+		ra = u32(std::clamp(std::floor(a), 0.0, double(frames)));
+		rb = u32(std::clamp(std::ceil(b), 0.0, double(frames)));
+	};
+	for (int w = 0; w < 3; w++) {
+		if (w)
+			ImGui::SameLine(0, gap);
+		ImGui::BeginGroup();
+		static const ImU32 cols[3] = { IM_COL32(110, 230, 120, 255), IM_COL32(255, 210, 90, 255), IM_COL32(200, 120, 255, 255) };
+		const char *names[3] = { UI_TEXT(smp_det_start, "Start (S)"), UI_TEXT(smp_det_end, "End (E)"), UI_TEXT(smp_det_loop, "Loop point (L)") };
+		const u32 at = w == 0 ? m_start : w == 1 ? m_end : m_loop_at;
+		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(cols[w]), "%s", names[w]);
+		ImGui::SameLine();
+		if (w == 2 && !m_loop_on)
+			ImGui::TextDisabled("%s", UI_TEXT(smp_det_loop_off, "(loop off)"));
+		else
+			ImGui::TextDisabled("%u  %.4f s", at, double(at) / rate);
+		const ImVec2 q = ImGui::GetCursorScreenPos();
+		const ImVec2 qs(dw, std::max(ImGui::GetContentRegionAvail().y, fs * 3));
+		char id[16];
+		std::snprintf(id, sizeof(id), "##det%d", w);
+		ImGui::InvisibleButton(id, qs);
+		// 表示の中心は点の位置。つまんでいるあいだは動かさない（動かすと押した所がずれる）
+		double &dspan = m_det_span[w];
+		dspan = std::clamp(dspan, 16.0, std::max(16.0, double(frames)));
+		if (m_det_drag != w)
+			m_det_center[w] = double(at);
+		const double c = m_det_center[w], d0 = c - dspan * 0.5, d1 = c + dspan * 0.5;
+		auto dx_of = [&](double f) { return q.x + float((f - d0) / dspan * double(qs.x)); };
+		auto df_of = [&](float x) { return d0 + double(x - q.x) / double(qs.x) * dspan; };
+		if (!busy) {
+			if (ImGui::IsItemHovered()) {
+				if (io.MouseWheel != 0.0f)
+					dspan *= io.MouseWheel > 0 ? 0.8 : 1.25;
+				ImGui::SetTooltip("%s", UI_TEXT(smp_det_tip, "Left-click or drag to place this point. Wheel zooms."));
+			}
+			if (ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+				m_det_drag = w;
+			if (m_det_drag == w && ImGui::IsItemActive()) {
+				const u32 f = u32(std::lround(std::clamp(df_of(io.MousePos.x), 0.0, double(frames))));
+				if (w == 0)
+					m_start = std::min(f, m_end >= 8 ? m_end - 8 : 0);
+				else if (w == 1)
+					m_end = std::max(f, m_start + 8);
+				else {
+					m_loop_at = f;
+					m_loop_on = true;
+				}
+				fit(w == 0 ? 1 : w == 1 ? 2 : 4);
+			}
+			if (ImGui::IsItemDeactivated() && m_det_drag == w) {
+				post_points(w == 0 ? 1 : w == 1 ? 2 : 4);
+				m_det_drag = -1;
+			}
+		}
+		// 波形を頼む: 自分の範囲と、つなぎ目の向こう側
+		u32 ra, rb;
+		clamp_req(d0, d1, ra, rb);
+		br.request_detail(w, num, ra, rb);
+		const bool ghost = m_loop_on && w > 0;
+		double shift = 0;
+		if (ghost && w == 1) {
+			// E より後ろに、戻った後に鳴る L から先を置く
+			shift = double(m_end) - double(m_loop_at);
+			clamp_req(double(m_loop_at), d1 - shift, ra, rb);
+		} else if (ghost) {
+			// L より前に、戻る前に鳴る E の手前を置く
+			shift = double(m_loop_at) - double(m_end);
+			clamp_req(d0 - shift, double(m_end), ra, rb);
+		}
+		br.request_detail(3 + w, ghost ? num : 0, ra, rb);
+
+		ImDrawList *ddl = ImGui::GetWindowDrawList();
+		ddl->PushClipRect(q, ImVec2(q.x + qs.x, q.y + qs.y), true);
+		ddl->AddRectFilled(q, ImVec2(q.x + qs.x, q.y + qs.y), IM_COL32(16, 20, 26, 255));
+		const float qmid = q.y + qs.y * 0.5f;
+		ddl->AddLine(ImVec2(q.x, qmid), ImVec2(q.x + qs.x, qmid), IM_COL32(80, 90, 110, 255));
+		const auto &main = m_view.details[size_t(w)];
+		const auto &gh = m_view.details[size_t(3 + w)];
+		if (main.number == num)
+			draw_slice(ddl, q, qs, d0, d1, main, 0.0, IM_COL32(110, 200, 255, 255));
+		// 鳴らさない側を暗く（始点の前・終点の後ろ）
+		const float xa = dx_of(double(at));
+		if (w == 0)
+			ddl->AddRectFilled(q, ImVec2(std::max(q.x, xa), q.y + qs.y), IM_COL32(0, 0, 0, 150));
+		else if (w == 1)
+			ddl->AddRectFilled(ImVec2(std::min(q.x + qs.x, xa), q.y), ImVec2(q.x + qs.x, q.y + qs.y), IM_COL32(0, 0, 0, 150));
+		if (ghost && gh.number == num)
+			draw_slice(ddl, q, qs, d0, d1, gh, shift, w == 1 ? IM_COL32(200, 120, 255, 200) : IM_COL32(255, 210, 90, 170));
+		if (w < 2 || m_loop_on)
+			ddl->AddLine(ImVec2(xa, q.y), ImVec2(xa, q.y + qs.y), cols[w], m_det_drag == w ? 3.0f : 2.0f);
+		ddl->PopClipRect();
+		ImGui::EndGroup();
 	}
 }
 

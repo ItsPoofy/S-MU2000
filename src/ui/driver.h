@@ -32,6 +32,9 @@ class driver
 	u32 m_wave_frames = 0;
 	u32 m_wave_from = 0, m_wave_to = 0;
 	std::vector<s16> m_wave_lo, m_wave_hi;
+	// 拡大した部分（bridge::request_detail）。made が false なら作り直す
+	std::array<bridge::sampling_view::slice, bridge::DETAIL_SLOTS> m_details{};
+	bool m_details_fresh = false;
 	int m_samp_tick = 0;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
@@ -60,11 +63,19 @@ public:
 			// 波形を書き換える仕事もあるので、測ったものは捨てる
 			m_samp_peaks.clear();
 			m_wave_made = -1;
+			m_details_fresh = false;
 		}
 		const bridge::overview_req want_wave = br.overview_wanted();
 		const bool new_wave = want_wave.number != m_wave_made || want_wave.from != m_wave_from ||
 		                      want_wave.to != m_wave_to;
 		if (new_wave)
+			did = true;
+		const auto want_details = br.details_wanted();
+		bool new_details = !m_details_fresh;
+		for (size_t i = 0; i < want_details.size(); i++)
+			new_details = new_details || want_details[i].number != m_details[i].number ||
+			              want_details[i].from != m_details[i].from || want_details[i].to != m_details[i].to;
+		if (new_details)
 			did = true;
 		if (!did && mu.rec_state() == 0 && !mu.preview_number() && !m_samp.preview_number && ++m_samp_tick < 8)
 			return;
@@ -107,6 +118,21 @@ public:
 		m_samp.wave_to = m_wave_to;
 		m_samp.wave_lo = m_wave_lo;
 		m_samp.wave_hi = m_wave_hi;
+		if (new_details) {
+			for (size_t i = 0; i < want_details.size(); i++) {
+				bridge::sampling_view::slice &d = m_details[i];
+				d.number = want_details[i].number;
+				d.from = want_details[i].from;
+				d.to = want_details[i].to;
+				u32 frames = 0;
+				d.lo.clear();
+				d.hi.clear();
+				if (d.number && d.to > d.from)
+					mu.sampling_overview(d.number, bridge::DETAIL_BUCKETS, d.lo, d.hi, frames, d.from, d.to);
+			}
+			m_details_fresh = true;
+		}
+		m_samp.details = m_details;
 		m_samp.peak[0] = mu.ad_peak(0);
 		m_samp.peak[1] = mu.ad_peak(1);
 		br.put_sampling(m_samp);

@@ -62,6 +62,10 @@ private:
 	u32 m_loop_at = 0;
 	// つなぎ目の道具。m_snap はゼロクロスに吸い付ける、m_xfade_ms はクロスフェードの長さ
 	bool m_snap = true;
+	// 始点・終点・ループの頭の拡大（0 = S、1 = E、2 = L）。表示する幅（サンプル）と中心、つまんでいる枠
+	double m_det_span[3] = { 400.0, 400.0, 400.0 };
+	double m_det_center[3] = {};
+	int m_det_drag = -1;
 	int m_xfade_ms = 20;
 	// 表へ書いた後の S・E・L（音源の側でそろえた値。吸い付けや E を合わせるで動いたものを窓へ戻す）
 	struct points_result

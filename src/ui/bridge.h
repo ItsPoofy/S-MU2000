@@ -306,8 +306,24 @@ public:
 		int preview_number = 0;           // 試聴しているサンプル（0 = していない）
 		u32 preview_pos = 0;              // 試聴している位置（サンプルの位置）
 		std::vector<s16> wave_lo, wave_hi;
+		// 拡大した部分の波形（request_detail）。区切りは DETAIL_BUCKETS 個まで（範囲が狭ければ 1 サンプルに 1 つ）
+		struct slice
+		{
+			int number = 0;
+			u32 from = 0, to = 0;
+			std::vector<s16> lo, hi;
+		};
+		std::array<slice, 6> details;
 	};
 	static constexpr int WAVE_BUCKETS = 1024;
+	static constexpr int DETAIL_BUCKETS = 1024;
+	static constexpr int DETAIL_SLOTS = 6;
+	// 拡大した部分の波形を作ってほしい範囲（slot ごと。number が 0 なら要らない）
+	void request_detail(int slot, int number, u32 from, u32 to)
+	{
+		std::lock_guard<std::mutex> lock(m_wave_lock);
+		m_detail_want[size_t(slot)] = { number, from, to };
+	}
 	// 見取り図を作ってほしいサンプル（0 = 要らない）
 	// from, to はサンプルの位置（0, 0 なら全体）。拡大したときはその範囲だけ
 	void request_overview(int number, u32 from = 0, u32 to = 0)
@@ -320,6 +336,11 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(m_wave_lock);
 		return m_wave_want;
+	}
+	std::array<overview_req, DETAIL_SLOTS> details_wanted() const
+	{
+		std::lock_guard<std::mutex> lock(m_wave_lock);
+		return m_detail_want;
 	}
 	void post(sampling_job job)
 	{
@@ -384,6 +405,7 @@ private:
 	std::atomic<bool> m_ain_list_want{false};
 	mutable std::mutex m_wave_lock;
 	overview_req m_wave_want;
+	std::array<overview_req, DETAIL_SLOTS> m_detail_want{};
 
 	// 読み手 1 本の輪。put はメッセージを書き終えてから 1 回で位置を進める
 	class ring
