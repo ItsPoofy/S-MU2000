@@ -198,9 +198,10 @@ bool load(const std::string &path, std::vector<event> &out, std::string &err)
 	std::FILE *f = std::fopen(path.c_str(), "rb");
 	if (!f)
 #endif
-    {
-        err = "MIDI ファイルを開けない: " + path; return false;
-    }
+	{
+		err = "MIDI ファイルを開けない: " + path;
+		return false;
+	}
 	std::fseek(f, 0, SEEK_END);
 	std::vector<u8> d(size_t(std::ftell(f)));
 	std::fseek(f, 0, SEEK_SET);
