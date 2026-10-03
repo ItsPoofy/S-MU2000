@@ -299,7 +299,15 @@ public:
 		std::string message;          // 直前の仕事の結果
 		u64 serial = 0;               // 写しを作るたびに 1 増える
 		bool ready = false;           // 音源が起動を終えた
+		// 窓が選んだサンプルの見取り図（request_overview）。波形を WAVE_BUCKETS 個に分けた最小と最大
+		int wave_number = 0;
+		u32 wave_frames = 0;
+		std::vector<s16> wave_lo, wave_hi;
 	};
+	static constexpr int WAVE_BUCKETS = 1024;
+	// 見取り図を作ってほしいサンプル（0 = 要らない）
+	void request_overview(int number) { m_wave_want.store(number, std::memory_order_relaxed); }
+	int overview_wanted() const { return m_wave_want.load(std::memory_order_relaxed); }
 	void post(sampling_job job)
 	{
 		std::lock_guard<std::mutex> lock(m_job_lock);
@@ -361,6 +369,7 @@ private:
 	bool m_ain_known = false;
 	std::atomic<int> m_ain_want{-2};
 	std::atomic<bool> m_ain_list_want{false};
+	std::atomic<int> m_wave_want{0};
 
 	// 読み手 1 本の輪。put はメッセージを書き終えてから 1 回で位置を進める
 	class ring

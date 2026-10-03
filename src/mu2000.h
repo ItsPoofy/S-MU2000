@@ -296,6 +296,11 @@ public:
 	std::vector<smu2000::sampling::sample> sampling_list() const;
 	// そのサンプルの波形の最大の絶対値（16bit）。無音で録れたかが分かる
 	int sampling_peak(const smu2000::sampling::sample &s) const;
+	// サンプルの波形を gain 倍する（サンプリング RAM を書き換える。はみ出したら 16bit で止める）。
+	// 変えた後の最大の絶対値か、そのサンプルが無ければ -1
+	int sampling_gain(int number, double gain);
+	// 見取り図: 波形を buckets 個に分けた、それぞれの最小と最大
+	bool sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const;
 	// まだ録れるサンプル数（44.1kHz）
 	u32 sampling_free_frames() const;
 	// 16bit・44.1kHz の波形をサンプリング RAM の空きへ書き、firmware の表に足す。足したサンプルの番号（1 から）か、

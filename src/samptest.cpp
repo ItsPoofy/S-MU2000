@@ -515,6 +515,24 @@ int main(int argc, char **argv)
 			steady = steady && view.message == "voice";
 		}
 		check(steady, "窓の道: 結果の一言が行き来しない", view.message);
+
+		// 音量を変える（サンプル 1 は振幅 12000 の正弦）。2 倍で 24000 前後、もう 2 倍で 16bit の上限で止まる。
+		// 見取り図（request_overview）も変えた後の波形になる
+		const int before = k.mu.sampling_peak(k.mu.sampling_list()[0]);
+		const int doubled = k.mu.sampling_gain(1, 2.0);
+		const int clipped = k.mu.sampling_gain(1, 2.0);
+		br.request_overview(1);
+		drv.pump_midi(k.mu, br);
+		br.get_sampling(view);
+		s16 wmax = 0;
+		for (s16 v : view.wave_hi)
+			wmax = std::max(wmax, v);
+		// 負の側は -32768 で止まるので、最大の絶対値は 32768 になりうる
+		check(std::abs(doubled - 2 * before) <= 2 && clipped >= 32767 && view.wave_number == 1 &&
+		      int(view.wave_hi.size()) == ui::bridge::WAVE_BUCKETS && wmax == 32767,
+		      "音量を変える・見取り図",
+		      std::to_string(before) + " → " + std::to_string(doubled) + " → " + std::to_string(clipped) +
+		      "、見取り図の最大 " + std::to_string(wmax));
 		const u8 pc2[] = { 0xc0, 0x01 };
 		for (u8 b : pc2)
 			k.mu.midi_in(b, 0);

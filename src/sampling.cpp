@@ -4,6 +4,7 @@
 #include "mu2000.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace sp = smu2000::sampling;
@@ -81,6 +82,51 @@ int mu2000::sampling_peak(const sp::sample &s) const
 		peak = std::max(peak, v < 0 ? -int(v) : int(v));
 	}
 	return peak;
+}
+
+int mu2000::sampling_gain(int number, double gain)
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		int peak = 0;
+		for (u32 i = s.start * 2; i < s.end * 2 && (i + 1) * 2 <= m_sampram.size(); i++) {
+			const s16 v = s16(m_sampram[i * 2] | m_sampram[i * 2 + 1] << 8);
+			const long w = std::clamp(std::lround(double(v) * gain), -32768L, 32767L);
+			m_sampram[i * 2] = u8(w);
+			m_sampram[i * 2 + 1] = u8(u16(w) >> 8);
+			peak = std::max(peak, int(w < 0 ? -w : w));
+		}
+		return peak;
+	}
+	return -1;
+}
+
+bool mu2000::sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const
+{
+	lo.clear();
+	hi.clear();
+	frames = 0;
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		frames = s.frames();
+		if (!frames || buckets <= 0)
+			return false;
+		lo.assign(size_t(buckets), 0);
+		hi.assign(size_t(buckets), 0);
+		for (u32 i = 0; i < frames; i++) {
+			const u32 at = (s.start * 2 + i) * 2;
+			if (at + 1 >= m_sampram.size())
+				break;
+			const s16 v = s16(m_sampram[at] | m_sampram[at + 1] << 8);
+			const size_t b = size_t(u64(i) * u64(buckets) / frames);
+			lo[b] = std::min(lo[b], v);
+			hi[b] = std::max(hi[b], v);
+		}
+		return true;
+	}
+	return false;
 }
 
 u32 mu2000::sampling_free_frames() const

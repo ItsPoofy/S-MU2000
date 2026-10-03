@@ -476,6 +476,12 @@ inline const ui_texts &en_texts()
 		.smp_play_hint_fmt = "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again.",
 		.smp_col_peak = "Peak",
 		.smp_silent = "silent",
+		.smp_wave = "Waveform",
+		.smp_wave_pick = "Pick a sample in the list",
+		.smp_normalize = "Normalize",
+		.smp_gain_apply = "Change volume",
+		.smp_gain_done_fmt = "Sample %03d: peak now %.1f dB",
+		.smp_gain_note = "Rewrites the sample in place. Turning it down and up again loses detail, and turning it up past full scale clips.",
 	};
 	return t;
 }

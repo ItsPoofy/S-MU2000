@@ -5,7 +5,7 @@
 //
 //   入力     録音デバイス（gui）、録る入力（AD1 / AD2 / AD1+2）、引き金、レベルメーター
 //   録音     名前・録音・止める・残りの時間。WAV ファイルから取り込むこともできる
-//   サンプル firmware の表にあるサンプルの一覧
+//   サンプル firmware の表にあるサンプルの一覧。選ぶと波形を出し、音量を上げ下げ・ノーマライズできる
 //   割り当て サンプル音色（Bank# 0/1 × PGM 1-128）に、サンプル・名前・音量・パンを書く
 //
 // 窓は音源に触らない。仕事は bridge::post で音を作る糸へ渡す（driver::sampling_tick）
@@ -30,13 +30,14 @@ public:
 		return get_lang() == lang::ja ? L"S-MU2000 サンプリング" : L"S-MU2000 Sampling";
 	}
 	int default_width() const override  { return 760; }
-	int default_height() const override { return 640; }
+	int default_height() const override { return 760; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
 
 private:
 	void input_pane(bridge &br);
 	void record_pane(bridge &br);
 	void samples_pane();
+	void wave_pane(bridge &br);
 	void assign_pane(bridge &br);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
 
@@ -47,6 +48,10 @@ private:
 	char m_path[512] = {};             // WAV の場所（ファイルの窓が無い所で）
 	std::string m_note;                // 直前の結果
 	u64 m_note_serial = 0;             // m_note を受け取った写しの番号
+
+	// 一覧で選んだサンプル（0 = 無し）と、音量を変える量（dB）
+	int m_selected = 0;
+	float m_gain_db = 6.0f;
 
 	// 割り当て
 	int m_bank = 0, m_pgm = 1;

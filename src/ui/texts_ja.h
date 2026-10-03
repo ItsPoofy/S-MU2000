@@ -476,6 +476,12 @@ inline const ui_texts &ja_texts()
 		.smp_play_hint_fmt = "バンク MSB 16、LSB %d、プログラム %d で鳴ります。書き込んだ値は、音色を選び直したときに効きます。",
 		.smp_col_peak = "最大",
 		.smp_silent = "無音",
+		.smp_wave = "波形",
+		.smp_wave_pick = "一覧からサンプルを選ぶと、ここに波形が出ます",
+		.smp_normalize = "ノーマライズ",
+		.smp_gain_apply = "音量を変える",
+		.smp_gain_done_fmt = "サンプル %03d: 最大が %.1f dB になりました",
+		.smp_gain_note = "サンプルそのものを書き換えます。下げてから上げ直すと細部が失われ、満杯を超えて上げると頭が切れます（波形の赤い所）。",
 	};
 	return t;
 }

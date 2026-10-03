@@ -28,6 +28,9 @@ class driver
 	std::string m_samp_msg;
 	struct samp_peak { int number = 0; u32 start = 0, end = 0; int peak = 0; };
 	std::vector<samp_peak> m_samp_peaks;
+	int m_wave_made = -1;              // 見取り図を作ったサンプル（-1 はまだ）
+	u32 m_wave_frames = 0;
+	std::vector<s16> m_wave_lo, m_wave_hi;
 	int m_samp_tick = 0;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
@@ -52,6 +55,14 @@ public:
 			m_samp_msg = job(mu);
 			did = true;
 		}
+		if (did) {
+			// 波形を書き換える仕事もあるので、測ったものは捨てる
+			m_samp_peaks.clear();
+			m_wave_made = -1;
+		}
+		const int want_wave = br.overview_wanted();
+		if (want_wave != m_wave_made)
+			did = true;
 		if (!did && mu.rec_state() == 0 && ++m_samp_tick < 8)
 			return;
 		m_samp_tick = 0;
@@ -77,6 +88,15 @@ public:
 		m_samp.free_frames = mu.sampling_free_frames();
 		m_samp.rec_state = mu.rec_state();
 		m_samp.rec_frames = mu.rec_frames();
+		if (want_wave != m_wave_made) {
+			mu.sampling_overview(want_wave, bridge::WAVE_BUCKETS, m_wave_lo, m_wave_hi, m_wave_frames);
+			m_wave_made = want_wave;
+		}
+		// 入れ物は入れ替えて使うので、見取り図も毎回入れ直す
+		m_samp.wave_number = m_wave_made;
+		m_samp.wave_frames = m_wave_frames;
+		m_samp.wave_lo = m_wave_lo;
+		m_samp.wave_hi = m_wave_hi;
 		m_samp.peak[0] = mu.ad_peak(0);
 		m_samp.peak[1] = mu.ad_peak(1);
 		br.put_sampling(m_samp);

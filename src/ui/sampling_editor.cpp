@@ -102,6 +102,8 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		return;
 	}
 
+	br.request_overview(m_selected);
+
 	// WAV のファイルの窓から読んだ中身
 	std::vector<u8> opened;
 	if (xgui::take_opened_wav(opened))
@@ -117,9 +119,12 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	ImGui::EndChild();
 	ImGui::SameLine();
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
-		const float h = ImGui::GetContentRegionAvail().y * 0.45f;
+		const float h = ImGui::GetContentRegionAvail().y * 0.28f;
 		if (ImGui::BeginChild("samples", ImVec2(0, h), ImGuiChildFlags_Borders))
 			samples_pane();
+		ImGui::EndChild();
+		if (ImGui::BeginChild("wave", ImVec2(0, h * 1.15f), ImGuiChildFlags_Borders))
+			wave_pane(br);
 		ImGui::EndChild();
 		if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
 			assign_pane(br);
@@ -279,8 +284,15 @@ void sampling_editor::samples_pane()
 	heading(UI_TEXT(smp_samples, "Samples"));
 	if (m_view.samples.empty()) {
 		ImGui::TextDisabled("%s", UI_TEXT(smp_none, "No samples yet"));
+		m_selected = 0;
 		return;
 	}
+	// 選んだものが消えていたら、最後に足したものを選ぶ（録った直後にすぐ見られるように）
+	bool found = false;
+	for (const sp::sample &s : m_view.samples)
+		found = found || s.number == m_selected;
+	if (!found)
+		m_selected = m_view.samples.back().number;
 	if (ImGui::BeginTable("samples", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV)) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn(UI_TEXT(smp_col_no, "No."), ImGuiTableColumnFlags_WidthFixed);
@@ -291,7 +303,10 @@ void sampling_editor::samples_pane()
 		for (const sp::sample &s : m_view.samples) {
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
-			ImGui::Text("%03d", s.number);
+			char id[16];
+			std::snprintf(id, sizeof(id), "%03d", s.number);
+			if (ImGui::Selectable(id, s.number == m_selected, ImGuiSelectableFlags_SpanAllColumns))
+				m_selected = s.number;
 			ImGui::TableNextColumn();
 			ImGui::TextUnformatted(s.name.c_str());
 			ImGui::TableNextColumn();
@@ -304,6 +319,78 @@ void sampling_editor::samples_pane()
 		}
 		ImGui::EndTable();
 	}
+}
+
+void sampling_editor::wave_pane(bridge &br)
+{
+	const sp::sample *sel = nullptr;
+	for (const sp::sample &s : m_view.samples)
+		if (s.number == m_selected)
+			sel = &s;
+	if (!sel) {
+		heading(UI_TEXT(smp_wave, "Waveform"));
+		ImGui::TextDisabled("%s", UI_TEXT(smp_wave_pick, "Pick a sample in the list"));
+		return;
+	}
+	char title[64];
+	std::snprintf(title, sizeof(title), "%s  %03d %s", UI_TEXT(smp_wave, "Waveform"), sel->number, sel->name.c_str());
+	heading(title);
+	const float fs = ImGui::GetFontSize();
+
+	// 音量。ノーマライズは最大を -0.5 dB に。書き換えなので元に戻せない
+	const int num = sel->number;
+	const int peak = sel->peak;
+	std::string done = UI_TEXT(smp_gain_done_fmt, "Sample %03d: peak now %.1f dB");
+	auto post_gain = [&](double gain) {
+		br.post([num, gain, done](mu2000 &mu) {
+			const int p = mu.sampling_gain(num, gain);
+			if (p < 0)
+				return std::string("no such sample");
+			char buf[120];
+			std::snprintf(buf, sizeof(buf), done.c_str(), num, p > 0 ? 20.0 * std::log10(p / 32768.0) : -90.0);
+			return std::string(buf);
+		});
+	};
+	const bool busy = m_view.rec_state != 0;
+	ImGui::BeginDisabled(busy || peak <= 0);
+	if (ImGui::Button(UI_TEXT(smp_normalize, "Normalize")))
+		post_gain(32767.0 * std::pow(10.0, -0.5 / 20.0) / double(peak));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 7);
+	ImGui::InputFloat("##gain", &m_gain_db, 1.0f, 6.0f, "%+.1f dB");
+	m_gain_db = std::clamp(m_gain_db, -40.0f, 40.0f);
+	ImGui::SameLine();
+	if (ImGui::Button(UI_TEXT(smp_gain_apply, "Change volume")))
+		post_gain(std::pow(10.0, double(m_gain_db) / 20.0));
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_gain_note, "Rewrites the sample in place. Turning it down and up again loses detail, and turning it up past full scale clips."));
+
+	// 波形。窓の幅の 1 列ごとに、見取り図の最小と最大を縦の線で
+	const ImVec2 p = ImGui::GetCursorScreenPos();
+	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(ImGui::GetContentRegionAvail().y, fs * 3));
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255));
+	const float mid = p.y + sz.y * 0.5f, half = sz.y * 0.5f - 2.0f;
+	dl->AddLine(ImVec2(p.x, mid), ImVec2(p.x + sz.x, mid), IM_COL32(80, 90, 110, 255));
+	const bool have = m_view.wave_number == num && !m_view.wave_hi.empty();
+	if (have) {
+		const int nb = int(m_view.wave_hi.size());
+		const int cols = std::max(1, int(sz.x));
+		for (int x = 0; x < cols; x++) {
+			const int b0 = x * nb / cols, b1 = std::max(b0 + 1, (x + 1) * nb / cols);
+			s16 lo = 0, hi = 0;
+			for (int b = b0; b < b1 && b < nb; b++) {
+				lo = std::min(lo, m_view.wave_lo[size_t(b)]);
+				hi = std::max(hi, m_view.wave_hi[size_t(b)]);
+			}
+			const float y0 = mid - half * float(hi) / 32768.0f, y1 = mid - half * float(lo) / 32768.0f;
+			const bool clip = hi >= 32767 || lo <= -32768;
+			dl->AddLine(ImVec2(p.x + float(x) + 0.5f, y0), ImVec2(p.x + float(x) + 0.5f, std::max(y1, y0 + 1.0f)),
+			            clip ? IM_COL32(235, 80, 70, 255) : IM_COL32(110, 200, 255, 255));
+		}
+	}
+	ImGui::Dummy(sz);
 }
 
 void sampling_editor::assign_pane(bridge &br)

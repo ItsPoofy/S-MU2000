@@ -510,6 +510,12 @@ struct ui_texts {
 	const char *smp_play_hint_fmt;
 	const char *smp_col_peak;
 	const char *smp_silent;
+	const char *smp_wave;
+	const char *smp_wave_pick;
+	const char *smp_normalize;
+	const char *smp_gain_apply;
+	const char *smp_gain_done_fmt;
+	const char *smp_gain_note;
 };
 
 // Each language file defines one of these (never included directly).
