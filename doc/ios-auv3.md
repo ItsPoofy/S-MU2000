@@ -156,6 +156,53 @@ Steps 1–3 are the risky ones and none of them involve the UI toolkit. Doing th
 would be starting on the part where the options are a genuine judgement call, before the
 parts that are simply unknown.
 
+## Milestone: the extension builds for iOS
+
+    make ios-auv3                      # the .appex, no ROMs
+    make ios-auv3 IOS_ROMS=roms        # ROMs baked into S-MU2000AU.appex/Resources/roms
+
+Resulting binary: `Mach-O 64-bit executable arm64`, `LC_BUILD_VERSION platform 2` (iOS),
+`minos 14.0`, `sdk 27.2`, ad-hoc signed, identifier `com.tarboh.smu2000.auv3.au.ios`.
+
+**Zero compile errors.** Every iOS problem encountered was one of two things, and neither
+was "this API does not exist on iOS":
+
+1. **Not included** - the source list, and `src/mu2000.cpp` and the `ui::xgui` PC sources
+   which the macOS rule passes separately.
+2. **Guarded** - three things, in this order of discovery:
+   - `pthread_jit_write_protect_np` is marked unavailable in the iOS SDK.
+     `exec_mem.h` now gates the MAP_JIT write-protection dance on `!TARGET_OS_IPHONE`.
+     iOS has no per-thread toggle, so the pages stay writable. The interpreter path never
+     touches `exec_mem` and is fully working, so this is a compile fix, not a capability
+     loss.
+   - `audio_unit.mm`'s AppKit: `<Cocoa/Cocoa.h>`, `<CoreAudioKit/CoreAudioKit.h>` and
+     `"view_controller.h"`; `requestViewControllerWithCompletionHandler:`; and
+     `supportedViewConfigurations:` (`AUAudioUnitViewConfiguration`). All three behind
+     `#if !TARGET_OS_IPHONE`.
+   - `-framework CoreText`, which `src/ui/font_file.h` needs for the family-name -> file
+     walk that finds the CJK face. The header compiled on iOS; only the link needed it.
+
+**The extension is deliberately no-UI** (`com.apple.AudioUnit`, principal class NSObject -
+see `src/auv3/factory_ios.mm`). Sound is identical either way; only the host's request for
+a view never arrives. That bought a working iOS binary before any UIKit existed. Switching
+back to `com.apple.AudioUnit-UI` means deleting the three guards and adding
+`view_controller_ios` + `panel_uiview`.
+
+**No paid account, so no App Groups.** Free provisioning does not support them, so the
+extension cannot reach the app's files through a shared container. This turned out to cost
+nothing: `engine.cpp` already searches `module_dir()/../Resources/roms`, and that is correct
+for both layouts - macOS puts the binary in `Contents/MacOS`, iOS is flat, so the bundle's
+`Resources` is one level up either way. ROMs are baked in for development; "import ROMs"
+from the app can come later.
+
+### Next: it needs a containing app
+
+A bare `.appex` does not register on iOS - only extensions inside an app are discovered. The
+next step is a deliberately thin host app: embed the `.appex`, let it register, load it,
+pull audio. That also settles the open question of whether an iOS app can host its own
+extension in-process (`doc/ios-auv3.md`, "A design decision worth making deliberately"),
+and it is worth finding out with a 60-line app rather than the full standalone.
+
 ## Open questions for the owner
 
 - Should the iOS app be a *different* UI codebase from the macOS one, or the same? The

@@ -23,11 +23,21 @@
 // 描き出しの中では確保も錠もしない。器は allocateRenderResources で取る。
 
 #import "audio_unit.h"
-#import "view_controller.h"
 
-#import <AVFoundation/AVFoundation.h>
+// The panel is AppKit. iOS builds this extension as com.apple.AudioUnit - principal
+// class NSObject, no view - until there is a UIKit panel (src/auv3/factory_ios.mm,
+// doc/ios-auv3.md), so the whole view path is compiled out rather than ported.
+// Nothing else in this file is AppKit: AUAudioUnit, AUMIDIEventList and AUEventBlock
+// are all there on iOS. Adding the panel means dropping the guard below and adding
+// the UIKit view controller alongside it.
+#import <TargetConditionals.h>
+#if !TARGET_OS_IPHONE
+#import "view_controller.h"
 #import <Cocoa/Cocoa.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#endif
+
+#import <AVFoundation/AVFoundation.h>
 #import <CoreMIDI/CoreMIDI.h>
 
 #include "ui/midi_split.h"
@@ -507,6 +517,7 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 
 // 画面。AUv2・VST3 と同じパネル（view_controller.mm）。拡張の中で動くので
 // engine は直接渡せる（AUv2 の kEngineProperty 回りは要らない）
+#if !TARGET_OS_IPHONE
 - (void)requestViewControllerWithCompletionHandler:(void (^)(NSViewController * __nullable))completionHandler
 {
 	// **view を触るのは主の糸で。** ホストは普通は主の糸からこれを呼ぶが、
@@ -533,7 +544,9 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 			completionHandler(answer);
 	});
 }
+#endif
 
+#if !TARGET_OS_IPHONE
 // 画面の置き方。パネルは決まった大きさ（1400x360）1 枚だけなので、
 // どれを渡されても全部使えると答える
 - (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations
@@ -544,6 +557,7 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 		[s addIndex:i];
 	return s;
 }
+#endif
 
 // The one factory preset, like the AUv2's. Choosing it puts the defaults
 // back; anything else is ignored

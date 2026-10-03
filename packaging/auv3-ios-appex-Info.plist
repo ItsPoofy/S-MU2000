@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for the AUv3 app extension, iOS.
+
+  Same extension as packaging/auv3-appex-Info.plist, with three differences that are
+  forced rather than chosen:
+
+    CFBundleSupportedPlatforms  iPhoneOS instead of MacOSX
+    LSMinimumSystemVersion      dropped; iOS keys this as MinimumOSVersion
+    CFBundleIdentifier          must be the containing app's id with a suffix. iOS
+                                refuses to install an extension whose id is not a
+                                prefix-extension of its app's - installing gave
+                                "Mismatched bundle IDs" with the macOS-style
+                                com.tarboh.smu2000.auv3.au.ios, because the app is
+                                com.tarboh.smu2000.ios
+
+  MinimumOSVersion is 14.0 because the AUv3 speaks MIDI 1.0 UMP - AUMIDIEventList with
+  64-bit words - which arrived in iOS 14. Dropping to 9.3 would only be possible by
+  giving up UMP, and the four virtual MIDI cables the real machine has want it.
+
+  The bundle layout is flat on iOS (PlugIns/S-MU2000AU.appex/S-MU2000AU, no Contents and
+  no MacOS subdirectory), so CFBundleExecutable stays "S-MU2000AU" and the Makefile
+  places it differently.
+
+  The extension kind is com.apple.AudioUnit-UI and the principal class is
+  SMU2000FactoryV3, for the same reason as on macOS: with plain com.apple.AudioUnit the
+  host never asks for a view and it sounds but shows no UI.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>S-MU2000AU</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.tarboh.smu2000.ios.auv3</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>S-MU2000 AUv3</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>14.0</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>AudioComponents</key>
+			<array>
+				<dict>
+					<key>description</key>
+					<string>S-MU2000</string>
+					<key>factoryFunction</key>
+					<string>SMU2000FactoryV3</string>
+					<key>name</key>
+					<string>tarboh: S-MU2000 AUv3</string>
+					<key>manufacturer</key>
+					<string>Trbh</string>
+					<key>type</key>
+					<string>aumu</string>
+					<key>subtype</key>
+					<string>SMU3</string>
+					<key>version</key>
+					<integer>65536</integer>
+					<key>tags</key>
+					<array>
+						<string>Synthesizer</string>
+						<string>MIDI</string>
+					</array>
+				</dict>
+			</array>
+		</dict>
+		<!--
+		  com.apple.AudioUnit, not -UI, for now: principal class is NSObject +
+		  AUAudioUnitFactory (see src/auv3/factory_ios.mm). The extension sounds the
+		  same either way; only the host's request for a view never arrives. That buys a
+		  working iOS plug-in before the UIKit view layer exists. Switch both this line
+		  and the principal class to the AUViewController form once there is a panel.
+		-->
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.AudioUnit</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>SMU2000FactoryV3</string>
+	</dict>
+</dict>
+</plist>

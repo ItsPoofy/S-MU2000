@@ -78,6 +78,13 @@ inline void write_end() {}
 
 #ifdef __APPLE__
 #include <pthread.h>
+#include <TargetConditionals.h>
+// pthread_jit_write_protect_np exists on macOS and is marked unavailable on iOS,
+// so the write-protection dance is macOS-only. MAP_JIT itself is still defined on
+// iOS (it is what a JIT would map), it just has no per-thread toggle to drive.
+#if !TARGET_OS_IPHONE
+#define SMU2000_JIT_WRITE_PROTECT 1
+#endif
 #ifndef MAP_JIT
 #define MAP_JIT 0x800
 #endif
@@ -105,14 +112,19 @@ inline void flush_code(void *, size_t) {}
 // Lift the write protection of MAP_JIT pages for the calling thread, and put
 // it back so the same thread can run the code again. Nothing on other
 // platforms (there it is a plain mmap and the stores are ordinary).
-#ifdef __aarch64__
-#ifdef __APPLE__
+//
+// **iOS has no per-thread JIT write protection.** pthread_jit_write_protect_np
+// is marked unavailable in the iOS SDK, so it cannot be called there at all - the
+// first iOS build failed on exactly this. On macOS arm64 a MAP_JIT region is
+// execute-only to the writing thread until the toggle lifts it; on iOS there is
+// no toggle, so the pages stay writable and the stores are ordinary.
+//
+// That is only a JIT feature. The interpreter path does not use exec_mem at all
+// and is fully working, so iOS builds and runs without the JIT; see
+// doc/ios-auv3.md.
+#if defined(__aarch64__) && defined(__APPLE__) && defined(SMU2000_JIT_WRITE_PROTECT)
 inline void write_begin() { pthread_jit_write_protect_np(0); }
 inline void write_end()   { pthread_jit_write_protect_np(1); }
-#else
-inline void write_begin() {}
-inline void write_end() {}
-#endif
 #else
 inline void write_begin() {}
 inline void write_end() {}

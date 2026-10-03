@@ -1332,3 +1332,185 @@ clean:
 -include $(shell find $(BUILD) -name '*.d' 2>/dev/null)
 
 .PHONY: all clean regen check test test-update vst3 install-vst3 probe clap install-clap vsti install-vsti vsti-probe au install-au au-probe check-au
+
+# ---- iOS AUv3 ----------------------------------------------------------------
+#
+# The AUv3 extension built for iOS. Reuses AUV3_SRCS unchanged - engine, AUv3 core and
+# the shared ImGui panel are already platform-free (doc/ios-auv3.md) - and only replaces
+# the toolchain flags and the bundle layout.
+#
+# Two things are NOT macOS-shaped and are handled here rather than in the sources:
+#
+#   * Bundle layout. macOS is App.app/Contents/PlugIns/X.appex/Contents/MacOS/X.
+#     iOS is flat: App.app/PlugIns/X.appex/X. There is no Contents and no MacOS
+#     subdirectory.
+#   * Toolchain. -isysroot plus -target arm64-apple-ios, and the macOS deployment
+#     target has to be filtered out or clang rejects the combination.
+#
+# The AppKit-only files are excluded (pc_window_mac.mm, window_mac.mm): UIKit versions
+# are step 7, and the extension builds and installs without them.
+# Two SDKs, and they are not interchangeable: iphoneos builds for a device
+# (LC_BUILD_VERSION platform 2), iphonesimulator for the simulator (platform 7).
+# Installing a device build on the simulator fails with "does not contain code for any
+# platform ... this device can run code for iOS-simulator", so each gets its own tree.
+#   make ios-app                                        device
+#   make ios-app IOS_SDK_NAME=iphonesimulator           simulator
+IOS_SDK_NAME ?= iphoneos
+IOS_SDK    := $(shell xcrun --sdk $(IOS_SDK_NAME) --show-sdk-path)
+IOS_MIN    ?= 14.0
+ifeq ($(IOS_SDK_NAME),iphonesimulator)
+IOS_TARGET := arm64-apple-ios$(IOS_MIN)-simulator
+IOS_ROOT   := build-ios/simulator
+else
+IOS_TARGET := arm64-apple-ios$(IOS_MIN)
+IOS_ROOT   := build-ios/device
+endif
+# IOS_DEBUG defaults to 1 and should stay that way until the extension has booted, found its
+# ROMs and produced audio. Without debug info a crash report is a wall of hex offsets
+# (the first launch died with a frame at 0xccc6e4 and no name); with it the same report
+# names UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption immediately.
+#
+# -Og rather than -O0: -O0 is the reflex answer and it is wrong here, because this process
+# emulates a 28 MHz SH2 in a C++ interpreter and an unoptimised interpreter can slow a boot
+# enough to muddy the measurement we are trying to make. -Og keeps the frames and their
+# callers - it does not inline away the function being debugged - and leaves the hot loop
+# largely alone.
+#
+# -Og is the part that matters. Apple's linker discards DWARF from the linked executable
+# (verified: obj-g/src/ios/smoke.o has 10 debug sections, the linked binary has 0, even when
+# linked by hand with -g), so -g buys nothing in the artefact. What it does keep is the symbol
+# table - 91 symbols, 15 of them SmokeDelegate methods - and that is what a crash report uses
+# to symbolicate. -Og is therefore there to stop the optimiser inlining those names away, not
+# to carry debug info. Keep it until this stops crashing; the cost is interpreter speed.
+#
+# The object directory is suffixed because make does not know that a flag changed. Sharing one
+# directory would let a toggle silently link a mixture of -O3 and -Og objects, which is worse
+# than either setting.
+#
+# This block must stay ABOVE the IOS_BUILD assignment: := expands immediately, so a use above
+# the definition yields an empty value and no error. That happened once - IOS_BUILD came out
+# as build-ios/simulator/ with no object subdirectory and IOS_OPTFLAGS was never applied.
+IOS_DEBUG ?= 1
+ifeq ($(IOS_DEBUG),1)
+IOS_OPTFLAGS := -Og -g
+IOS_OBJ      := obj-g
+else
+IOS_OPTFLAGS := -O3
+IOS_OBJ      := obj
+endif
+
+IOS_BUILD  := $(IOS_ROOT)/$(IOS_OBJ)
+IOS_APP    := $(IOS_ROOT)/S-MU2000.app
+IOS_APPEX  := $(IOS_APP)/PlugIns/S-MU2000AU.appex
+IOS_BIN    := $(IOS_APPEX)/S-MU2000AU
+
+# The -mXXX-version-min flag is per-SDK and does not exist for the other one; the
+# -target triple already carries the deployment version, so drop it and let the triple
+# do that job rather than passing a flag the SDK rejects.
+IOS_CXXFLAGS := $(filter-out -mmacosx-version-min=% -O3,$(CXXFLAGS)) $(IOS_OPTFLAGS) \
+                -isysroot $(IOS_SDK) -target $(IOS_TARGET)
+# CoreText is not optional: src/ui/font_file.h walks family name -> font file through
+# CTFontDescriptorCreateWithAttributes / CTFontDescriptorCopyAttribute to find the CJK
+# face. The header compiles on iOS; it is the link that needs the framework.
+IOS_FW := -framework Foundation -framework AudioToolbox -framework AVFoundation \
+          -framework CoreAudio -framework CoreMIDI -framework UIKit -framework Metal \
+          -framework QuartzCore -framework CoreGraphics -framework CoreText
+
+IOS_ENGINE_OBJS := $(SRCS:%.cpp=$(IOS_BUILD)/%.o)
+
+# Deliberately not AUV3_SRCS. That list carries the AppKit view layer -
+# src/auv3/view_controller.{h,mm}, src/vst3/panel_nsview.h and src/vst3/view_mac.mm -
+# which cannot compile for iOS. audio_unit.mm itself is portable (only AUAudioUnit,
+# AUMIDIEventList and AUEventBlock) and is reused unchanged; the factory is the iOS
+# no-UI variant. The view layer is step 7.
+# src/mu2000.cpp is separate because the macOS rule passes it separately too
+# ($(BUILD)/src/mu2000.o): it is the machine's own API - run_sample, lcd_render,
+# native_midi, load_state and the rest - and the engine calls into it directly.
+# The PC-editor sources are the ui::xgui layer the engine also calls; they come from
+# MAC_PC_SRCS with pc_window_mac.mm dropped, since that is AppKit. They are ImGui and
+# shared, which is the point - nothing here is rewritten for iOS.
+IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
+               src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
+               src/ui/master_editor.cpp src/ui/fx_icons.cpp
+
+IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
+                 src/mu2000.cpp \
+                 src/vst3/engine.cpp src/vst3/iids.cpp \
+                 $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
+IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
+
+# ImGui core plus the Metal backend, which is iOS's own GPU API and is already vendored.
+# The PC-editor window (pc_window_mac.mm) is AppKit and is left out.
+IOS_IMGUI_OBJS := $(IMGUI_CORE:%.cpp=$(IOS_BUILD)/%.o) \
+                  $(IOS_BUILD)/$(IMGUI_DIR)/backends/imgui_impl_metal.o
+
+$(IOS_BUILD)/$(IMGUI_DIR)/backends/imgui_impl_metal.o: $(IMGUI_DIR)/backends/imgui_impl_metal.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -c -o $@ $<
+
+$(IOS_BUILD)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(VST3_INC) $(IMGUI_FLAGS) -c -o $@ $<
+
+$(IOS_BUILD)/%.o: %.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(VST3_INC) $(IMGUI_FLAGS) $(AUV3_FLAGS) -ObjC++ -c -o $@ $<
+
+# ROMs baked into the extension. Off by default for the same reason as macOS: the
+# images are Yamaha's and must not travel in anything we hand out. Working without a
+# paid account rules out App Groups, so a local build bakes them instead of importing.
+# engine.cpp already searches module_dir()/../Resources/roms, which lands here on the
+# flat iOS layout.
+#   make ios-auv3                     no ROMs (a build to look at)
+#   make ios-auv3 IOS_ROMS=roms       ROMs baked into S-MU2000AU.appex/Resources/roms
+IOS_ROMS ?=
+
+ios-auv3-roms:
+ifneq ($(strip $(IOS_ROMS)),)
+	@rm -rf $(IOS_APPEX)/Resources/roms
+	@mkdir -p $(IOS_APPEX)/Resources
+	@cp -R $(IOS_ROMS) $(IOS_APPEX)/Resources/roms
+	@echo "ROM を入れた: $(IOS_ROMS) -> $(IOS_APPEX)/Resources/roms"
+endif
+
+$(IOS_BIN): $(IOS_ENGINE_OBJS) $(IOS_AUV3_OBJS) $(IOS_IMGUI_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -o $@ $^ $(IOS_FW) -e _NSExtensionMain -fapplication-extension
+	@cp -f packaging/auv3-ios-appex-Info.plist $(IOS_APPEX)/Info.plist
+	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none \
+	          --entitlements packaging/auv3-ios-appex.entitlements $(IOS_APPEX)
+	@echo "出来た: $(IOS_BIN)"
+
+# The thin host app. iOS only discovers app extensions inside a containing app, so the
+# extension cannot be tested without one. src/ios/smoke.mm renders offline and reports a
+# peak, which needs no audio session, no output route and no hardware - so the same test
+# runs on the simulator and on a device.
+IOS_APP_BIN := $(IOS_APP)/S-MU2000
+
+$(IOS_BUILD)/src/ios/smoke.o: src/ios/smoke.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -c -o $@ $<
+
+$(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -o $@ $(IOS_BUILD)/src/ios/smoke.o $(IOS_FW)
+	@cp -f packaging/ios-app-Info.plist $(IOS_APP)/Info.plist
+	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP)
+	@echo " beetles: $(IOS_APP)"
+
+# Simulator first: no signing, no certificate, no device.
+#   make ios-app IOS_SDK_NAME=iphonesimulator
+#   xcrun simctl boot "iPhone 18 Pro"
+#   xcrun simctl install booted build-ios/simulator/S-MU2000.app
+#   xcrun simctl spawn booted log stream --predicate 'process == "S-MU2000"'
+#   xcrun simctl launch booted com.tarboh.smu2000
+ios-app: $(IOS_APP_BIN) ios-auv3-roms
+
+.PHONY: ios-app
+
+ios-auv3: $(IOS_BIN) ios-auv3-roms
+	@echo "iOS 拡張: $(IOS_APPEX)"
+	@echo "これを .app に入れて起動すれば登録される（ROM は app group に置く）"
+
+.PHONY: ios-auv3
