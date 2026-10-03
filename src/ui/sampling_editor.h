@@ -31,7 +31,7 @@ public:
 	{
 		return get_lang() == lang::ja ? L"S-MU2000 サンプリング" : L"S-MU2000 Sampling";
 	}
-	int default_width() const override  { return 760; }
+	int default_width() const override  { return 1040; }
 	int default_height() const override { return 800; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
 
@@ -60,6 +60,17 @@ private:
 	u32 m_start = 0, m_end = 0;
 	bool m_loop_on = false;
 	u32 m_loop_at = 0;
+	// つなぎ目の道具。m_snap はゼロクロスに吸い付ける、m_xfade_ms はクロスフェードの長さ
+	bool m_snap = true;
+	int m_xfade_ms = 20;
+	// 表へ書いた後の S・E・L（音源の側でそろえた値。吸い付けや E を合わせるで動いたものを窓へ戻す）
+	struct points_result
+	{
+		std::atomic<bool> done{ false };
+		int number = 0;
+		u32 from = 0, to = 0, loop_from = 0;
+	};
+	std::shared_ptr<points_result> m_points;
 	double m_view0 = 0.0, m_view1 = 0.0;
 	int m_drag = 0;
 	int m_trim_for = 0;

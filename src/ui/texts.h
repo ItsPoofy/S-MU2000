@@ -535,6 +535,15 @@ struct ui_texts {
 	const char *smp_loop_tip;
 	const char *smp_loop_at;
 	const char *smp_trim_note;
+	const char *smp_snap;
+	const char *smp_snap_tip;
+	const char *smp_match;
+	const char *smp_match_tip;
+	const char *smp_match_done_fmt;
+	const char *smp_xfade;
+	const char *smp_xfade_tip;
+	const char *smp_xfade_done_fmt;
+	const char *smp_xfade_fail;
 	const char *smp_env;
 	const char *smp_env_tip;
 	const char *smp_env_attack;

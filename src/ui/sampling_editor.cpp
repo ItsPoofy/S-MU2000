@@ -109,20 +109,24 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		import_wav(opened, br);
 
 	const float fs = ImGui::GetFontSize();
-	const float left_w = std::min(fs * 24.0f, ImGui::GetContentRegionAvail().x * 0.5f);
-	if (ImGui::BeginChild("left", ImVec2(left_w, 0), ImGuiChildFlags_Borders)) {
-		input_pane(br);
-		ImGui::Separator();
-		record_pane(br);
+	const float left_w = std::min(fs * 22.0f, ImGui::GetContentRegionAvail().x * 0.4f);
+	// 左は入力・録音とサンプルの一覧（残りの高さを全部）、右は波形と音色への割り当て
+	if (ImGui::BeginChild("left", ImVec2(left_w, 0))) {
+		if (ImGui::BeginChild("inrec", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY)) {
+			input_pane(br);
+			ImGui::Separator();
+			record_pane(br);
+		}
+		ImGui::EndChild();
+		if (ImGui::BeginChild("samples", ImVec2(0, 0), ImGuiChildFlags_Borders))
+			samples_pane();
+		ImGui::EndChild();
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
-		const float h = ImGui::GetContentRegionAvail().y * 0.28f;
-		if (ImGui::BeginChild("samples", ImVec2(0, h), ImGuiChildFlags_Borders))
-			samples_pane();
-		ImGui::EndChild();
-		if (ImGui::BeginChild("wave", ImVec2(0, h * 1.15f), ImGuiChildFlags_Borders))
+		const float h = ImGui::GetContentRegionAvail().y * 0.5f;
+		if (ImGui::BeginChild("wave", ImVec2(0, h), ImGuiChildFlags_Borders))
 			wave_pane(br);
 		ImGui::EndChild();
 		if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
@@ -363,13 +367,49 @@ void sampling_editor::wave_pane(bridge &br)
 		if (moved == 4 && m_loop_at < m_start)
 			m_start = m_loop_at;
 	};
-	// 鳴らす所は変えたらすぐ表へ（波形は切らない）
-	auto post_points = [&]() {
+	// 音源の側でそろえた S・E・L が届いたら窓へ（吸い付けや E を合わせるで動いた分）
+	if (m_points && m_points->done.load(std::memory_order_acquire)) {
+		if (m_points->number == num && !m_drag) {
+			m_start = m_points->from;
+			m_end = m_points->to;
+			m_loop_at = m_points->loop_from;
+		}
+		m_points.reset();
+	}
+	// 鳴らす所は変えたらすぐ表へ（波形は切らない）。moved は今動かしたもの（1 = S、2 = E、4 = L、8 = E を合わせる）。
+	// 吸い付けが入っていれば、動かしたものを近くのゼロクロスへ寄せてから書く
+	auto post_points = [&](int moved = 0) {
 		const u32 f0 = m_start, f1 = m_end, at = m_loop_at;
-		const bool on = m_loop_on;
-		br.post([num, f0, f1, on, at](mu2000 &mu) {
-			mu.sampling_points(num, f0, f1, on, at);
-			return std::string();
+		const bool on = m_loop_on, snap = m_snap;
+		auto res = std::make_shared<points_result>();
+		res->number = num;
+		m_points = res;
+		std::string matched = UI_TEXT(smp_match_done_fmt, "End moved to %u (%+d)");
+		br.post([num, f0, f1, on, at, snap, moved, res, matched](mu2000 &mu) {
+			u32 s = f0, e = f1, l = at, o = 0;
+			const u32 range = sp::SAMPLE_RATE / 100;   // 10ms 以内
+			std::string msg;
+			if (moved == 8 && mu.sampling_match_end(num, l, e, sp::SAMPLE_RATE / 20, o)) {
+				char buf[80];
+				std::snprintf(buf, sizeof(buf), matched.c_str(), o, int(o) - int(e));
+				msg = buf;
+				e = o;
+			}
+			if (snap && moved == 1 && mu.sampling_snap(num, s, false, range, o))
+				s = o;
+			if (snap && moved == 2 && mu.sampling_snap(num, e, false, range, o))
+				e = o;
+			if (snap && moved == 4 && mu.sampling_snap(num, l, true, range, o))
+				l = o;
+			mu.sampling_points(num, s, e, on, l);
+			for (const sp::sample &x : mu.sampling_list())
+				if (x.number == num) {
+					res->from = x.play_from;
+					res->to = x.play_to;
+					res->loop_from = x.loop_from;
+				}
+			res->done.store(true, std::memory_order_release);
+			return msg;
 		});
 	};
 	// 表示の範囲。いちばん細かくて 32 サンプル
@@ -507,6 +547,40 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::SameLine();
 	ImGui::Text("%.3f s", double(m_loop_at) / rate);
 	ImGui::EndDisabled();
+
+	// ---- つなぎ目の道具
+	ImGui::Checkbox(UI_TEXT(smp_snap, "Snap to zero crossings"), &m_snap);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_snap_tip, "When a line is placed with the mouse, move it to the nearest point (within 10 ms) where the wave crosses zero going up. Typed numbers are kept as they are."));
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!m_loop_on);
+	if (ImGui::Button(UI_TEXT(smp_match, "Match end to loop")))
+		post_points(8);
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_match_tip, "Moves the end point (within 50 ms) to where the wave looks most like the wave around the loop point, so the jump back is smooth. Works best on a steady, pitched part."));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 6);
+	ImGui::InputInt("##xfade", &m_xfade_ms, 5, 20);
+	m_xfade_ms = std::clamp(m_xfade_ms, 1, 500);
+	ImGui::SameLine(0, 2);
+	ImGui::TextUnformatted("ms");
+	ImGui::SameLine();
+	if (ImGui::Button(UI_TEXT(smp_xfade, "Crossfade"))) {
+		const u32 l = m_loop_at, e = m_end, len = u32(m_xfade_ms) * sp::SAMPLE_RATE / 1000;
+		std::string done_x = UI_TEXT(smp_xfade_done_fmt, "Sample %03d: crossfaded %.0f ms before the end");
+		std::string fail_x = UI_TEXT(smp_xfade_fail, "Nothing to crossfade: the loop point needs sound before it");
+		br.post([num, l, e, len, done_x, fail_x](mu2000 &mu) {
+			const u32 use = std::min({ len, l, e > l ? e - l : 0u });
+			if (!mu.sampling_crossfade(num, l, e, len))
+				return fail_x;
+			char buf[120];
+			std::snprintf(buf, sizeof(buf), done_x.c_str(), num, double(use) * 1000.0 / sp::SAMPLE_RATE);
+			return std::string(buf);
+		});
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_xfade_tip, "Blends the sound just before the end into the sound just before the loop point, so the loop has no jump in level or tone. This rewrites the sample and cannot be undone. Needs that much sound before the loop point."));
+	ImGui::EndDisabled();
 	ImGui::EndDisabled();
 
 	// ---- 試聴。始点から終点まで（音源を通さない生の音）。ループが入っていれば止めるまでくり返す
@@ -609,8 +683,9 @@ void sampling_editor::wave_pane(bridge &br)
 			}
 		}
 		// S・E・L は放したときに表へ
+		// 吸い付けはマウスで置いたときだけ（数の +/- は 1 サンプルずつ動かせるように）
 		if (ImGui::IsItemDeactivated() && (m_drag == 1 || m_drag == 2 || m_drag == 4))
-			post_points();
+			post_points(m_drag);
 		if (!ImGui::IsItemActive())
 			m_drag = 0;
 	}
@@ -701,7 +776,7 @@ void sampling_editor::assign_pane(bridge &br)
 {
 	heading(UI_TEXT(smp_assign, "Voice assignment"));
 	const float fs = ImGui::GetFontSize();
-	const float lab = fs * 7.5f;
+	const float lab = fs * 10.0f;   // 「レベル 2（サステイン）」が入る幅
 
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted("Bank#");
@@ -809,13 +884,28 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::SliderInt("##fine", &m_fine, -64, 63, "%+d"))
 		m_dirty = true;
 
-	// エンベロープ。速さは大きいほど速く 0 は動かない、レベルは 127 が最大。左に形の目安、右に値
+	// エンベロープ。速さは大きいほど速く 0 は動かない、レベルは 127 が最大。値の下に形の目安
 	ImGui::Spacing();
 	ImGui::TextDisabled("%s", UI_TEXT(smp_env, "Envelope"));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", UI_TEXT(smp_env_tip, "Rates run 0-63 (higher is faster, 0 stays put); levels 0-127. A key goes up at the attack rate, falls at decay 1 to level 1, then at decay 2 to level 2 and stays there while held (with the loop on, the sound keeps going). Release fades it out after the key is let go."));
 	{
-		const float gw = fs * 9, gh = ImGui::GetFrameHeightWithSpacing() * 6 - ImGui::GetStyle().ItemSpacing.y;
+		auto rate = [&](const char *name, const char *id, int &v, int max) {
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(name);
+			ImGui::SameLine(lab);
+			ImGui::SetNextItemWidth(-1);
+			if (ImGui::SliderInt(id, &v, 0, max))
+				m_dirty = true;
+		};
+		rate(UI_TEXT(smp_env_attack, "Attack"), "##ar", m_attack, 63);
+		rate(UI_TEXT(smp_env_decay1, "Decay 1"), "##d1r", m_decay1, 63);
+		rate(UI_TEXT(smp_env_level1, "Level 1"), "##d1l", m_level1, 127);
+		rate(UI_TEXT(smp_env_decay2, "Decay 2"), "##d2r", m_decay2, 63);
+		rate(UI_TEXT(smp_env_level2, "Level 2 (sustain)"), "##d2l", m_level2, 127);
+		rate(UI_TEXT(smp_env_release, "Release"), "##rr", m_release, 63);
+
+		const float gw = ImGui::GetContentRegionAvail().x, gh = fs * 4;
 		const ImVec2 g0 = ImGui::GetCursorScreenPos();
 		ImGui::Dummy(ImVec2(gw, gh));
 		ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -844,24 +934,6 @@ void sampling_editor::assign_pane(bridge &br)
 		pts.push_back(ImVec2(x, m_release ? bot : bot - hh * peak * l2));
 		dl->AddPolyline(pts.data(), int(pts.size()), IM_COL32(110, 200, 255, 255), 0, 2.0f);
 		dl->AddLine(ImVec2(xoff, g0.y), ImVec2(xoff, g0.y + gh), IM_COL32(255, 210, 90, 160));
-		ImGui::SameLine();
-		ImGui::BeginGroup();
-		const float lab2 = fs * 8;
-		auto rate = [&](const char *name, const char *id, int &v, int max) {
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(name);
-			ImGui::SameLine(lab2);   // BeginGroup の中ではまとまりの左端から
-			ImGui::SetNextItemWidth(-1);
-			if (ImGui::SliderInt(id, &v, 0, max))
-				m_dirty = true;
-		};
-		rate(UI_TEXT(smp_env_attack, "Attack"), "##ar", m_attack, 63);
-		rate(UI_TEXT(smp_env_decay1, "Decay 1"), "##d1r", m_decay1, 63);
-		rate(UI_TEXT(smp_env_level1, "Level 1"), "##d1l", m_level1, 127);
-		rate(UI_TEXT(smp_env_decay2, "Decay 2"), "##d2r", m_decay2, 63);
-		rate(UI_TEXT(smp_env_level2, "Level 2 (sustain)"), "##d2l", m_level2, 127);
-		rate(UI_TEXT(smp_env_release, "Release"), "##rr", m_release, 63);
-		ImGui::EndGroup();
 	}
 
 	ImGui::Spacing();

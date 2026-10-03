@@ -213,6 +213,118 @@ bool mu2000::sampling_points(int number, u32 from, u32 to, bool on, u32 loop_fro
 	return false;
 }
 
+namespace {
+
+// サンプリング RAM のサンプル s の頭から i 番目
+s16 pcm_at(const std::vector<u8> &ram, const sp::sample &s, u32 i)
+{
+	const size_t o = (size_t(s.start) * 2 + i) * 2;
+	return o + 1 < ram.size() ? s16(ram[o] | ram[o + 1] << 8) : 0;
+}
+
+void pcm_put(std::vector<u8> &ram, const sp::sample &s, u32 i, long v)
+{
+	const size_t o = (size_t(s.start) * 2 + i) * 2;
+	if (o + 1 >= ram.size())
+		return;
+	const s16 w = s16(std::clamp(v, -32768L, 32767L));
+	ram[o] = u8(w);
+	ram[o + 1] = u8(u16(w) >> 8);
+}
+
+} // namespace
+
+bool mu2000::sampling_snap(int number, u32 at, bool even, u32 range, u32 &out) const
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		const u32 n = s.frames();
+		// i の直前が負で i が 0 以上（下から上へ横切る）所のうち、at にいちばん近いもの
+		auto rising = [&](u32 i) { return i > 0 && i < n && pcm_at(m_sampram, s, i - 1) < 0 && pcm_at(m_sampram, s, i) >= 0; };
+		for (u32 d = 0; d <= range; d++) {
+			for (int sgn : { -1, 1 }) {
+				if (d == 0 && sgn > 0)
+					continue;
+				const long i = long(at) + sgn * long(d);
+				if (i <= 0 || i >= long(n) || (even && (i & 1)))
+					continue;
+				// 偶数に限るときは、その 1 つ前で横切っていてもよい（ループの頭は語の境にしか置けない）
+				if (rising(u32(i)) || (even && rising(u32(i) + 1))) {
+					out = u32(i);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+bool mu2000::sampling_match_end(int number, u32 loop_from, u32 near, u32 range, u32 &out) const
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		const u32 n = s.frames();
+		// E のまわり [E - W, E + W) が L のまわり [L - W, L + W) と同じ形なら、E から L へ戻ってもつながる。
+		// 差の 2 乗の和を両方の大きさで割ったものがいちばん小さい E（E の後ろが無ければ前の半分だけで比べる）
+		const long W = 256;
+		const long lo = std::max<long>(long(loop_from) + 64, long(near) - long(range));
+		const long hi = std::min<long>(long(n), long(near) + long(range));
+		double best = 1e30;
+		long best_e = -1;
+		for (long e = lo; e <= hi; e++) {
+			double diff = 0, energy = 0;
+			for (long k = -W; k < W; k++) {
+				const long a = long(loop_from) + k, b = e + k;
+				if (a < 0 || b < 0 || b >= long(n) || a >= e)
+					continue;
+				const double x = pcm_at(m_sampram, s, u32(a)), y = pcm_at(m_sampram, s, u32(b));
+				diff += (x - y) * (x - y);
+				energy += x * x + y * y;
+			}
+			if (energy <= 0)
+				continue;
+			const double score = diff / energy;
+			if (score < best) {
+				best = score;
+				best_e = e;
+			}
+		}
+		if (best_e < 0)
+			return false;
+		out = u32(best_e);
+		return true;
+	}
+	return false;
+}
+
+bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len)
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		const u32 n = s.frames();
+		to = std::min(to ? to : n, n);
+		// E の手前 len を、L の手前 len と少しずつ混ぜる。終わりで L の手前とそろうので、E から L へなめらかにつながる
+		len = std::min({ len, loop_from, to > loop_from ? to - loop_from : 0u });
+		if (len < 2)
+			return false;
+		const double PI = 3.14159265358979323846;
+		for (u32 k = 0; k < len; k++) {
+			const double w = 0.5 - 0.5 * std::cos(PI * double(k + 1) / double(len));
+			const double a = pcm_at(m_sampram, s, to - len + k), b = pcm_at(m_sampram, s, loop_from - len + k);
+			pcm_put(m_sampram, s, to - len + k, std::lround(a * (1 - w) + b * w));
+		}
+		// 鳴らすときに E の少し先まで読むことがあるので、E の後ろ（鳴らさない所）を L の後ろと同じに
+		for (u32 k = 0; k < 4 && to + k < n; k++)
+			pcm_put(m_sampram, s, to + k, pcm_at(m_sampram, s, loop_from + k));
+		return true;
+	}
+	return false;
+}
+
 bool mu2000::sampling_bounds(int number, double ratio, u32 &from, u32 &to) const
 {
 	for (const sp::sample &s : sampling_list()) {

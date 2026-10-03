@@ -716,6 +716,45 @@ int main(int argc, char **argv)
 			      std::to_string(q440) + " 660 " + std::to_string(q660));
 			k.mu.sampling_points(n5, 0, 0, true, at - 1000);
 
+			// つなぎ目の道具。だんだん小さくなる 440Hz（1 周期 100.227 サンプル）で
+			{
+				std::vector<s16> dec(RATE / 2);
+				for (size_t i = 0; i < dec.size(); i++)
+					dec[i] = s16(std::lround(16000.0 * (1.0 - 0.8 * double(i) / double(dec.size())) *
+					                         std::sin(2 * PI * 440.0 * double(i) / RATE)));
+				const int n7 = k.mu.sampling_add(dec.data(), dec.size(), "decay", err);
+				sp::sample s7;
+				for (const sp::sample &x : k.mu.sampling_list())
+					if (x.number == n7)
+						s7 = x;
+				auto raw = [&](u32 i) {
+					const size_t o = (size_t(s7.start) * 2 + i) * 2;
+					return int(s16(k.mu.sample_ram()[o] | k.mu.sample_ram()[o + 1] << 8));
+				};
+				// ゼロクロス: 1000 の近くで下から上へ横切る所（周期の 10 倍 1002.3 のあたり）。偶数に限ると偶数
+				u32 z = 0, ze = 0;
+				const bool zok = k.mu.sampling_snap(n7, 1000, false, 441, z) && k.mu.sampling_snap(n7, 1000, true, 441, ze);
+				check(zok && raw(z - 1) < 0 && raw(z) >= 0 && z > 990 && z < 1010 && !(ze & 1) && ze + 2 >= z && ze <= z,
+				      "つなぎ目: ゼロクロスに吸い付ける", std::to_string(z) + "・偶数 " + std::to_string(ze));
+				// 終点をループに合わせる: L = 2000 から、E - L が周期の整数倍に近い所
+				u32 e = 0;
+				const bool mok = k.mu.sampling_match_end(n7, 2000, 9000, RATE / 20, e);
+				const double periods = double(e - 2000) * 440.0 / RATE;
+				check(mok && std::fabs(periods - std::round(periods)) < 0.02,
+				      "つなぎ目: 終点をループに合わせる", std::to_string(e) + "（" + std::to_string(periods) + " 周期）");
+				// クロスフェード: 終点の手前が、ループの頭の手前と同じ形になる
+				std::vector<int> before_l;
+				for (u32 i = 0; i < 16; i++)
+					before_l.push_back(raw(6000 - 16 + i));
+				const int mid_before = raw(18000 - 1000);
+				const bool xok = k.mu.sampling_crossfade(n7, 6000, 18000, 2000);
+				int worst = 0;
+				for (u32 i = 0; i < 16; i++)
+					worst = std::max(worst, std::abs(raw(18000 - 16 + i) - before_l[i]));
+				check(xok && worst <= 300 && raw(18000 - 1000) != mid_before,
+				      "つなぎ目: クロスフェード", "終点の手前とループの頭の手前の差 " + std::to_string(worst));
+			}
+
 			// エンベロープ（ループの入った PGM003 で）。押して 0.8 秒あとと離して 0.15 秒あとの大きさを、既定と比べる
 			auto env = [&](double &held, double &after, double &first) {
 				for (u8 b : pc3)

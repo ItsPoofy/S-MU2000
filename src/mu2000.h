@@ -307,6 +307,13 @@ public:
 	bool sampling_points(int number, u32 from, u32 to, bool on, u32 loop_from);
 	// 鳴り始め・鳴り終わりはそのままでループだけ
 	bool sampling_loop(int number, bool on, u32 loop_from);
+	// ループのつなぎ目を整える道具。
+	// snap: at から range 以内で、波形が下から上へ 0 を横切るいちばん近い所（even なら偶数の位置）
+	bool sampling_snap(int number, u32 at, bool even, u32 range, u32 &out) const;
+	// match_end: near から range 以内で、まわりの形が loop_from のまわりといちばん似ている鳴り終わり
+	bool sampling_match_end(int number, u32 loop_from, u32 near, u32 range, u32 &out) const;
+	// crossfade: to の手前 len を loop_from の手前 len と混ぜて書き換える（元に戻せない）
+	bool sampling_crossfade(int number, u32 loop_from, u32 to, u32 len);
 	// 前後の無音を除いた範囲 [from, to)。最大の絶対値の ratio 倍以上になる最初と最後（無音なら false）
 	bool sampling_bounds(int number, double ratio, u32 &from, u32 &to) const;
 	// 見取り図: 波形の [from, to)（0, 0 なら全体）を buckets 個に分けた、それぞれの最小と最大。
