@@ -10,10 +10,14 @@
 // REC の InputSrc（AD2 / AD1+2）で録るものが変わるかを見る。
 // 食い違えば 1 を返す。
 #include "mu2000.h"
+#include "ui/bridge.h"
+#include "ui/driver.h"
+#include "wav_in.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -342,6 +346,515 @@ int main(int argc, char **argv)
 	g.press(B::enter);
 	g.sine_amp = 0;
 	g.pump(300);
+
+	// パネルを通さない道（src/sampling.cpp）。新しい機械で、A/D INPUT から直に録って firmware の表に足し、
+	// 音色に割り当てる。firmware がそれを自分のサンプルとして扱う（一覧・試聴・REC の続き・音色として鳴る）かを見る
+	{
+		namespace sp = smu2000::sampling;
+		static rig k;
+		if (!k.mu.load_program(dir + "/mu2000_flash.bin") || !k.mu.load_wave(dir + "/dump")) {
+			std::fprintf(stderr, "%s\n", k.mu.error().c_str());
+			return 1;
+		}
+		k.verbose = g.verbose;
+		k.mu.load_sintab(dir + "/standin/sin-table.bin");
+		k.mu.reset();
+		for (u32 i = 0; i < 30 * RATE && !k.mu.midi_ready(); i += RATE / 100)
+			k.pump(10);
+		k.pump(1500);
+		auto check = [&](bool ok, const char *what, const std::string &detail) {
+			std::printf("%s %-28s %s\n", ok ? "合" : "NG", what, detail.c_str());
+			if (!ok)
+				bad++;
+		};
+
+		// 引き金つきで録る。300ms は無音なので待ち、正弦が来てから録り始める
+		k.mu.rec_start(sp::source::ad1, 4000, 10 * RATE);
+		k.pump(300);
+		const bool waited = k.mu.rec_state() == 1 && k.mu.rec_frames() == 0;
+		k.sine_amp = 12000;
+		k.pump(1000);
+		k.sine_amp = 0;
+		std::vector<s16> pcm = k.mu.rec_take();
+		check(waited && pcm.size() > RATE * 9 / 10 && pcm.size() < RATE * 11 / 10 && std::abs(pcm[0]) >= 4000,
+		      "直の録音: 引き金を待って録る", std::to_string(pcm.size()) + " サンプル、頭 " + std::to_string(pcm[0]));
+		std::string err;
+		const int n = k.mu.sampling_add(pcm.data(), pcm.size(), "", err);
+		const auto list = k.mu.sampling_list();
+		check(n == 1 && list.size() == 1 && list[0].name == "take001" && list[0].frames() >= pcm.size(),
+		      "直の録音: firmware の表に足す", err.empty() ? (list.empty() ? std::string() : list[0].name) : err);
+
+		// firmware の SAMPLE の画面に出て、試聴が 440Hz
+		k.press(B::sampling_mode);
+		k.press(B::enter);
+		k.press(B::enter);
+		check(k.lcd().find("SMPL001 take001") != std::string::npos, "直の録音: SAMPLE の画面に出る", k.lcd());
+		k.out.clear();
+		k.collect = true;
+		k.mu.set_button(B::audition, true);
+		k.pump(800);
+		k.mu.set_button(B::audition, false);
+		k.collect = false;
+		check(tone(k.out, 440) > 0.005 && tone(k.out, 440) > 10 * tone(k.out, 660),
+		      "直の録音: 試聴が 440Hz", std::to_string(tone(k.out, 440)));
+
+		// 続けてパネルで録ると、空きの続き（直に足したものの後ろ）に 2 つ目ができる
+		k.press(B::exit);
+		k.press(B::exit);
+		for (int i = 0; i < 3; i++)
+			k.press(B::select_right);
+		k.press(B::enter);
+		check(k.lcd().find("Sp=002") != std::string::npos, "直の録音: REC は Sp=002 から", k.lcd());
+		k.sine_amp = 12000;
+		k.pump(200);
+		k.press(B::enter);
+		k.pump(600);
+		k.press(B::enter);
+		k.sine_amp = 0;
+		k.pump(300);
+		k.press(B::exit);
+		k.press(B::enter);                  // Keep Sample 002?
+		k.press(B::exit);
+		k.press(B::exit);
+		const auto list2 = k.mu.sampling_list();
+		check(list2.size() == 2 && list2[1].start == list2[0].end,
+		      "直の録音: パネルの録音がその後ろに続く",
+		      list2.size() == 2 ? std::to_string(list2[0].end) + " / " + std::to_string(list2[1].start) : std::string());
+
+		// 音色に割り当てて、バンク 16 の PGM001 で鳴らす
+		sp::voice v;
+		v.assigned = true;
+		v.sample = 1;
+		v.name = "Direct";
+		v.level = 127;
+		v.pan = 7;
+		const bool set = k.mu.sampling_set_voice(0, v, err);
+		sp::voice back;
+		k.mu.sampling_voice(0, back);
+		check(set && back.assigned && back.sample == 1 && back.name == "Direct", "直の割り当て: 読み戻せる", back.name);
+		// 名前の余りは空白（0 だと LCD が CGRAM の字を出す）。名前の欄は 8 文字で、その後ろは触らない
+		{
+			const auto &d = k.mu.dram();
+			const u32 o = sp::TAB_VOICE - 0x1000000;
+			const std::string raw(reinterpret_cast<const char *>(&d[o + 2]), 10);
+			check(raw == std::string("Direct  ") + std::string(2, '\0'), "直の割り当て: 名前は 8 文字・空白埋め", raw.substr(0, 8));
+		}
+		k.press(B::play);
+		const u8 pc[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x00 };
+		for (u8 b : pc)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+		check(k.lcd().find("Direct") != std::string::npos, "直の割り当て: 音色の名前が出る", k.lcd());
+		k.out.clear();
+		k.collect = true;
+		const u8 on[] = { 0x90, 0x3c, 0x64 };
+		for (u8 b : on)
+			k.mu.midi_in(b, 0);
+		k.pump(600);
+		k.collect = false;
+		check(tone(k.out, 440) > 0.005 && tone(k.out, 440) > 10 * tone(k.out, 660),
+		      "直の割り当て: ノート 60 が 440Hz", std::to_string(tone(k.out, 440)));
+		const u8 off[] = { 0x80, 0x3c, 0x40 };
+		for (u8 b : off)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+
+		// 窓の道（bridge::post → driver::sampling_tick）と WAV の取り込み。48kHz・2ch の WAV
+		// （左 660Hz、右 880Hz）を作り、AD2（右）を 44.1kHz に直して足し、PGM002 に割り当てて鳴らす
+		std::vector<u8> wav;
+		{
+			const u32 rate = 48000, frames = rate / 2;
+			auto put32 = [&](u32 v) { for (int i = 0; i < 4; i++) wav.push_back(u8(v >> (8 * i))); };
+			auto put16 = [&](u32 v) { wav.push_back(u8(v)); wav.push_back(u8(v >> 8)); };
+			wav.insert(wav.end(), { 'R', 'I', 'F', 'F' });
+			put32(36 + frames * 4);
+			wav.insert(wav.end(), { 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ' });
+			put32(16); put16(1); put16(2); put32(rate); put32(rate * 4); put16(4); put16(16);
+			wav.insert(wav.end(), { 'd', 'a', 't', 'a' });
+			put32(frames * 4);
+			for (u32 i = 0; i < frames; i++) {
+				put16(u16(s16(std::lround(12000 * std::sin(2 * PI * 660.0 * i / rate)))));
+				put16(u16(s16(std::lround(12000 * std::sin(2 * PI * 880.0 * i / rate)))));
+			}
+		}
+		smu2000::wav_data w;
+		const bool parsed = smu2000::parse_wav(wav, w, err);
+		const std::vector<s16> right = smu2000::wav_for_sampling(w, sp::source::ad2, RATE * 10);
+		std::vector<double> rd(right.begin(), right.end());
+		check(parsed && right.size() > RATE / 2 - 10 && right.size() <= RATE / 2 &&
+		      tone(rd, 880) > 10 * tone(rd, 660),
+		      "WAV: 48kHz の右を 44.1kHz に", std::to_string(right.size()) + " サンプル");
+		ui::bridge br;
+		ui::driver drv;
+		auto pcm2 = std::make_shared<std::vector<s16>>(right);
+		br.post([pcm2](mu2000 &mu) {
+			std::string e;
+			const int num = mu.sampling_add(pcm2->data(), pcm2->size(), "wav880", e);
+			return num ? "added " + std::to_string(num) : e;
+		});
+		sp::voice v2;
+		v2.assigned = true;
+		v2.sample = 3;
+		v2.name = "Wav880";
+		br.post([v2](mu2000 &mu) {
+			std::string e;
+			return mu.sampling_set_voice(1, v2, e) ? std::string("voice") : e;
+		});
+		drv.pump_midi(k.mu, br);
+		ui::bridge::sampling_view view;
+		br.get_sampling(view);
+		check(view.samples.size() == 3 && view.samples[2].name == "wav880" && view.voices[1].name == "Wav880" &&
+		      view.message == "voice",
+		      "窓の道: 仕事を渡して表を読む", view.message);
+		// 写しの入れ物は bridge と driver で入れ替えて使う。何度受け取っても、結果の一言は最後の仕事のまま
+		// （入れ物に置いていたときは、新しい一言と古い一言が交互に届いた）
+		bool steady = true;
+		for (int i = 0; i < 40; i++) {
+			drv.pump_midi(k.mu, br);
+			br.get_sampling(view);
+			steady = steady && view.message == "voice";
+		}
+		check(steady, "窓の道: 結果の一言が行き来しない", view.message);
+
+		// 音量を変える（サンプル 1 は振幅 12000 の正弦）。2 倍で 24000 前後、もう 2 倍で 16bit の上限で止まる。
+		// 見取り図（request_overview）も変えた後の波形になる
+		const int before = k.mu.sampling_peak(k.mu.sampling_list()[0]);
+		const int doubled = k.mu.sampling_gain(1, 2.0);
+		const int clipped = k.mu.sampling_gain(1, 2.0);
+		br.request_overview(1);
+		drv.pump_midi(k.mu, br);
+		br.get_sampling(view);
+		s16 wmax = 0;
+		for (s16 v : view.wave_hi)
+			wmax = std::max(wmax, v);
+		// 負の側は -32768 で止まるので、最大の絶対値は 32768 になりうる
+		check(std::abs(doubled - 2 * before) <= 2 && clipped >= 32767 && view.wave_number == 1 &&
+		      int(view.wave_hi.size()) == ui::bridge::WAVE_BUCKETS && wmax == 32767,
+		      "音量を変える・見取り図",
+		      std::to_string(before) + " → " + std::to_string(doubled) + " → " + std::to_string(clipped) +
+		      "、見取り図の最大 " + std::to_string(wmax));
+
+		// 拡大した部分（request_detail）。狭い範囲なら 1 サンプルに 1 つで、波形そのもの
+		{
+			br.request_detail(2, 1, 3000, 3100);
+			drv.pump_midi(k.mu, br);
+			br.get_sampling(view);
+			const auto &d = view.details[2];
+			const sp::sample s1 = k.mu.sampling_list()[0];
+			bool same = d.number == 1 && d.from == 3000 && d.to == 3100 && d.lo.size() == 100;
+			for (size_t i = 0; same && i < d.lo.size(); i++) {
+				const size_t o = (size_t(s1.start) * 2 + 3000 + i) * 2;
+				same = d.lo[i] == d.hi[i] && d.lo[i] == s16(k.mu.sample_ram()[o] | k.mu.sample_ram()[o + 1] << 8);
+			}
+			check(same, "窓の道: 拡大した部分の波形", std::to_string(d.lo.size()) + " 点");
+			br.request_detail(2, 0, 0, 0);
+		}
+
+		// トリム。サンプル 1 の [1000, 1000 + 0.25 秒) だけを残す。後ろのサンプル 2・3 は前へ詰まり、空きが増える。
+		// サンプル 3 を使う PGM002 は、この後の確認で 880Hz のまま鳴る
+		{
+			const auto l0 = k.mu.sampling_list();
+			const u32 free0 = k.mu.sampling_free_frames();
+			const u32 keep = RATE / 4;
+			const bool ok = k.mu.sampling_trim(1, 1000, 1000 + keep, err);
+			const auto l1 = k.mu.sampling_list();
+			const u32 freed = l0[0].end - l1[0].end;
+			check(ok && l1.size() == 3 && l1[0].frames() == (keep + 1) / 2 * 2 && l1[1].start == l1[0].end &&
+			      l1[2].start == l1[1].end && l1[2].frames() == l0[2].frames() &&
+			      k.mu.sampling_free_frames() == free0 + freed * 2,
+			      "トリム: 残して後ろを詰める",
+			      std::to_string(l0[0].frames()) + " → " + std::to_string(l1[0].frames()) + " フレーム、空き +" +
+			      std::to_string(k.mu.sampling_free_frames() - free0));
+		}
+		// 前後の無音を除いた範囲と、範囲を決めた見取り図（拡大）。無音 2000・正弦 4410・無音 3000 のサンプルを足す
+		{
+			std::vector<s16> pad(2000 + 4410 + 3000, 0);
+			for (int i = 0; i < 4410; i++)
+				pad[size_t(2000 + i)] = s16(std::lround(10000 * std::sin(2 * PI * 440.0 * i / RATE + 0.3)));
+			const int n4 = k.mu.sampling_add(pad.data(), pad.size(), "padded", err);
+			u32 a = 0, b = 0;
+			const bool found = n4 > 0 && k.mu.sampling_bounds(n4, 0.01, a, b);
+			std::vector<s16> lo, hi;
+			u32 fr = 0;
+			k.mu.sampling_overview(n4, ui::bridge::WAVE_BUCKETS, lo, hi, fr, 2000, 2100);
+			bool exact = lo.size() == 100;
+			for (size_t i = 0; exact && i < lo.size(); i++)
+				exact = lo[i] == hi[i] && lo[i] == pad[2000 + i];
+			check(found && a >= 2000 && a < 2010 && b > 6400 && b <= 6410 && exact,
+			      "無音を除いた範囲・拡大した見取り図",
+			      std::to_string(a) + " - " + std::to_string(b) + "、見取り図 " + std::to_string(lo.size()) + " 点");
+		}
+		const u8 pc2[] = { 0xc0, 0x01 };
+		for (u8 b : pc2)
+			k.mu.midi_in(b, 0);
+		k.pump(300);
+		k.out.clear();
+		k.collect = true;
+		for (u8 b : on)
+			k.mu.midi_in(b, 0);
+		k.pump(400);
+		k.collect = false;
+		for (u8 b : off)
+			k.mu.midi_in(b, 0);
+		check(tone(k.out, 880) > 0.005 && tone(k.out, 880) > 10 * tone(k.out, 660),
+		      "窓の道: PGM002 が 880Hz", std::to_string(tone(k.out, 880)));
+		k.pump(300);
+
+		// 音程。PGM002（880Hz のサンプル）を半音 -12 にすると 440Hz、微調 +31 で 448Hz ほど
+		{
+			sp::voice v3;
+			k.mu.sampling_voice(1, v3);
+			v3.coarse = -12;
+			v3.fine = 31;
+			k.mu.sampling_set_voice(1, v3, err);
+			sp::voice back3;
+			k.mu.sampling_voice(1, back3);
+			for (u8 b : pc2)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			k.out.clear();
+			k.collect = true;
+			for (u8 b : on)
+				k.mu.midi_in(b, 0);
+			k.pump(600);
+			k.collect = false;
+			for (u8 b : off)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			double best_f = 0, best = 0;
+			for (double f = 400; f <= 500; f += 0.1)
+				if (const double t = tone(k.out, f); t > best) {
+					best = t;
+					best_f = f;
+				}
+			check(back3.coarse == -12 && back3.fine == 31 && best_f > 446.0 && best_f < 450.0,
+			      "音程: 半音 -12・微調 +31", std::to_string(best_f) + " Hz");
+		}
+
+		// 試聴。サンプル 3（880Hz）の頭 0.1 秒を、音源を通さずにそのまま鳴らす。終わったら止まる
+		{
+			k.out.clear();
+			k.collect = true;
+			const bool started = k.mu.preview_start(3, 0, RATE / 10);
+			k.pump(80);
+			const bool during = k.mu.preview_number() == 3;
+			k.pump(100);
+			k.collect = false;
+			check(started && during && k.mu.preview_number() == 0 && tone(k.out, 880) > 0.05,
+			      "試聴: 選んだ範囲を鳴らして止まる", std::to_string(tone(k.out, 880)));
+		}
+
+		// ループ。0.2 秒の 440Hz と 0.2 秒の 660Hz をつないだサンプルを PGM003 に。ループなしなら 0.4 秒で消え、
+		// ループの頭を 660Hz の頭にすると、押しているあいだ 660Hz だけが続く。トリムしてもループの頭は同じ音の所
+		{
+			std::vector<s16> two(RATE * 2 / 5);
+			for (size_t i = 0; i < two.size(); i++)
+				two[i] = s16(std::lround(12000 * std::sin(2 * PI * (i < RATE / 5 ? 440.0 : 660.0) * double(i) / RATE)));
+			const int n5 = k.mu.sampling_add(two.data(), two.size(), "looped", err);
+			sp::voice v5;
+			v5.assigned = true;
+			v5.sample = n5;
+			v5.name = "Looped";
+			k.mu.sampling_set_voice(2, v5, err);
+			const u8 pc3[] = { 0xc0, 0x02 };
+			// 押して 1.2 秒。0.8 秒から後の 0.4 秒を見る
+			auto hold = [&]() {
+				for (u8 b : pc3)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(800);
+				k.out.clear();
+				k.collect = true;
+				k.pump(400);
+				k.collect = false;
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+			};
+			hold();
+			const double once = tone(k.out, 660);
+			const u32 at = RATE / 5;
+			k.mu.sampling_loop(n5, true, at);
+			hold();
+			const double l440 = tone(k.out, 440), l660 = tone(k.out, 660);
+			sp::sample s5;
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s5 = x;
+			check(once < 0.002 && l660 > 0.01 && l660 > 10 * l440 && s5.loop && s5.loop_from == at,
+			      "ループ: 頭から終わりをくり返す",
+			      "なし 660 " + std::to_string(once) + "、あり 440 " + std::to_string(l440) + " 660 " + std::to_string(l660));
+			// 頭の 1000 を切る。ループの頭は 1000 前へ
+			const bool trimmed = k.mu.sampling_trim(n5, 1000, u32(two.size()), err);
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s5 = x;
+			hold();
+			check(trimmed && s5.loop && s5.loop_from == at - 1000 && tone(k.out, 660) > 0.01 &&
+			      tone(k.out, 660) > 10 * tone(k.out, 440),
+			      "ループ: トリムの後もループの頭は同じ所", std::to_string(s5.loop_from));
+			// 試聴もループの頭へ戻って続く
+			k.mu.preview_start(n5, 0, s5.frames(), s5.loop_from);
+			k.pump(600);
+			const bool still = k.mu.preview_number() == n5;
+			k.mu.preview_stop();
+			check(still, "ループ: 試聴も止めるまで続く", std::to_string(k.mu.preview_pos()));
+
+			// 鳴り始め・鳴り終わり（波形は切らない）。440Hz の所は [0, at - 1000)、660Hz はその後
+			const u32 mid = at - 1000;
+			k.mu.sampling_points(n5, 0, mid, true, 0);   // 440Hz だけをくり返す
+			hold();
+			const double p440 = tone(k.out, 440), p660 = tone(k.out, 660);
+			k.mu.sampling_points(n5, mid, 0, false, 0);  // 660Hz から 1 度だけ
+			for (u8 b : pc3)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			k.out.clear();
+			k.collect = true;
+			for (u8 b : on)
+				k.mu.midi_in(b, 0);
+			k.pump(150);
+			k.collect = false;
+			for (u8 b : off)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			const double q440 = tone(k.out, 440), q660 = tone(k.out, 660);
+			sp::sample s6;
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s6 = x;
+			check(p440 > 0.01 && p440 > 10 * p660 && q660 > 0.01 && q660 > 10 * q440 && s6.play_from == mid &&
+			      s6.play_to == s6.frames() && !s6.loop && s6.loop_from == mid,
+			      "鳴り始め・鳴り終わり: 終点までループ、始点から鳴る",
+			      "E まで 440 " + std::to_string(p440) + " 660 " + std::to_string(p660) + "、S から 440 " +
+			      std::to_string(q440) + " 660 " + std::to_string(q660));
+			k.mu.sampling_points(n5, 0, 0, true, at - 1000);
+
+			// つなぎ目の道具。だんだん小さくなる 440Hz（1 周期 100.227 サンプル）で
+			{
+				std::vector<s16> dec(RATE / 2);
+				for (size_t i = 0; i < dec.size(); i++)
+					dec[i] = s16(std::lround(16000.0 * (1.0 - 0.8 * double(i) / double(dec.size())) *
+					                         std::sin(2 * PI * 440.0 * double(i) / RATE)));
+				const int n7 = k.mu.sampling_add(dec.data(), dec.size(), "decay", err);
+				sp::sample s7;
+				for (const sp::sample &x : k.mu.sampling_list())
+					if (x.number == n7)
+						s7 = x;
+				auto raw = [&](u32 i) {
+					const size_t o = (size_t(s7.start) * 2 + i) * 2;
+					return int(s16(k.mu.sample_ram()[o] | k.mu.sample_ram()[o + 1] << 8));
+				};
+				// ゼロクロス: 1000 の近くで下から上へ横切る所（周期の 10 倍 1002.3 のあたり）。偶数に限ると偶数
+				u32 z = 0, ze = 0;
+				const bool zok = k.mu.sampling_snap(n7, 1000, false, 441, z) && k.mu.sampling_snap(n7, 1000, true, 441, ze);
+				check(zok && raw(z - 1) < 0 && raw(z) >= 0 && z > 990 && z < 1010 && !(ze & 1) && ze + 2 >= z && ze <= z,
+				      "つなぎ目: ゼロクロスに吸い付ける", std::to_string(z) + "・偶数 " + std::to_string(ze));
+				// 終点をループに合わせる: L = 2000 から、E - L が周期の整数倍に近い所
+				u32 e = 0;
+				const bool mok = k.mu.sampling_match_end(n7, 2000, 9000, RATE / 20, e);
+				const double periods = double(e - 2000) * 440.0 / RATE;
+				check(mok && std::fabs(periods - std::round(periods)) < 0.02,
+				      "つなぎ目: 終点をループに合わせる", std::to_string(e) + "（" + std::to_string(periods) + " 周期）");
+				// クロスフェード: 終点の手前が、ループの頭の手前と同じ形になる
+				std::vector<int> before_l;
+				for (u32 i = 0; i < 16; i++)
+					before_l.push_back(raw(6000 - 16 + i));
+				const int mid_before = raw(18000 - 1000);
+				const bool xok = k.mu.sampling_crossfade(n7, 6000, 18000, 2000);
+				int worst = 0;
+				for (u32 i = 0; i < 16; i++)
+					worst = std::max(worst, std::abs(raw(18000 - 16 + i) - before_l[i]));
+				check(xok && worst <= 300 && raw(18000 - 1000) != mid_before,
+				      "つなぎ目: クロスフェード", "終点の手前とループの頭の手前の差 " + std::to_string(worst));
+				// 等パワーの曲線も、終わりではループの頭の手前と同じ形
+				std::vector<int> before_l2;
+				for (u32 i = 0; i < 16; i++)
+					before_l2.push_back(raw(4000 - 16 + i));
+				const bool pok = k.mu.sampling_crossfade(n7, 4000, 12000, 3000, true);
+				int worst2 = 0;
+				for (u32 i = 0; i < 16; i++)
+					worst2 = std::max(worst2, std::abs(raw(12000 - 16 + i) - before_l2[i]));
+				check(pok && worst2 <= 300, "つなぎ目: 等パワーのクロスフェード", "差 " + std::to_string(worst2));
+			}
+
+			// ループ区間を探す。音程がゆっくり揺れる（±1% のビブラート 5Hz）220Hz の中で、0.3 秒以上の組。
+			// 見つかった組は、つなぎ目のまわりの形の差が、適当に選んだ組（周期の整数倍の長さ）より小さい
+			{
+				std::vector<s16> vib(RATE * 2);
+				double ph = 0;
+				for (size_t i = 0; i < vib.size(); i++) {
+					const double f = 220.0 * (1.0 + 0.01 * std::sin(2 * PI * 5.0 * double(i) / RATE));
+					ph += 2 * PI * f / RATE;
+					vib[i] = s16(std::lround(12000 * std::sin(ph)));
+				}
+				u32 l = 0, e = 0;
+				const bool fok = sp::find_loop(vib, 0, u32(vib.size()), RATE * 3 / 10, l, e);
+				auto mismatch = [&](u32 a, u32 b) {
+					double d = 0, s = 0;
+					for (int k2 = -256; k2 < 256; k2++) {
+						const double x = vib[size_t(long(a) + k2)], y = vib[size_t(long(b) + k2)];
+						d += (x - y) * (x - y);
+						s += x * x + y * y;
+					}
+					return d / s;
+				};
+				// 比べる組: 頭 10000、長さは 220Hz の 80 周期（ビブラートで周期がずれる）
+				const double found = fok ? mismatch(l, e) : 1.0, naive = mismatch(10000, 10000 + u32(80 * RATE / 220));
+				check(fok && !(l & 1) && e - l >= RATE * 3 / 10 && found < naive * 0.2 && found < 0.01,
+				      "ループ区間を探す",
+				      std::to_string(l) + " - " + std::to_string(e) + "、差 " + std::to_string(found) + "（適当な組 " +
+				      std::to_string(naive) + "）");
+			}
+
+			// エンベロープ（ループの入った PGM003 で）。押して 0.8 秒あとと離して 0.15 秒あとの大きさを、既定と比べる
+			auto env = [&](double &held, double &after, double &first) {
+				for (u8 b : pc3)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.out.clear();
+				k.collect = true;
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(1000);
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.collect = false;
+				k.pump(1500);
+				auto rms = [&](u32 ms) {
+					const size_t c = size_t(ms) * RATE / 1000;
+					double s = 0;
+					for (size_t i = c - RATE / 200; i < c + RATE / 200; i++)
+						s += k.out[i] * k.out[i];
+					return std::sqrt(s / double(RATE / 100));
+				};
+				first = rms(20);
+				held = rms(800);
+				after = rms(1150);
+			};
+			double h0, a0, f0, h1, a1, f1;
+			env(h0, a0, f0);
+			sp::voice e;
+			k.mu.sampling_voice(2, e);
+			e.attack = 24;    // ゆっくり立ち上がる（0.4 秒ほど）
+			e.decay1 = 63;
+			e.level1 = 96;    // すぐ -24dB ほどへ
+			e.release = 16;   // 離しても長く残る
+			k.mu.sampling_set_voice(2, e, err);
+			sp::voice eb;
+			k.mu.sampling_voice(2, eb);
+			env(h1, a1, f1);
+			const double db = 20 * std::log10(h1 / h0);
+			check(eb.attack == 24 && eb.decay1 == 63 && eb.level1 == 96 && eb.release == 16 && f1 < 0.2 * f0 &&
+			      db < -18 && db > -30 && a1 > 0.5 * h1 && a0 < 0.1 * h0,
+			      "エンベロープ: アタック・レベル・リリース",
+			      "頭 " + std::to_string(f1 / f0) + "、押している間 " + std::to_string(db) + " dB、離した後 " +
+			      std::to_string(a1 / h1) + "（既定 " + std::to_string(a0 / h0) + "）");
+		}
+	}
 
 	std::printf("サンプリング: 食い違い %d\n", bad);
 	return bad ? 1 : 0;

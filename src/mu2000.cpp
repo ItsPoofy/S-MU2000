@@ -3493,11 +3493,40 @@ void mu2000::run_sample(s32 &left, s32 &right)
 		const s32 a = std::min(std::abs(m_ad_in[i]), 32767);
 		m_ad_peak[i] = a >= m_ad_peak[i] ? a : m_ad_peak[i] - ((m_ad_peak[i] >> 12) + 1);
 	}
+	// 録音（パネルを通さない道。src/sampling.cpp の rec_start）
+	if (m_rec_state) {
+		using smu2000::sampling::source;
+		const s32 v = m_rec_src == source::ad1 ? m_ad_in[0]
+		            : m_rec_src == source::ad2 ? m_ad_in[1]
+		            : std::clamp(m_ad_in[0] + m_ad_in[1], -32768, 32767);
+		if (m_rec_state == 1 && std::abs(v) >= m_rec_trigger)
+			m_rec_state = 2;
+		if (m_rec_state == 2) {
+			if (m_rec_buf.size() < m_rec_max)
+				m_rec_buf.push_back(s16(std::clamp(v, -32768, 32767)));
+			else
+				m_rec_state = 0;
+		}
+	}
 
 	// スピーカーに出るのはマスタの DAC だけ。
 	// スレーブの DAC はどこにも繋がっていない
 	left  = lm;
 	right = rm;
+	// サンプリングの窓の試聴。サンプリング RAM の 16bit をそのまま DAC の目盛りで足す（src/sampling.cpp）
+	if (m_prev_on) {
+		const size_t at = size_t(m_prev_base + m_prev_pos) * 2;
+		if (m_prev_pos < m_prev_end && at + 1 < m_sampram.size()) {
+			const s16 v = s16(m_sampram[at] | m_sampram[at + 1] << 8);
+			const s32 o = s32(s64(v) * DAC_FULL_SCALE / 32768);
+			left += o;
+			right += o;
+			if (++m_prev_pos >= m_prev_end && m_prev_loop != ~0u)
+				m_prev_pos = m_prev_loop;
+		} else {
+			m_prev_on = false;
+		}
+	}
 	// 一覧のマスターのスペクトラム（最終の出力、左右の平均）
 	if (m_pscope_on.load(std::memory_order_relaxed)) {
 		const u32 w = m_oscope_w.load(std::memory_order_relaxed);

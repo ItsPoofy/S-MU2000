@@ -18,6 +18,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -33,6 +34,7 @@
 #include "ui/fx_editor.h"
 #include "ui/keymap.h"
 #include "ui/master_editor.h"
+#include "ui/sampling_editor.h"
 #include "ui/menu.h"
 #include "ui/options.h"
 #include "ui/overview.h"
@@ -93,6 +95,7 @@ public:
 	pc_window fx{ std::make_unique<fx_editor>() };
 	pc_window shapes{ std::make_unique<part_shapes>() };
 	pc_window master{ std::make_unique<master_editor>() };
+	pc_window sampling{ std::make_unique<sampling_editor>() };
 
 	struct engine *eng = nullptr;    // set once the ROMs are loaded
 	std::atomic<int> *state = nullptr; // the engine's, so menus can grey out
@@ -146,8 +149,10 @@ public:
 	// (paint_main below)
 	void frame_work()
 	{
+		run_deferred();
 		poll();
-		pc_frame_all(list, pc, fx, shapes, master, panel.xg(), panel.ram(), br,
+		serve_ain_requests();
+		pc_frame_all(list, pc, fx, shapes, master, sampling, panel.xg(), panel.ram(), br,
 		             [this](pc_window &w) { open_pc_window(w); });
 	}
 
@@ -403,7 +408,7 @@ public:
 	// Open a PC window by BAR_* id (F2/F3, the strip, the menus)
 	void open_window_by_kind(int kind)
 	{
-		open_pc_window(*window_for_kind(kind, list, pc, fx, shapes, master));
+		open_pc_window(*window_for_kind(kind, list, pc, fx, shapes, master, sampling));
 	}
 
 	// ---- remembered settings (gui.ini)
@@ -535,6 +540,53 @@ public:
 	{
 		return open_out(mu_out, out_dev_mu, out_name_mu, out_keep_mu,
 		                "MIDI 出力（本体の OUT）", dev, keep);
+	}
+
+	// サンプリングの窓の録音デバイスの欄（bridge::set_ain_devices / request_ain）。
+	// 一覧は窓が欄を開いたときと、選び直した後に作り直す（デバイスを数えるのは重いので毎コマはしない）。
+	//
+	// **パネルを描いている最中（frame_work の中）にデバイスを数えたり開いたりしない。** Windows の UI の糸は
+	// COM の STA なので、WASAPI を初めて使うときにたまっている窓のメッセージを処理することがあり、そこで
+	// パネルの WM_PAINT が入れ子で来ると、終わっていないコマの上で ImGui::NewFrame が呼ばれて assert で落ちた
+	// （作り直した exe の初回の起動で、起動が遅いときに出た）。一覧は別の糸で数え、選び直しは描画の外で行う
+	// （Windows は窓のメッセージで、ほかは次のコマの頭で。defer_outside_paint）
+	bool m_ain_listed = false;
+	std::atomic<bool> m_ain_listing{false};
+	std::thread m_ain_lister;
+	void list_ain_async()
+	{
+		if (m_ain_listing.exchange(true))
+			return;
+		if (m_ain_lister.joinable())
+			m_ain_lister.join();
+		const std::string current = ain_name;
+		m_ain_lister = std::thread([this, current] {
+			br.set_ain_devices(audio_in::list(), current);
+			m_ain_listing.store(false);
+		});
+	}
+	void serve_ain_requests()
+	{
+		if (br.take_ain_list_request() || !m_ain_listed) {
+			m_ain_listed = true;
+			list_ain_async();
+		}
+		const int want = br.take_ain_request();
+		if (want >= -1)
+			defer_outside_paint([this, want] {
+				choose_ain(want);
+				list_ain_async();
+			});
+	}
+	// 描画の外で行う仕事。Windows は窓のメッセージで（app_win.h）、ほかは次のコマの頭で
+	std::vector<std::function<void()>> m_deferred;
+	virtual void defer_outside_paint(std::function<void()> f) { m_deferred.push_back(std::move(f)); }
+	void run_deferred()
+	{
+		std::vector<std::function<void()>> todo;
+		todo.swap(m_deferred);
+		for (auto &f : todo)
+			f();
 	}
 
 	bool choose_ain(int dev, bool keep = false)
@@ -1096,6 +1148,8 @@ public:
 			open_window_by_kind(BAR_SHAPES);
 		if (w.open_master && !w.lcd_only)
 			open_window_by_kind(BAR_MASTER);
+		if (w.open_sampling && !w.lcd_only)
+			open_window_by_kind(BAR_SAMPLING);
 	}
 
 	// Starts the audio device. False parks the engine on the failure and
@@ -1164,7 +1218,9 @@ public:
 	// The boot thread join stays in main (it owns the thread)
 	void shutdown()
 	{
-		pc_shutdown_all(list, pc, fx, shapes, master, br);
+		pc_shutdown_all(list, pc, fx, shapes, master, sampling, br);
+		if (m_ain_lister.joinable())
+			m_ain_lister.join();
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		// Stop a MIDI file first: its all-notes-off travels out through the
 		// audio thread, so stopping the sound first would leave the far-end
