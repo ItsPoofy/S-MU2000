@@ -21,6 +21,7 @@
 // エンコーダがあり、VALUE -/+ のボタンと同じ働きをする。
 
 #include "compat/console.h"
+#include "compat/crash_log.h"
 
 #include "mu2000.h"
 #include "ui/app_win.h"
@@ -50,6 +51,8 @@ using namespace ui;
 int main(int argc, char **argv)
 {
 	smu2000::init_console_utf8();
+	// abort() や std::terminate で止まったら、呼び出し元を <設定>/S-MU2000/crash.txt に残す
+	smu2000::crash_log::install();
 
 	ui::tool_args a;
 	a.latency = 20;        // 溜める目標 (per-backend default; the shared parser keeps it)

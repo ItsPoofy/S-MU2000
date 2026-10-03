@@ -236,6 +236,12 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		return 0;
 	}
 
+	case win_app::WM_APP_DEFERRED:
+		// 描画の外で行う仕事（app::defer_outside_paint。録音デバイスの選び直しなど）
+		g_win->run_deferred_win();
+		InvalidateRect(hwnd, nullptr, FALSE);
+		return 0;
+
 	case WM_COMMAND: {
 		const UINT id = LOWORD(wp);
 		g_win->last_error.clear();
