@@ -26,6 +26,8 @@ class driver
 	// 直前の仕事の結果。写しの入れ物は bridge と入れ替えて 2 つを交互に使うので、結果は外に持って
 	// 毎回入れ直す（入れ物に置くと、新しい結果と古い結果が交互に窓へ届いて表示が行き来した）
 	std::string m_samp_msg;
+	struct samp_peak { int number = 0; u32 start = 0, end = 0; int peak = 0; };
+	std::vector<samp_peak> m_samp_peaks;
 	int m_samp_tick = 0;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
@@ -56,6 +58,20 @@ public:
 		m_samp.ready = mu.midi_ready();
 		m_samp.message = m_samp_msg;
 		m_samp.samples = mu.sampling_list();
+		// 最大の大きさは、番号・開始・終わりが変わったときだけ測り直す（4MB を毎回は舐めない）
+		if (m_samp_peaks.size() < m_samp.samples.size())
+			m_samp_peaks.resize(m_samp.samples.size());
+		for (size_t i = 0; i < m_samp.samples.size(); i++) {
+			smu2000::sampling::sample &s = m_samp.samples[i];
+			samp_peak &c = m_samp_peaks[i];
+			if (c.number != s.number || c.start != s.start || c.end != s.end) {
+				c.number = s.number;
+				c.start = s.start;
+				c.end = s.end;
+				c.peak = mu.sampling_peak(s);
+			}
+			s.peak = c.peak;
+		}
 		for (int i = 0; i < smu2000::sampling::MAX_VOICES; i++)
 			mu.sampling_voice(i, m_samp.voices[size_t(i)]);
 		m_samp.free_frames = mu.sampling_free_frames();

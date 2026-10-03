@@ -73,6 +73,16 @@ std::vector<sp::sample> mu2000::sampling_list() const
 	return out;
 }
 
+int mu2000::sampling_peak(const sp::sample &s) const
+{
+	int peak = 0;
+	for (u32 i = s.start * 2; i < s.end * 2 && (i + 1) * 2 <= m_sampram.size(); i++) {
+		const s16 v = s16(m_sampram[i * 2] | m_sampram[i * 2 + 1] << 8);
+		peak = std::max(peak, v < 0 ? -int(v) : int(v));
+	}
+	return peak;
+}
+
 u32 mu2000::sampling_free_frames() const
 {
 	const u32 next = rd32(m_dram, sp::NEXT_FREE - DRAM) & 0xffffff;
@@ -138,7 +148,7 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 	if (slot < 0 || slot >= sp::MAX_VOICES)
 		return false;
 	const u32 o = voice_rec(slot);
-	out.name = text(m_dram, o + 2, 10);
+	out.name = text(m_dram, o + 2, 8);
 	out.assigned = m_dram[o + 12] == 0x01;
 	const u16 sv = u16(m_dram[o + 14] << 8 | m_dram[o + 15]);
 	out.sample = out.assigned ? int(sv & 0x1ff) + 1 : 0;
@@ -158,8 +168,9 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		return false;
 	}
 	const u32 o = voice_rec(slot);
+	// 名前は 8 文字で、余りは空白（0 で埋めると LCD が CGRAM の 0 番の字を出す）。+10・+11 は別の欄
 	if (!v.name.empty())
-		put_text(m_dram, o + 2, 10, v.name, 0);
+		put_text(m_dram, o + 2, 8, v.name, ' ');
 	if (v.assigned) {
 		m_dram[o + 12] = 0x01;
 		m_dram[o + 13] = 0x7f;

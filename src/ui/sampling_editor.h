@@ -53,7 +53,7 @@ private:
 	int m_loaded_slot = -1;            // 編集欄に読み込んだ音色
 	bool m_dirty = false;              // 編集欄を触った
 	int m_sample = 0;                  // 0 = 無し
-	char m_voice_name[11] = {};
+	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 };
 

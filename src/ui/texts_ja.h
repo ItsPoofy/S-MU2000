@@ -474,6 +474,8 @@ inline const ui_texts &ja_texts()
 		.smp_voice_set_fmt = "Bank# %d の %d 番に書き込みました",
 		.smp_select_part1 = "パート 1 で選ぶ",
 		.smp_play_hint_fmt = "バンク MSB 16、LSB %d、プログラム %d で鳴ります。書き込んだ値は、音色を選び直したときに効きます。",
+		.smp_col_peak = "最大",
+		.smp_silent = "無音",
 	};
 	return t;
 }

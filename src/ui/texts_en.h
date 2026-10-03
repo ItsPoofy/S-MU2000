@@ -474,6 +474,8 @@ inline const ui_texts &en_texts()
 		.smp_voice_set_fmt = "Wrote Bank# %d, program %d",
 		.smp_select_part1 = "Select on part 1",
 		.smp_play_hint_fmt = "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again.",
+		.smp_col_peak = "Peak",
+		.smp_silent = "silent",
 	};
 	return t;
 }

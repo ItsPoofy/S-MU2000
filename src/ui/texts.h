@@ -508,6 +508,8 @@ struct ui_texts {
 	const char *smp_voice_set_fmt;
 	const char *smp_select_part1;
 	const char *smp_play_hint_fmt;
+	const char *smp_col_peak;
+	const char *smp_silent;
 };
 
 // Each language file defines one of these (never included directly).

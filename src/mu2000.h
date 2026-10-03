@@ -294,6 +294,8 @@ public:
 	// どれも音を作る糸（run_sample と同じ糸）から呼ぶこと
 	// firmware の表にあるサンプルの一覧
 	std::vector<smu2000::sampling::sample> sampling_list() const;
+	// そのサンプルの波形の最大の絶対値（16bit）。無音で録れたかが分かる
+	int sampling_peak(const smu2000::sampling::sample &s) const;
 	// まだ録れるサンプル数（44.1kHz）
 	u32 sampling_free_frames() const;
 	// 16bit・44.1kHz の波形をサンプリング RAM の空きへ書き、firmware の表に足す。足したサンプルの番号（1 から）か、

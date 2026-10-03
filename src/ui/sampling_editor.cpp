@@ -281,11 +281,12 @@ void sampling_editor::samples_pane()
 		ImGui::TextDisabled("%s", UI_TEXT(smp_none, "No samples yet"));
 		return;
 	}
-	if (ImGui::BeginTable("samples", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV)) {
+	if (ImGui::BeginTable("samples", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV)) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn(UI_TEXT(smp_col_no, "No."), ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn(UI_TEXT(smp_name, "Name"));
 		ImGui::TableSetupColumn(UI_TEXT(smp_col_len, "Length"), ImGuiTableColumnFlags_WidthFixed);
+		ImGui::TableSetupColumn(UI_TEXT(smp_col_peak, "Peak"), ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableHeadersRow();
 		for (const sp::sample &s : m_view.samples) {
 			ImGui::TableNextRow();
@@ -295,6 +296,11 @@ void sampling_editor::samples_pane()
 			ImGui::TextUnformatted(s.name.c_str());
 			ImGui::TableNextColumn();
 			ImGui::Text("%.2f s", double(s.frames()) / double(s.rate ? s.rate : sp::SAMPLE_RATE));
+			ImGui::TableNextColumn();
+			if (s.peak == 0)
+				ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.45f, 1.0f), "%s", UI_TEXT(smp_silent, "silent"));
+			else if (s.peak > 0)
+				ImGui::Text("%.1f dB", double(db(s.peak)));
 		}
 		ImGui::EndTable();
 	}

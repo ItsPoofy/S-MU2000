@@ -32,7 +32,7 @@ constexpr u32 TAB_SAMPLE = 0x106be04;
 constexpr u32 NEXT_FREE = 0x1070604;
 constexpr int MAX_SAMPLES = 512;
 // サンプル音色。350 バイト × 256（Bank# 0 の PGM001-128、Bank# 1 の PGM129-256）。
-//   +0 01 7f  +2 名前 10 文字（0 で埋める）
+//   +0 01 7f  +2 名前 8 文字（空白で埋める）  +10 00 00
 //   +12 1 つ目の要素: 鳴らすなら 01、+13 7f、+14 u16 0x4000 | (サンプル n − 1)。割り当て無しは 00 7f 3f 7f
 //   +0x47 Level（0-127）  +0x51 Pan（0 = L7、7 = C、14 = R7、15 = Scaling）
 constexpr u32 TAB_VOICE = 0x1054e00;
@@ -48,6 +48,7 @@ struct sample
 	std::string name;
 	u32 start = 0, end = 0;  // サンプリング RAM の語の位置
 	u32 rate = SAMPLE_RATE;
+	int peak = -1;           // 波形の最大の絶対値（16bit）。-1 はまだ測っていない（sampling_peak）
 	u32 frames() const { return (end - start) * 2; }
 };
 

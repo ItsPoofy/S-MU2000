@@ -432,6 +432,13 @@ int main(int argc, char **argv)
 		sp::voice back;
 		k.mu.sampling_voice(0, back);
 		check(set && back.assigned && back.sample == 1 && back.name == "Direct", "直の割り当て: 読み戻せる", back.name);
+		// 名前の余りは空白（0 だと LCD が CGRAM の字を出す）。名前の欄は 8 文字で、その後ろは触らない
+		{
+			const auto &d = k.mu.dram();
+			const u32 o = sp::TAB_VOICE - 0x1000000;
+			const std::string raw(reinterpret_cast<const char *>(&d[o + 2]), 10);
+			check(raw == std::string("Direct  ") + std::string(2, '\0'), "直の割り当て: 名前は 8 文字・空白埋め", raw.substr(0, 8));
+		}
 		k.press(B::play);
 		const u8 pc[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x00 };
 		for (u8 b : pc)
