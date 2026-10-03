@@ -79,6 +79,10 @@ The lower half of the same menu.
 * `Stop` stops and silences anything still ringing (All Note Off and damper release)
 
 * `Play ports 3 and 4 on top of A and B` / `Do not play ports 3 and 4` control how files with three or four ports are handled (below)
+* `Thin out dense pitch bends (unlike the real unit)` is off by default. The MU2000 firmware works through only about
+  1,500 pitch bends a second; a denser stream falls behind and catches up later, on the real unit as here. When on, the
+  player sends at most one bend every 4 ms per channel (the latest value), and the latest value before any note on that
+  channel. Remembered in gui.ini
 
 **Dropping a MIDI file on a window** also plays it (the panel window, or the
 editor, list and insertion-settings windows). If several are dropped, only

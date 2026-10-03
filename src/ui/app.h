@@ -434,6 +434,7 @@ public:
 		r.card      = card_path;
 		r.volume    = br.gain();
 		r.fold34    = play.fold_extra_ports();
+		r.thin_bends = play.thin_bends();
 		r.analog    = eng && eng->analog.load();
 		r.edit_out  = edit_out_name.empty() ? edit_out_keep : edit_out_name;
 		write_settings_file(path, collect_settings(r));
@@ -865,6 +866,12 @@ public:
 		save_settings();
 	}
 
+	void toggle_thin_bends()
+	{
+		play.set_thin_bends(!play.thin_bends());
+		save_settings();
+	}
+
 	void set_analog(bool on)
 	{
 		if (!eng)
@@ -905,6 +912,7 @@ public:
 		s.playing = play.playing();
 		s.play_name = play.name();
 		s.fold34 = play.fold_extra_ports();
+		s.thin_bends = play.thin_bends();
 		s.ready = eng && state && state->load() == 1;
 		s.native_fx = eng && eng->native_fx.load();
 		s.native_engine = eng && eng->native_engine.load();
@@ -939,6 +947,7 @@ public:
 		else if (id == ID_STOP_FILE)                                  play.stop();
 		else if (id == ID_PORTS34_FOLD)                               set_fold34(true);
 		else if (id == ID_PORTS34_DROP)                               set_fold34(false);
+		else if (id == ID_THIN_BENDS)                                 toggle_thin_bends();
 		else if (id == ID_NATIVE_FX)                                  toggle_fx();
 		else if (id == ID_NATIVE_ENGINE)                              toggle_engine();
 		else if (id == ID_FACTORY)                                    do_factory_reset();
@@ -1066,6 +1075,7 @@ public:
 			if (r.analog)
 				std::printf("音の出口: アナログ（直流を切る）\n");
 			play.set_fold_extra_ports(r.fold34);
+			play.set_thin_bends(r.thin_bends);
 		}
 		// Only the window boots from remembered settings: --shot must give
 		// the same picture every time
