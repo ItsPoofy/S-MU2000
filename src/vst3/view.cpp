@@ -128,9 +128,11 @@ struct plug_view::impl
 };
 
 
-plug_view::plug_view(engine &eng)
-	: m_impl(new impl(eng)), m_engine(eng)
+plug_view::plug_view(engine &eng, FUnknown *owner)
+	: m_impl(new impl(eng)), m_engine(eng), m_owner(owner)
 {
+	if (m_owner)
+		m_owner->addRef();
 	// パネルの配置。%LOCALAPPDATA%\S-MU2000\panel.txt があれば読む。無ければ
 	// 束の中の写真調の絵（Resources/panel）、それも無ければ組み込みの配置
 	// （doc/panel-editing.md）
@@ -160,6 +162,13 @@ int plug_view::default_height() { return ui::LOGICAL_H + ui::toolbar::HEIGHT; }
 plug_view::~plug_view()
 {
 	removed();
+	// 窓と panel（engine の bridge を見ている）を先に片付けてから、本体を手放す。
+	// 本体はこれで最後の参照が外れて消えることがある
+	m_impl.reset();
+	if (Steinberg::FUnknown *owner = m_owner) {
+		m_owner = nullptr;
+		owner->release();
+	}
 }
 
 tresult PLUGIN_API plug_view::queryInterface(const TUID iid, void **obj)
