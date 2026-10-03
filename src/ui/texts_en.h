@@ -67,7 +67,7 @@ inline const ui_texts &en_texts()
 		.menu_stop_fmt = "Stop (%s)",
 		.menu_fold34 = "Fold ports 3+4 onto A and B (DIN ports only)",
 		.menu_drop34 = "Drop ports 3+4 (DIN ports only)",
-		.menu_thin_bends = "Thin out dense pitch bends (unlike the real unit)",
+		.menu_thin_bends = "Lighten heavy MIDI: thin pitch bends, drop Roland display data (unlike the real unit)",
 		.menu_out_title = "Sound output",
 		.menu_out_digital = "Digital (S/PDIF; keeps DPCM DC)",
 		.menu_out_analog = "Analog (LINE OUT/PHONES; cuts DC)",
