@@ -186,17 +186,17 @@ bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std:
 bool load(const std::string &path, std::vector<event> &out, std::string &err)
 {
 #ifdef _WIN32
-    std::FILE *f = nullptr;
-    const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
-    if (n > 0) {
-        std::wstring w(size_t(n), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
-        f = _wfopen(w.c_str(), L"rb");
-    }
-    if (!f)
+	std::FILE *f = nullptr;
+	const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+	if (n > 0) {
+		std::wstring w(size_t(n), L'\0');
+		MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
+		f = _wfopen(w.c_str(), L"rb");
+	}
+	if (!f)
 #else
-    std::FILE *f = std::fopen(path.c_str(), "rb");
-    if (!f)
+	std::FILE *f = std::fopen(path.c_str(), "rb");
+	if (!f)
 #endif
     {
         err = "MIDI ファイルを開けない: " + path; return false;
