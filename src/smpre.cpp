@@ -217,9 +217,15 @@ int main(int argc, char **argv)
 			double sum = 0;
 			for (double v : g.out)
 				sum += v * v;
-			std::printf("measure rms %.4f  330 %.5f 440 %.5f 660 %.5f 880 %.5f\n",
+			// いちばん強い周波数（200-1800Hz を 1Hz おきに探してから 0.01Hz まで詰める）
+			double best_f = 0, best = 0;
+			for (double f = 200; f <= 1800; f += 1.0)
+				if (const double t = tone(g.out, f); t > best) { best = t; best_f = f; }
+			for (double f = best_f - 1.0; f <= best_f + 1.0; f += 0.01)
+				if (const double t = tone(g.out, f); t > best) { best = t; best_f = f; }
+			std::printf("measure rms %.4f  330 %.5f 440 %.5f 660 %.5f 880 %.5f  peak %.2f Hz\n",
 			            std::sqrt(sum / std::max<size_t>(1, g.out.size())),
-			            tone(g.out, 330), tone(g.out, 440), tone(g.out, 660), tone(g.out, 880));
+			            tone(g.out, 330), tone(g.out, 440), tone(g.out, 660), tone(g.out, 880), best_f);
 		} else if (cmd == "lcd") {
 			std::printf("lcd    [%s]\n", g.lcd().c_str());
 		} else {

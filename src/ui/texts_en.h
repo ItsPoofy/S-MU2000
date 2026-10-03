@@ -486,12 +486,17 @@ inline const ui_texts &en_texts()
 		.smp_trim = "Trim",
 		.smp_trim_clear = "Select all",
 		.smp_trimmed_fmt = "Sample %03d trimmed to %.2f s",
-		.smp_trim_tip = "Drag the start or end line to move it (a click moves the nearer one). Wheel zooms, right-drag scrolls.",
+		.smp_trim_tip = "Left-click sets the start, right-click the end. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls.",
 		.smp_trim_start = "Start",
 		.smp_trim_end = "End",
 		.smp_zoom = "Zoom",
 		.smp_zoom_all = "All",
 		.smp_zoom_sel = "Selection",
+		.smp_coarse = "Pitch (semitones)",
+		.smp_fine = "Fine (cents)",
+		.smp_play = "Play",
+		.smp_play_stop = "Stop playing",
+		.smp_play_tip = "Plays from the start to the end point as recorded, without the voice's level, pan or pitch",
 	};
 	return t;
 }

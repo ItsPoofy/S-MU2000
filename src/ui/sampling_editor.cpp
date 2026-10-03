@@ -455,6 +455,26 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::EndDisabled();
 	ImGui::EndDisabled();
 
+	// ---- 試聴。始点から終点まで（音源を通さない生の音）
+	const bool playing = m_view.preview_number == num;
+	if (!playing) {
+		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
+			const u32 f0 = m_start, f1 = m_end;
+			br.post([num, f0, f1](mu2000 &mu) {
+				mu.preview_start(num, f0, f1);
+				return std::string();
+			});
+		}
+	} else if (ImGui::Button(UI_TEXT(smp_play_stop, "Stop playing"))) {
+		br.post([](mu2000 &mu) {
+			mu.preview_stop();
+			return std::string();
+		});
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_play_tip, "Plays from the start to the end point as recorded, without the voice's level, pan or pitch"));
+	ImGui::SameLine(0, fs * 1.2f);
+
 	// ---- 表示の拡大・縮小
 	ImGui::TextUnformatted(UI_TEXT(smp_zoom, "Zoom"));
 	ImGui::SameLine();
@@ -495,16 +515,21 @@ void sampling_editor::wave_pane(bridge &br)
 			// ホイールでマウスの所を中心に拡大・縮小
 			if (io.MouseWheel != 0.0f)
 				zoom_at(f_of(io.MousePos.x), io.MouseWheel > 0 ? 0.8 : 1.25);
-			ImGui::SetTooltip("%s", UI_TEXT(smp_trim_tip, "Drag the start or end line to move it (a click moves the nearer one). Wheel zooms, right-drag scrolls."));
+			ImGui::SetTooltip("%s", UI_TEXT(smp_trim_tip, "Left-click sets the start, right-click the end. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls."));
 		}
-		// 左: 始点か終点をつまむ。どちらにも近くなければ、近いほうをそこへ
-		if (ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+		// 線（つまみ）の近くを押したら、どのボタンでもその線を動かす。それ以外は左で始点、右で終点をそこへ。
+		// 中ボタンで表示を動かす
+		if (ImGui::IsItemActivated()) {
 			const float xs = x_of(double(m_start)), xe = x_of(double(m_end));
-			const float mx = io.MousePos.x;
-			m_drag = std::fabs(mx - xs) <= std::fabs(mx - xe) ? 1 : 2;
+			const float mx = io.MousePos.x, grab = fs * 0.5f;
+			const float ds = std::fabs(mx - xs), de = std::fabs(mx - xe);
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+				m_drag = 3;
+			else if (ds <= grab || de <= grab)
+				m_drag = ds <= de ? 1 : 2;
+			else
+				m_drag = ImGui::IsMouseClicked(ImGuiMouseButton_Right) ? 2 : 1;
 		}
-		if (ImGui::IsItemActivated() && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Middle)))
-			m_drag = 3;
 		if (m_drag && ImGui::IsItemActive()) {
 			if (m_drag == 3) {
 				const double df = -double(io.MouseDelta.x) / double(sz.x) * span;
@@ -579,6 +604,10 @@ void sampling_editor::wave_pane(bridge &br)
 	dl->AddLine(ImVec2(xe, p.y), ImVec2(xe, p.y + sz.y), IM_COL32(255, 210, 90, 255), m_drag == 2 ? 3.0f : 2.0f);
 	dl->AddText(ImVec2(xs + 3, p.y + 2), IM_COL32(110, 230, 120, 255), "S");
 	dl->AddText(ImVec2(xe - fs * 0.8f, p.y + 2), IM_COL32(255, 210, 90, 255), "E");
+	if (playing) {
+		const float xp = x_of(double(m_view.preview_pos));
+		dl->AddLine(ImVec2(xp, p.y), ImVec2(xp, p.y + sz.y), IM_COL32(255, 255, 255, 230), 1.5f);
+	}
 	dl->PopClipRect();
 
 	// 拡大しているときは、表示の位置を動かす棒
@@ -621,6 +650,8 @@ void sampling_editor::assign_pane(bridge &br)
 		std::snprintf(m_voice_name, sizeof(m_voice_name), "%s", cur.name.c_str());
 		m_level = cur.level;
 		m_pan = cur.pan;
+		m_coarse = cur.coarse;
+		m_fine = cur.fine;
 		m_dirty = false;
 	}
 
@@ -684,6 +715,20 @@ void sampling_editor::assign_pane(bridge &br)
 		ImGui::EndCombo();
 	}
 
+	// 音程。鍵 60 が録ったときの高さで、そこからずらす
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_coarse, "Pitch (semitones)"));
+	ImGui::SameLine(lab);
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt("##coarse", &m_coarse, -24, 24, "%+d"))
+		m_dirty = true;
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_fine, "Fine (cents)"));
+	ImGui::SameLine(lab);
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt("##fine", &m_fine, -64, 63, "%+d"))
+		m_dirty = true;
+
 	ImGui::Spacing();
 	if (ImGui::Button(UI_TEXT(smp_apply, "Apply"), ImVec2(fs * 7, 0))) {
 		sp::voice v;
@@ -692,6 +737,8 @@ void sampling_editor::assign_pane(bridge &br)
 		v.name = m_voice_name;
 		v.level = m_level;
 		v.pan = m_pan;
+		v.coarse = m_coarse;
+		v.fine = m_fine;
 		std::string done = UI_TEXT(smp_voice_set_fmt, "Wrote Bank# %d, program %d");
 		const int bank = m_bank, pgm = m_pgm;
 		br.post([slot, v, done, bank, pgm](mu2000 &mu) {
@@ -710,8 +757,9 @@ void sampling_editor::assign_pane(bridge &br)
 		const std::vector<u8> msg = { 0xb0, 0x00, 0x10, 0xb0, 0x20, u8(m_bank), 0xc0, u8(m_pgm - 1) };
 		br.send(msg);
 	}
-	ImGui::TextWrapped(UI_TEXT(smp_play_hint_fmt, "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again."),
-	                   m_bank, m_pgm);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip(UI_TEXT(smp_play_hint_fmt, "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again."),
+		                  m_bank, m_pgm);
 }
 
 } // namespace ui

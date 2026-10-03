@@ -303,6 +303,8 @@ public:
 		int wave_number = 0;
 		u32 wave_frames = 0;
 		u32 wave_from = 0, wave_to = 0;   // 見取り図にした範囲（サンプルの位置）
+		int preview_number = 0;           // 試聴しているサンプル（0 = していない）
+		u32 preview_pos = 0;              // 試聴している位置（サンプルの位置）
 		std::vector<s16> wave_lo, wave_hi;
 	};
 	static constexpr int WAVE_BUCKETS = 1024;

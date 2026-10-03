@@ -526,6 +526,11 @@ struct ui_texts {
 	const char *smp_zoom;
 	const char *smp_zoom_all;
 	const char *smp_zoom_sel;
+	const char *smp_coarse;
+	const char *smp_fine;
+	const char *smp_play;
+	const char *smp_play_stop;
+	const char *smp_play_tip;
 };
 
 // Each language file defines one of these (never included directly).

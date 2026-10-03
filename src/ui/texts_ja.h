@@ -486,12 +486,17 @@ inline const ui_texts &ja_texts()
 		.smp_trim = "トリム",
 		.smp_trim_clear = "全体を選ぶ",
 		.smp_trimmed_fmt = "サンプル %03d を %.2f 秒にトリムしました",
-		.smp_trim_tip = "始点（緑）か終点（黄）の線をつまんで動かす（クリックすると近いほうがそこへ）。ホイールで拡大・縮小、右ドラッグで表示を動かす",
+		.smp_trim_tip = "左クリックで始点、右クリックで終点をそこへ。線（つまみ）はどちらのボタンでもつまんで動かせる。ホイールで拡大・縮小、中ボタンのドラッグで表示を動かす",
 		.smp_trim_start = "始点",
 		.smp_trim_end = "終点",
 		.smp_zoom = "表示",
 		.smp_zoom_all = "全体",
 		.smp_zoom_sel = "選んだ所",
+		.smp_coarse = "音程（半音）",
+		.smp_fine = "微調（セント）",
+		.smp_play = "再生",
+		.smp_play_stop = "止める",
+		.smp_play_tip = "始点から終点までを、録ったままの音で鳴らす（音色の音量・パン・音程は効かない）",
 	};
 	return t;
 }

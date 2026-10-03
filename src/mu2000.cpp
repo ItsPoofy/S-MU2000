@@ -3513,6 +3513,19 @@ void mu2000::run_sample(s32 &left, s32 &right)
 	// スレーブの DAC はどこにも繋がっていない
 	left  = lm;
 	right = rm;
+	// サンプリングの窓の試聴。サンプリング RAM の 16bit をそのまま DAC の目盛りで足す（src/sampling.cpp）
+	if (m_prev_on) {
+		const size_t at = size_t(m_prev_base + m_prev_pos) * 2;
+		if (m_prev_pos < m_prev_end && at + 1 < m_sampram.size()) {
+			const s16 v = s16(m_sampram[at] | m_sampram[at + 1] << 8);
+			const s32 o = s32(s64(v) * DAC_FULL_SCALE / 32768);
+			left += o;
+			right += o;
+			m_prev_pos++;
+		} else {
+			m_prev_on = false;
+		}
+	}
 	// 一覧のマスターのスペクトラム（最終の出力、左右の平均）
 	if (m_pscope_on.load(std::memory_order_relaxed)) {
 		const u32 w = m_oscope_w.load(std::memory_order_relaxed);

@@ -583,6 +583,50 @@ int main(int argc, char **argv)
 		check(tone(k.out, 880) > 0.005 && tone(k.out, 880) > 10 * tone(k.out, 660),
 		      "窓の道: PGM002 が 880Hz", std::to_string(tone(k.out, 880)));
 		k.pump(300);
+
+		// 音程。PGM002（880Hz のサンプル）を半音 -12 にすると 440Hz、微調 +31 で 448Hz ほど
+		{
+			sp::voice v3;
+			k.mu.sampling_voice(1, v3);
+			v3.coarse = -12;
+			v3.fine = 31;
+			k.mu.sampling_set_voice(1, v3, err);
+			sp::voice back3;
+			k.mu.sampling_voice(1, back3);
+			for (u8 b : pc2)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			k.out.clear();
+			k.collect = true;
+			for (u8 b : on)
+				k.mu.midi_in(b, 0);
+			k.pump(600);
+			k.collect = false;
+			for (u8 b : off)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			double best_f = 0, best = 0;
+			for (double f = 400; f <= 500; f += 0.1)
+				if (const double t = tone(k.out, f); t > best) {
+					best = t;
+					best_f = f;
+				}
+			check(back3.coarse == -12 && back3.fine == 31 && best_f > 446.0 && best_f < 450.0,
+			      "音程: 半音 -12・微調 +31", std::to_string(best_f) + " Hz");
+		}
+
+		// 試聴。サンプル 3（880Hz）の頭 0.1 秒を、音源を通さずにそのまま鳴らす。終わったら止まる
+		{
+			k.out.clear();
+			k.collect = true;
+			const bool started = k.mu.preview_start(3, 0, RATE / 10);
+			k.pump(80);
+			const bool during = k.mu.preview_number() == 3;
+			k.pump(100);
+			k.collect = false;
+			check(started && during && k.mu.preview_number() == 0 && tone(k.out, 880) > 0.05,
+			      "試聴: 選んだ範囲を鳴らして止まる", std::to_string(tone(k.out, 880)));
+		}
 	}
 
 	std::printf("サンプリング: 食い違い %d\n", bad);

@@ -34,6 +34,7 @@ constexpr int MAX_SAMPLES = 512;
 // サンプル音色。350 バイト × 256（Bank# 0 の PGM001-128、Bank# 1 の PGM129-256）。
 //   +0 01 7f  +2 名前 8 文字（空白で埋める）  +10 00 00
 //   +12 1 つ目の要素: 鳴らすなら 01、+13 7f、+14 u16 0x4000 | (サンプル n − 1)。割り当て無しは 00 7f 3f 7f
+//   +0x1d 半音（0x40 = 0、±12 で 1 オクターブ）  +0x1e 微調（0x40 = 0、1 でおよそ 1 セント）
 //   +0x47 Level（0-127）  +0x51 Pan（0 = L7、7 = C、14 = R7、15 = Scaling）
 constexpr u32 TAB_VOICE = 0x1054e00;
 constexpr u32 VOICE_SIZE = 350;
@@ -59,6 +60,8 @@ struct voice
 	int sample = 0;          // 1 から（assigned のとき）
 	int level = 127;         // 0-127
 	int pan = 7;             // 0 = L7、7 = C、14 = R7、15 = Scaling
+	int coarse = 0;          // 半音（-24〜+24）
+	int fine = 0;            // セント（-64〜+63）
 };
 
 // 録音で入力のどれを録るか（firmware の InputSrc と同じ並び）

@@ -297,6 +297,8 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 	out.sample = out.assigned ? int(sv & 0x1ff) + 1 : 0;
 	out.level = m_dram[o + 0x47];
 	out.pan = m_dram[o + 0x51];
+	out.coarse = int(m_dram[o + 0x1d]) - 0x40;
+	out.fine = int(m_dram[o + 0x1e]) - 0x40;
 	return true;
 }
 
@@ -328,7 +330,27 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 	}
 	m_dram[o + 0x47] = u8(std::clamp(v.level, 0, 127));
 	m_dram[o + 0x51] = u8(std::clamp(v.pan, 0, 15));
+	m_dram[o + 0x1d] = u8(0x40 + std::clamp(v.coarse, -24, 24));
+	m_dram[o + 0x1e] = u8(0x40 + std::clamp(v.fine, -64, 63));
 	return true;
+}
+
+bool mu2000::preview_start(int number, u32 from, u32 to)
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		to = std::min(to ? to : s.frames(), s.frames());
+		if (from >= to)
+			return false;
+		m_prev_number = number;
+		m_prev_base = s.start * 2;
+		m_prev_pos = from;
+		m_prev_end = to;
+		m_prev_on = true;
+		return true;
+	}
+	return false;
 }
 
 void mu2000::rec_start(sp::source src, int trigger, u32 max_frames)

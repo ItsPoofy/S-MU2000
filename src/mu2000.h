@@ -325,6 +325,12 @@ public:
 	u32 rec_frames() const { return u32(m_rec_buf.size()); }
 	// 録れたものを取り出す（録音は止まる）
 	std::vector<s16> rec_take();
+	// 試聴（サンプリングの窓の再生）。サンプル number の [from, to) を、音源を通さずそのまま出力に足す。
+	// 編集の確かめ用で、実機には無い道（音色の Level・Pan・音程は効かない）
+	bool preview_start(int number, u32 from, u32 to);
+	void preview_stop() { m_prev_on = false; }
+	int preview_number() const { return m_prev_on ? m_prev_number : 0; }
+	u32 preview_pos() const { return m_prev_pos; }
 	// A/D INPUT のピーク（16bit の絶対値。ゆっくり下がる）。レベルメーター用
 	s32 ad_peak(int i) const { return m_ad_peak[i & 1]; }
 
@@ -936,6 +942,10 @@ private:
 	s32 m_rec_trigger = 0;
 	u32 m_rec_max = 0;
 	std::vector<s16> m_rec_buf;
+	// 試聴（preview_start）。m_prev_base はサンプリング RAM のサンプルの位置（語 × 2）
+	bool m_prev_on = false;
+	int m_prev_number = 0;
+	u32 m_prev_base = 0, m_prev_pos = 0, m_prev_end = 0;
 	s32 m_ad_in[2] = {};            // A/D INPUT（set_audio_input）
 	s32 m_ad_peak[2] = {};          // A/D INPUT のピーク（レベルメーター、AN0 / AN2）。状態の保存には入れない
 	u16 ad_level_adc(int i) const

@@ -66,7 +66,7 @@ public:
 		                      want_wave.to != m_wave_to;
 		if (new_wave)
 			did = true;
-		if (!did && mu.rec_state() == 0 && ++m_samp_tick < 8)
+		if (!did && mu.rec_state() == 0 && !mu.preview_number() && !m_samp.preview_number && ++m_samp_tick < 8)
 			return;
 		m_samp_tick = 0;
 		m_samp.ready = mu.midi_ready();
@@ -102,6 +102,8 @@ public:
 		m_samp.wave_number = m_wave_made;
 		m_samp.wave_frames = m_wave_frames;
 		m_samp.wave_from = m_wave_from;
+		m_samp.preview_number = mu.preview_number();
+		m_samp.preview_pos = mu.preview_pos();
 		m_samp.wave_to = m_wave_to;
 		m_samp.wave_lo = m_wave_lo;
 		m_samp.wave_hi = m_wave_hi;

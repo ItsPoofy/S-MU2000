@@ -32,7 +32,7 @@ public:
 		return get_lang() == lang::ja ? L"S-MU2000 サンプリング" : L"S-MU2000 Sampling";
 	}
 	int default_width() const override  { return 760; }
-	int default_height() const override { return 760; }
+	int default_height() const override { return 800; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
 
 private:
@@ -71,6 +71,7 @@ private:
 	int m_sample = 0;                  // 0 = 無し
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
+	int m_coarse = 0, m_fine = 0;
 };
 
 } // namespace ui
