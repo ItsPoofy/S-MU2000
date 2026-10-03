@@ -65,6 +65,7 @@ private:
 	// 始点・終点・ループの頭の拡大（0 = S、1 = E、2 = L）。表示する幅（サンプル）と中心、つまんでいる枠
 	double m_det_span[3] = { 400.0, 400.0, 400.0 };
 	double m_det_center[3] = {};
+	u32 m_det_last[3] = { ~0u, ~0u, ~0u };   // 前のコマの点の位置（動いたら中心を合わせる）
 	int m_det_drag = -1;
 	int m_xfade_ms = 20;
 	// 表へ書いた後の S・E・L（音源の側でそろえた値。吸い付けや E を合わせるで動いたものを窓へ戻す）
@@ -91,6 +92,8 @@ private:
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;
 	// エンベロープ（sp::voice の attack・decay1・decay2・release・level1・level2）
+	// 押して試聴する鍵と、鳴らしている鍵（-1 = なし）
+	int m_audition_key = 60, m_held_key = -1;
 	int m_attack = 63, m_decay1 = 0, m_decay2 = 0, m_release = 63, m_level1 = 127, m_level2 = 127;
 };
 

@@ -111,6 +111,47 @@ void draw_slice(ImDrawList *dl, ImVec2 p, ImVec2 sz, double v0, double v1, const
 	}
 }
 
+// 横のスクロールバー。v0 は表示の左端（サンプル）、span は表示の幅、total は全体。動かしたら true。
+// つまみをつかむとその所を保ち、つまみの外を押すとそこへ飛ぶ
+bool hscroll(const char *id, double &v0, double span, double total, float w)
+{
+	const float h = ImGui::GetFontSize() * 0.75f;
+	const ImVec2 p = ImGui::GetCursorScreenPos();
+	ImGui::InvisibleButton(id, ImVec2(w, h));
+	const double maxv = std::max(0.0, total - span);
+	const float tw = maxv > 0 ? std::max(h * 2.0f, w * float(span / total)) : w;
+	const double cur = std::clamp(v0, 0.0, maxv);
+	const float tx = p.x + (maxv > 0 ? float(cur / maxv) * (w - tw) : 0.0f);
+	bool changed = false;
+	const ImGuiID key = ImGui::GetItemID();
+	ImGuiStorage *st = ImGui::GetStateStorage();
+	const float mx = ImGui::GetIO().MousePos.x;
+	if (ImGui::IsItemActivated())
+		st->SetFloat(key, mx >= tx && mx <= tx + tw ? mx - tx : tw * 0.5f);
+	if (ImGui::IsItemActive() && maxv > 0) {
+		const float grab = st->GetFloat(key, tw * 0.5f);
+		v0 = std::clamp(double(mx - grab - p.x) / double(w - tw) * maxv, 0.0, maxv);
+		changed = true;
+	}
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(ImGuiCol_ScrollbarBg), h * 0.5f);
+	const ImGuiCol c = ImGui::IsItemActive() ? ImGuiCol_ScrollbarGrabActive
+	                   : ImGui::IsItemHovered() ? ImGuiCol_ScrollbarGrabHovered : ImGuiCol_ScrollbarGrab;
+	dl->AddRectFilled(ImVec2(tx + 1, p.y + 2), ImVec2(tx + tw - 1, p.y + h - 2), ImGui::GetColorU32(c), h * 0.5f);
+	return changed;
+}
+
+// 波形の枠: 角を少し丸めた背景と、色の付いた縁（縁は波形を描いた後に、切り抜きの外で）
+void wave_frame(ImDrawList *dl, ImVec2 p, ImVec2 sz)
+{
+	dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255), 4.0f);
+}
+
+void wave_border(ImDrawList *dl, ImVec2 p, ImVec2 sz, ImU32 border)
+{
+	dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + sz.x + 1, p.y + sz.y + 1), border, 4.0f, 0, 1.5f);
+}
+
 s32 trigger_level(int trigger_db)
 {
 	return trigger_db >= 0 ? 0 : s32(std::lround(32768.0 * std::pow(10.0, trigger_db / 20.0)));
@@ -400,6 +441,8 @@ void sampling_editor::wave_pane(bridge &br)
 		m_drag = 0;
 		m_loop_on = sel->loop;
 		m_loop_at = sel->loop_from;
+		for (u32 &l : m_det_last)
+			l = ~0u;   // 拡大の枠も点へ合わせ直す
 	}
 	// 鳴り始め S・鳴り終わり E・ループの頭 L をそろえる（src/sampling.cpp の fit_points と同じ）。
 	// moved は今動かしたもの（1 = S、2 = E、4 = L）。L は S と E の 8 手前のあいだで、S や E に押されて動く
@@ -673,9 +716,8 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::TextDisabled("%.3f - %.3f s  (x%.0f)", m_view0 / rate, m_view1 / rate, double(frames) / (m_view1 - m_view0));
 
 	// ---- 全体の波形（下に始点・終点・ループの頭の拡大を 3 つ並べる）
-	const bool zoomed = m_view1 - m_view0 < double(frames) - 0.5;
-	const float bar_h = zoomed ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
-	const float det_h = std::max(fs * 6, ImGui::GetContentRegionAvail().y * 0.45f);
+	const float bar_h = fs * 0.75f + ImGui::GetStyle().ItemSpacing.y;
+	const float det_h = std::max(fs * 7, ImGui::GetContentRegionAvail().y * 0.48f);
 	const ImVec2 p = ImGui::GetCursorScreenPos();
 	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(ImGui::GetContentRegionAvail().y - bar_h - det_h, fs * 3));
 	ImGui::InvisibleButton("##wave", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
@@ -738,8 +780,8 @@ void sampling_editor::wave_pane(bridge &br)
 	br.request_overview(num, v0, v1);
 
 	ImDrawList *dl = ImGui::GetWindowDrawList();
+	wave_frame(dl, p, sz);
 	dl->PushClipRect(p, ImVec2(p.x + sz.x, p.y + sz.y), true);
-	dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255));
 	const float mid = p.y + sz.y * 0.5f, half = sz.y * 0.5f - 2.0f;
 	dl->AddLine(ImVec2(p.x, mid), ImVec2(p.x + sz.x, mid), IM_COL32(80, 90, 110, 255));
 	auto y_of = [&](int v) { return mid - half * float(v) / 32768.0f; };
@@ -803,22 +845,18 @@ void sampling_editor::wave_pane(bridge &br)
 		dl->AddLine(ImVec2(xp, p.y), ImVec2(xp, p.y + sz.y), IM_COL32(255, 255, 255, 230), 1.5f);
 	}
 	dl->PopClipRect();
+	wave_border(dl, p, sz, IM_COL32(110, 125, 150, 255));
 
-	// 拡大しているときは、表示の位置を動かす棒
-	if (zoomed) {
-		float pos = float(m_view0);
-		const float max_pos = float(double(frames) - span);
-		ImGui::SetNextItemWidth(-1);
-		if (ImGui::SliderFloat("##scroll", &pos, 0.0f, max_pos, "")) {
-			m_view0 = double(pos);
-			m_view1 = m_view0 + span;
-			clamp_view();
-		}
+	// 表示の位置を動かす棒（全体を表示しているときはつまみが端から端まで）
+	if (hscroll("##oscroll", m_view0, span, double(frames), sz.x)) {
+		m_view1 = m_view0 + span;
+		clamp_view();
 	}
 
 	// ---- 始点・終点・ループの頭の拡大。それぞれ左クリック（ドラッグ）でその点を置く。ホイールで拡大・縮小。
 	// 終点の枠には戻った後に鳴る L の後ろを、ループの頭の枠には戻る前に鳴る E の手前を薄く重ねる（つなぎ目の形）
-	const float gap = ImGui::GetStyle().ItemSpacing.x;
+	ImGui::Dummy(ImVec2(0, fs * 0.3f));
+	const float gap = fs * 0.8f;
 	const float dw = (ImGui::GetContentRegionAvail().x - gap * 2) / 3.0f;
 	auto clamp_req = [&](double a, double b, u32 &ra, u32 &rb) {
 		ra = u32(std::clamp(std::floor(a), 0.0, double(frames)));
@@ -838,15 +876,17 @@ void sampling_editor::wave_pane(bridge &br)
 		else
 			ImGui::TextDisabled("%u  %.4f s", at, double(at) / rate);
 		const ImVec2 q = ImGui::GetCursorScreenPos();
-		const ImVec2 qs(dw, std::max(ImGui::GetContentRegionAvail().y, fs * 3));
+		const ImVec2 qs(dw, std::max(ImGui::GetContentRegionAvail().y - bar_h, fs * 3));
 		char id[16];
 		std::snprintf(id, sizeof(id), "##det%d", w);
 		ImGui::InvisibleButton(id, qs);
-		// 表示の中心は点の位置。つまんでいるあいだは動かさない（動かすと押した所がずれる）
+		// 点が動いたら（ほかの枠や数で）表示の中心をそこへ。スクロールバーで離れて見られる。
+		// つまんでいるあいだは動かさない（動かすと押した所がずれる）
 		double &dspan = m_det_span[w];
 		dspan = std::clamp(dspan, 16.0, std::max(16.0, double(frames)));
-		if (m_det_drag != w)
+		if (m_det_drag != w && at != m_det_last[w])
 			m_det_center[w] = double(at);
+		m_det_last[w] = at;
 		const double c = m_det_center[w], d0 = c - dspan * 0.5, d1 = c + dspan * 0.5;
 		auto dx_of = [&](double f) { return q.x + float((f - d0) / dspan * double(qs.x)); };
 		auto df_of = [&](float x) { return d0 + double(x - q.x) / double(qs.x) * dspan; };
@@ -893,8 +933,8 @@ void sampling_editor::wave_pane(bridge &br)
 		br.request_detail(3 + w, ghost ? num : 0, ra, rb);
 
 		ImDrawList *ddl = ImGui::GetWindowDrawList();
+		wave_frame(ddl, q, qs);
 		ddl->PushClipRect(q, ImVec2(q.x + qs.x, q.y + qs.y), true);
-		ddl->AddRectFilled(q, ImVec2(q.x + qs.x, q.y + qs.y), IM_COL32(16, 20, 26, 255));
 		const float qmid = q.y + qs.y * 0.5f;
 		ddl->AddLine(ImVec2(q.x, qmid), ImVec2(q.x + qs.x, qmid), IM_COL32(80, 90, 110, 255));
 		const auto &main = m_view.details[size_t(w)];
@@ -912,6 +952,13 @@ void sampling_editor::wave_pane(bridge &br)
 		if (w < 2 || m_loop_on)
 			ddl->AddLine(ImVec2(xa, q.y), ImVec2(xa, q.y + qs.y), cols[w], m_det_drag == w ? 3.0f : 2.0f);
 		ddl->PopClipRect();
+		// 縁はその点の色（ループが切れているときの L は暗く）
+		const ImU32 bc = (w == 2 && !m_loop_on) ? IM_COL32(90, 80, 105, 255) : (cols[w] & 0x00ffffffu) | 0xc8000000u;
+		wave_border(ddl, q, qs, bc);
+		std::snprintf(id, sizeof(id), "##dsc%d", w);
+		double dv0 = m_det_center[w] - dspan * 0.5;
+		if (hscroll(id, dv0, dspan, double(frames), qs.x))
+			m_det_center[w] = dv0 + dspan * 0.5;
 		ImGui::EndGroup();
 	}
 }
@@ -920,7 +967,10 @@ void sampling_editor::assign_pane(bridge &br)
 {
 	heading(UI_TEXT(smp_assign, "Voice assignment"));
 	const float fs = ImGui::GetFontSize();
-	const float lab = fs * 10.0f;   // 「レベル 2（サステイン）」が入る幅
+	float lab = fs * 7.0f;   // 項目の名前の幅（右の列は「レベル 2（サステイン）」が入るよう広げる）
+	// 左の列は音色・サンプル・音量・音程、右の列はエンベロープと試聴・書き込み（スクロールしなくても届くように）
+	const float col_w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	ImGui::BeginChild("assign_l", ImVec2(col_w, 0));
 
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted("Bank#");
@@ -1028,8 +1078,12 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::SliderInt("##fine", &m_fine, -64, 63, "%+d"))
 		m_dirty = true;
 
+	ImGui::EndChild();
+	ImGui::SameLine();
+	ImGui::BeginChild("assign_r", ImVec2(0, 0));
+	lab = fs * 10.0f;
+
 	// エンベロープ。速さは大きいほど速く 0 は動かない、レベルは 127 が最大。値の下に形の目安
-	ImGui::Spacing();
 	ImGui::TextDisabled("%s", UI_TEXT(smp_env, "Envelope"));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", UI_TEXT(smp_env_tip, "Rates run 0-63 (higher is faster, 0 stays put); levels 0-127. A key goes up at the attack rate, falls at decay 1 to level 1, then at decay 2 to level 2 and stays there while held (with the loop on, the sound keeps going). Release fades it out after the key is let go."));
@@ -1081,7 +1135,7 @@ void sampling_editor::assign_pane(bridge &br)
 	}
 
 	ImGui::Spacing();
-	if (ImGui::Button(UI_TEXT(smp_apply, "Apply"), ImVec2(fs * 7, 0))) {
+	auto make_voice = [&]() {
 		sp::voice v;
 		v.assigned = m_sample != 0;
 		v.sample = m_sample;
@@ -1096,6 +1150,48 @@ void sampling_editor::assign_pane(bridge &br)
 		v.release = m_release;
 		v.level1 = m_level1;
 		v.level2 = m_level2;
+		return v;
+	};
+
+	// 試聴（音源を通す）。押しているあいだ、今の値を音色に書いてパート 1 をその音色にし、鍵を鳴らす。
+	// 離すとノートオフ（リリースも聞ける）
+	ImGui::BeginDisabled(m_sample == 0);
+	ImGui::Button(UI_TEXT(smp_audition, "Hold to play"), ImVec2(fs * 9, 0));
+	const bool hold_on = ImGui::IsItemActivated(), hold_off = ImGui::IsItemDeactivated();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_audition_tip, "While held, writes the values above to the voice, selects it on part 1 and plays the key through the tone generator (level, pan, pitch and envelope all apply). Letting go sends note-off, so the release is heard too."));
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_audition_key, "Key"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 6);
+	if (ImGui::InputInt("##akey", &m_audition_key))
+		m_audition_key = std::clamp(m_audition_key, 0, 127);
+	ImGui::SameLine();
+	static const char *const NOTE[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+	ImGui::TextDisabled("%s%d", NOTE[m_audition_key % 12], m_audition_key / 12 - 2);   // XG の数え方（60 = C3）
+	if (hold_on) {
+		const sp::voice v = make_voice();
+		br.post([slot, v](mu2000 &mu) {
+			std::string err;
+			mu.sampling_set_voice(slot, v, err);
+			return err;
+		});
+		m_dirty = false;
+		m_held_key = m_audition_key;
+		const std::vector<u8> msg = { 0xb0, 0x00, 0x10, 0xb0, 0x20, u8(m_bank), 0xc0, u8(m_pgm - 1),
+		                              0x90, u8(m_held_key), 0x64 };
+		br.send(msg);
+	}
+	if (hold_off && m_held_key >= 0) {
+		const std::vector<u8> msg = { 0x80, u8(m_held_key), 0x40 };
+		br.send(msg);
+		m_held_key = -1;
+	}
+
+	if (ImGui::Button(UI_TEXT(smp_apply, "Apply"), ImVec2(fs * 7, 0))) {
+		const sp::voice v = make_voice();
 		std::string done = UI_TEXT(smp_voice_set_fmt, "Wrote Bank# %d, program %d");
 		const int bank = m_bank, pgm = m_pgm;
 		br.post([slot, v, done, bank, pgm](mu2000 &mu) {
@@ -1117,6 +1213,7 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip(UI_TEXT(smp_play_hint_fmt, "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again."),
 		                  m_bank, m_pgm);
+	ImGui::EndChild();
 }
 
 } // namespace ui
