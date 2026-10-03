@@ -550,6 +550,24 @@ int main(int argc, char **argv)
 			      std::to_string(l0[0].frames()) + " → " + std::to_string(l1[0].frames()) + " フレーム、空き +" +
 			      std::to_string(k.mu.sampling_free_frames() - free0));
 		}
+		// 前後の無音を除いた範囲と、範囲を決めた見取り図（拡大）。無音 2000・正弦 4410・無音 3000 のサンプルを足す
+		{
+			std::vector<s16> pad(2000 + 4410 + 3000, 0);
+			for (int i = 0; i < 4410; i++)
+				pad[size_t(2000 + i)] = s16(std::lround(10000 * std::sin(2 * PI * 440.0 * i / RATE + 0.3)));
+			const int n4 = k.mu.sampling_add(pad.data(), pad.size(), "padded", err);
+			u32 a = 0, b = 0;
+			const bool found = n4 > 0 && k.mu.sampling_bounds(n4, 0.01, a, b);
+			std::vector<s16> lo, hi;
+			u32 fr = 0;
+			k.mu.sampling_overview(n4, ui::bridge::WAVE_BUCKETS, lo, hi, fr, 2000, 2100);
+			bool exact = lo.size() == 100;
+			for (size_t i = 0; exact && i < lo.size(); i++)
+				exact = lo[i] == hi[i] && lo[i] == pad[2000 + i];
+			check(found && a >= 2000 && a < 2010 && b > 6400 && b <= 6410 && exact,
+			      "無音を除いた範囲・拡大した見取り図",
+			      std::to_string(a) + " - " + std::to_string(b) + "、見取り図 " + std::to_string(lo.size()) + " 点");
+		}
 		const u8 pc2[] = { 0xc0, 0x01 };
 		for (u8 b : pc2)
 			k.mu.midi_in(b, 0);

@@ -157,7 +157,41 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 	return true;
 }
 
-bool mu2000::sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const
+bool mu2000::sampling_bounds(int number, double ratio, u32 &from, u32 &to) const
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		auto at = [&](u32 i) {
+			const u32 o = (s.start * 2 + i) * 2;
+			const s16 v = s16(m_sampram[o] | m_sampram[o + 1] << 8);
+			return v < 0 ? -int(v) : int(v);
+		};
+		const u32 n = s.frames();
+		if ((s.start * 2 + n) * 2 > m_sampram.size())
+			return false;
+		int peak = 0;
+		for (u32 i = 0; i < n; i++)
+			peak = std::max(peak, at(i));
+		if (!peak)
+			return false;
+		const int thr = std::max(1, int(std::lround(peak * ratio)));
+		u32 a = 0, b = n;
+		while (a < n && at(a) < thr)
+			a++;
+		while (b > a && at(b - 1) < thr)
+			b--;
+		if (b - a < 8)
+			b = std::min(n, a + 8);
+		from = a;
+		to = b;
+		return true;
+	}
+	return false;
+}
+
+bool mu2000::sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames,
+                               u32 from, u32 to) const
 {
 	lo.clear();
 	hi.clear();
@@ -168,14 +202,22 @@ bool mu2000::sampling_overview(int number, int buckets, std::vector<s16> &lo, st
 		frames = s.frames();
 		if (!frames || buckets <= 0)
 			return false;
-		lo.assign(size_t(buckets), 0);
-		hi.assign(size_t(buckets), 0);
-		for (u32 i = 0; i < frames; i++) {
+		if (to <= from || to > frames) {
+			if (to <= from)
+				from = 0;
+			to = frames;
+		}
+		const u32 span = to - from;
+		if (u32(buckets) > span)
+			buckets = int(span);
+		lo.assign(size_t(buckets), 32767);
+		hi.assign(size_t(buckets), -32768);
+		for (u32 i = from; i < to; i++) {
 			const u32 at = (s.start * 2 + i) * 2;
 			if (at + 1 >= m_sampram.size())
 				break;
 			const s16 v = s16(m_sampram[at] | m_sampram[at + 1] << 8);
-			const size_t b = size_t(u64(i) * u64(buckets) / frames);
+			const size_t b = size_t(u64(i - from) * u64(buckets) / span);
 			lo[b] = std::min(lo[b], v);
 			hi[b] = std::max(hi[b], v);
 		}

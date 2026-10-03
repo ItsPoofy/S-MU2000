@@ -486,7 +486,12 @@ inline const ui_texts &en_texts()
 		.smp_trim = "Trim",
 		.smp_trim_clear = "Select all",
 		.smp_trimmed_fmt = "Sample %03d trimmed to %.2f s",
-		.smp_trim_tip = "Drag across the waveform to choose what to keep",
+		.smp_trim_tip = "Drag the start or end line to move it (a click moves the nearer one). Wheel zooms, right-drag scrolls.",
+		.smp_trim_start = "Start",
+		.smp_trim_end = "End",
+		.smp_zoom = "Zoom",
+		.smp_zoom_all = "All",
+		.smp_zoom_sel = "Selection",
 	};
 	return t;
 }

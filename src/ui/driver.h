@@ -30,6 +30,7 @@ class driver
 	std::vector<samp_peak> m_samp_peaks;
 	int m_wave_made = -1;              // 見取り図を作ったサンプル（-1 はまだ）
 	u32 m_wave_frames = 0;
+	u32 m_wave_from = 0, m_wave_to = 0;
 	std::vector<s16> m_wave_lo, m_wave_hi;
 	int m_samp_tick = 0;
 public:
@@ -60,8 +61,10 @@ public:
 			m_samp_peaks.clear();
 			m_wave_made = -1;
 		}
-		const int want_wave = br.overview_wanted();
-		if (want_wave != m_wave_made)
+		const bridge::overview_req want_wave = br.overview_wanted();
+		const bool new_wave = want_wave.number != m_wave_made || want_wave.from != m_wave_from ||
+		                      want_wave.to != m_wave_to;
+		if (new_wave)
 			did = true;
 		if (!did && mu.rec_state() == 0 && ++m_samp_tick < 8)
 			return;
@@ -88,13 +91,18 @@ public:
 		m_samp.free_frames = mu.sampling_free_frames();
 		m_samp.rec_state = mu.rec_state();
 		m_samp.rec_frames = mu.rec_frames();
-		if (want_wave != m_wave_made) {
-			mu.sampling_overview(want_wave, bridge::WAVE_BUCKETS, m_wave_lo, m_wave_hi, m_wave_frames);
-			m_wave_made = want_wave;
+		if (new_wave) {
+			mu.sampling_overview(want_wave.number, bridge::WAVE_BUCKETS, m_wave_lo, m_wave_hi, m_wave_frames,
+			                      want_wave.from, want_wave.to);
+			m_wave_made = want_wave.number;
+			m_wave_from = want_wave.from;
+			m_wave_to = want_wave.to;
 		}
 		// 入れ物は入れ替えて使うので、見取り図も毎回入れ直す
 		m_samp.wave_number = m_wave_made;
 		m_samp.wave_frames = m_wave_frames;
+		m_samp.wave_from = m_wave_from;
+		m_samp.wave_to = m_wave_to;
 		m_samp.wave_lo = m_wave_lo;
 		m_samp.wave_hi = m_wave_hi;
 		m_samp.peak[0] = mu.ad_peak(0);

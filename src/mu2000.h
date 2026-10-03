@@ -302,8 +302,12 @@ public:
 	// [from, to) のサンプル（44.1kHz の位置）だけを残す。縮めて空いた所は詰める（後ろにあるサンプルを前へずらし、
 	// 表の番地も書き直す）。できなければ false（理由は err）
 	bool sampling_trim(int number, u32 from, u32 to, std::string &err);
-	// 見取り図: 波形を buckets 個に分けた、それぞれの最小と最大
-	bool sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames) const;
+	// 前後の無音を除いた範囲 [from, to)。最大の絶対値の ratio 倍以上になる最初と最後（無音なら false）
+	bool sampling_bounds(int number, double ratio, u32 &from, u32 &to) const;
+	// 見取り図: 波形の [from, to)（0, 0 なら全体）を buckets 個に分けた、それぞれの最小と最大。
+	// 範囲が buckets より短ければ 1 サンプルずつ（lo と hi が同じ）
+	bool sampling_overview(int number, int buckets, std::vector<s16> &lo, std::vector<s16> &hi, u32 &frames,
+	                       u32 from = 0, u32 to = 0) const;
 	// まだ録れるサンプル数（44.1kHz）
 	u32 sampling_free_frames() const;
 	// 16bit・44.1kHz の波形をサンプリング RAM の空きへ書き、firmware の表に足す。足したサンプルの番号（1 から）か、

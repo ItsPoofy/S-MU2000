@@ -521,6 +521,11 @@ struct ui_texts {
 	const char *smp_trim_clear;
 	const char *smp_trimmed_fmt;
 	const char *smp_trim_tip;
+	const char *smp_trim_start;
+	const char *smp_trim_end;
+	const char *smp_zoom;
+	const char *smp_zoom_all;
+	const char *smp_zoom_sel;
 };
 
 // Each language file defines one of these (never included directly).

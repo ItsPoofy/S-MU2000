@@ -302,12 +302,23 @@ public:
 		// 窓が選んだサンプルの見取り図（request_overview）。波形を WAVE_BUCKETS 個に分けた最小と最大
 		int wave_number = 0;
 		u32 wave_frames = 0;
+		u32 wave_from = 0, wave_to = 0;   // 見取り図にした範囲（サンプルの位置）
 		std::vector<s16> wave_lo, wave_hi;
 	};
 	static constexpr int WAVE_BUCKETS = 1024;
 	// 見取り図を作ってほしいサンプル（0 = 要らない）
-	void request_overview(int number) { m_wave_want.store(number, std::memory_order_relaxed); }
-	int overview_wanted() const { return m_wave_want.load(std::memory_order_relaxed); }
+	// from, to はサンプルの位置（0, 0 なら全体）。拡大したときはその範囲だけ
+	void request_overview(int number, u32 from = 0, u32 to = 0)
+	{
+		std::lock_guard<std::mutex> lock(m_wave_lock);
+		m_wave_want = { number, from, to };
+	}
+	struct overview_req { int number = 0; u32 from = 0, to = 0; };
+	overview_req overview_wanted() const
+	{
+		std::lock_guard<std::mutex> lock(m_wave_lock);
+		return m_wave_want;
+	}
 	void post(sampling_job job)
 	{
 		std::lock_guard<std::mutex> lock(m_job_lock);
@@ -369,7 +380,8 @@ private:
 	bool m_ain_known = false;
 	std::atomic<int> m_ain_want{-2};
 	std::atomic<bool> m_ain_list_want{false};
-	std::atomic<int> m_wave_want{0};
+	mutable std::mutex m_wave_lock;
+	overview_req m_wave_want;
 
 	// 読み手 1 本の輪。put はメッセージを書き終えてから 1 回で位置を進める
 	class ring

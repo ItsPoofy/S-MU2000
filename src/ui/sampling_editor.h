@@ -17,6 +17,8 @@
 
 #include "xg_ui.h"
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -52,10 +54,15 @@ private:
 	// 一覧で選んだサンプル（0 = 無し）と、音量を変える量（dB）
 	int m_selected = 0;
 	float m_gain_db = 6.0f;
-	// トリムで残す所（波形の幅に対する 0-1）。m_trim_for のサンプルのもの
-	float m_trim0 = 0.0f, m_trim1 = 1.0f;
+	// トリムで残す所 [m_start, m_end)（サンプルの位置）と、表示している範囲（拡大・縮小）。
+	// m_trim_for のサンプル（長さ m_trim_frames）のもの。m_drag は 1 = 始点、2 = 終点、3 = 表示を動かす
+	u32 m_start = 0, m_end = 0;
+	double m_view0 = 0.0, m_view1 = 0.0;
+	int m_drag = 0;
 	int m_trim_for = 0;
-	bool m_trim_drag = false;
+	u32 m_trim_frames = 0;
+	// 前後の無音を除いて選ぶの答え（音源の側で調べる）。上 32bit が始点、下が終点。~0 はまだ、~1 は見つからない
+	std::shared_ptr<std::atomic<u64>> m_auto;
 
 	// 割り当て
 	int m_bank = 0, m_pgm = 1;
