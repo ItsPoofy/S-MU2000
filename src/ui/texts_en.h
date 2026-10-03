@@ -486,7 +486,7 @@ inline const ui_texts &en_texts()
 		.smp_trim = "Trim",
 		.smp_trim_clear = "Select all",
 		.smp_trimmed_fmt = "Sample %03d trimmed to %.2f s",
-		.smp_trim_tip = "Left-click sets the start, right-click the end. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls.",
+		.smp_trim_tip = "Left-click sets the start, right-click the end. Shift-click sets the loop point. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls.",
 		.smp_trim_start = "Start",
 		.smp_trim_end = "End",
 		.smp_zoom = "Zoom",
@@ -497,6 +497,9 @@ inline const ui_texts &en_texts()
 		.smp_play = "Play",
 		.smp_play_stop = "Stop playing",
 		.smp_play_tip = "Plays from the start to the end point as recorded, without the voice's level, pan or pitch",
+		.smp_loop = "Loop",
+		.smp_loop_tip = "While a key is held, repeat from the loop point to the end of the sample. Off plays the sample once.",
+		.smp_loop_at = "Loop point",
 	};
 	return t;
 }

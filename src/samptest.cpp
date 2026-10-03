@@ -627,6 +627,65 @@ int main(int argc, char **argv)
 			check(started && during && k.mu.preview_number() == 0 && tone(k.out, 880) > 0.05,
 			      "試聴: 選んだ範囲を鳴らして止まる", std::to_string(tone(k.out, 880)));
 		}
+
+		// ループ。0.2 秒の 440Hz と 0.2 秒の 660Hz をつないだサンプルを PGM003 に。ループなしなら 0.4 秒で消え、
+		// ループの頭を 660Hz の頭にすると、押しているあいだ 660Hz だけが続く。トリムしてもループの頭は同じ音の所
+		{
+			std::vector<s16> two(RATE * 2 / 5);
+			for (size_t i = 0; i < two.size(); i++)
+				two[i] = s16(std::lround(12000 * std::sin(2 * PI * (i < RATE / 5 ? 440.0 : 660.0) * double(i) / RATE)));
+			const int n5 = k.mu.sampling_add(two.data(), two.size(), "looped", err);
+			sp::voice v5;
+			v5.assigned = true;
+			v5.sample = n5;
+			v5.name = "Looped";
+			k.mu.sampling_set_voice(2, v5, err);
+			const u8 pc3[] = { 0xc0, 0x02 };
+			// 押して 1.2 秒。0.8 秒から後の 0.4 秒を見る
+			auto hold = [&]() {
+				for (u8 b : pc3)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(800);
+				k.out.clear();
+				k.collect = true;
+				k.pump(400);
+				k.collect = false;
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+			};
+			hold();
+			const double once = tone(k.out, 660);
+			const u32 at = RATE / 5;
+			k.mu.sampling_loop(n5, true, at);
+			hold();
+			const double l440 = tone(k.out, 440), l660 = tone(k.out, 660);
+			sp::sample s5;
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s5 = x;
+			check(once < 0.002 && l660 > 0.01 && l660 > 10 * l440 && s5.loop && s5.loop_from == at,
+			      "ループ: 頭から終わりをくり返す",
+			      "なし 660 " + std::to_string(once) + "、あり 440 " + std::to_string(l440) + " 660 " + std::to_string(l660));
+			// 頭の 1000 を切る。ループの頭は 1000 前へ
+			const bool trimmed = k.mu.sampling_trim(n5, 1000, u32(two.size()), err);
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s5 = x;
+			hold();
+			check(trimmed && s5.loop && s5.loop_from == at - 1000 && tone(k.out, 660) > 0.01 &&
+			      tone(k.out, 660) > 10 * tone(k.out, 440),
+			      "ループ: トリムの後もループの頭は同じ所", std::to_string(s5.loop_from));
+			// 試聴もループの頭へ戻って続く
+			k.mu.preview_start(n5, 0, s5.frames(), s5.loop_from);
+			k.pump(600);
+			const bool still = k.mu.preview_number() == n5;
+			k.mu.preview_stop();
+			check(still, "ループ: 試聴も止めるまで続く", std::to_string(k.mu.preview_pos()));
+		}
 	}
 
 	std::printf("サンプリング: 食い違い %d\n", bad);

@@ -350,6 +350,8 @@ void sampling_editor::wave_pane(bridge &br)
 		m_view0 = 0.0;
 		m_view1 = double(frames);
 		m_drag = 0;
+		m_loop_on = sel->loop;
+		m_loop_at = sel->loop_from;
 	}
 	// 表示の範囲。いちばん細かくて 32 サンプル
 	const double min_span = std::min(32.0, double(frames));
@@ -453,15 +455,44 @@ void sampling_editor::wave_pane(bridge &br)
 		});
 	}
 	ImGui::EndDisabled();
+
+	// ---- ループ。鍵盤を押しているあいだ、ループの頭からサンプルの終わりまでをくり返す（変えたらすぐ表へ）
+	const u32 loop_max = frames > 8 ? (frames - 8) & ~1u : 0;
+	auto post_loop = [&]() {
+		const bool on = m_loop_on;
+		const u32 at = m_loop_at;
+		br.post([num, on, at](mu2000 &mu) {
+			mu.sampling_loop(num, on, at);
+			return std::string();
+		});
+	};
+	if (ImGui::Checkbox(UI_TEXT(smp_loop, "Loop"), &m_loop_on))
+		post_loop();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_loop_tip, "While a key is held, repeat from the loop point to the end of the sample. Off plays the sample once."));
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!m_loop_on);
+	ImGui::TextUnformatted(UI_TEXT(smp_loop_at, "Loop point"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 7);
+	int la = int(m_loop_at);
+	if (ImGui::InputInt("##loopat", &la, 2, step_fast)) {
+		m_loop_at = u32(std::clamp(la, 0, int(loop_max))) & ~1u;
+		post_loop();
+	}
+	ImGui::SameLine();
+	ImGui::Text("%.3f s", double(m_loop_at) / rate);
+	ImGui::EndDisabled();
 	ImGui::EndDisabled();
 
-	// ---- 試聴。始点から終点まで（音源を通さない生の音）
+	// ---- 試聴。始点から終点まで（音源を通さない生の音）。ループが入っていれば止めるまでくり返す
 	const bool playing = m_view.preview_number == num;
 	if (!playing) {
 		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
 			const u32 f0 = m_start, f1 = m_end;
-			br.post([num, f0, f1](mu2000 &mu) {
-				mu.preview_start(num, f0, f1);
+			const u32 lp = m_loop_on ? std::max(m_loop_at, m_start) : ~0u;
+			br.post([num, f0, f1, lp](mu2000 &mu) {
+				mu.preview_start(num, f0, f1, lp);
 				return std::string();
 			});
 		}
@@ -515,16 +546,20 @@ void sampling_editor::wave_pane(bridge &br)
 			// ホイールでマウスの所を中心に拡大・縮小
 			if (io.MouseWheel != 0.0f)
 				zoom_at(f_of(io.MousePos.x), io.MouseWheel > 0 ? 0.8 : 1.25);
-			ImGui::SetTooltip("%s", UI_TEXT(smp_trim_tip, "Left-click sets the start, right-click the end. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls."));
+			ImGui::SetTooltip("%s", UI_TEXT(smp_trim_tip, "Left-click sets the start, right-click the end. Shift-click sets the loop point. Drag a line with either button to move it. Wheel zooms, middle-drag scrolls."));
 		}
 		// 線（つまみ）の近くを押したら、どのボタンでもその線を動かす。それ以外は左で始点、右で終点をそこへ。
 		// 中ボタンで表示を動かす
 		if (ImGui::IsItemActivated()) {
-			const float xs = x_of(double(m_start)), xe = x_of(double(m_end));
+			const float xs = x_of(double(m_start)), xe = x_of(double(m_end)), xl = x_of(double(m_loop_at));
 			const float mx = io.MousePos.x, grab = fs * 0.5f;
-			const float ds = std::fabs(mx - xs), de = std::fabs(mx - xe);
+			const float ds = std::fabs(mx - xs), de = std::fabs(mx - xe), dlp = m_loop_on ? std::fabs(mx - xl) : 1e9f;
 			if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
 				m_drag = 3;
+			else if (io.KeyShift)
+				m_drag = 4;   // Shift を押しながらならどのボタンでもループの頭（ループも入れる）
+			else if (dlp <= grab && dlp < ds && dlp < de)
+				m_drag = 4;
 			else if (ds <= grab || de <= grab)
 				m_drag = ds <= de ? 1 : 2;
 			else
@@ -540,10 +575,17 @@ void sampling_editor::wave_pane(bridge &br)
 				const long f = std::lround(std::clamp(f_of(io.MousePos.x), 0.0, double(frames)));
 				if (m_drag == 1)
 					m_start = u32(std::clamp(f, 0L, long(m_end) - 8));
-				else
+				else if (m_drag == 2)
 					m_end = u32(std::clamp(f, long(m_start) + 8, long(frames)));
+				else {
+					m_loop_at = u32(std::clamp(f, 0L, long(loop_max))) & ~1u;
+					m_loop_on = true;
+				}
 			}
 		}
+		// ループの頭は放したときに表へ
+		if (ImGui::IsItemDeactivated() && m_drag == 4)
+			post_loop();
 		if (!ImGui::IsItemActive())
 			m_drag = 0;
 	}
@@ -604,6 +646,13 @@ void sampling_editor::wave_pane(bridge &br)
 	dl->AddLine(ImVec2(xe, p.y), ImVec2(xe, p.y + sz.y), IM_COL32(255, 210, 90, 255), m_drag == 2 ? 3.0f : 2.0f);
 	dl->AddText(ImVec2(xs + 3, p.y + 2), IM_COL32(110, 230, 120, 255), "S");
 	dl->AddText(ImVec2(xe - fs * 0.8f, p.y + 2), IM_COL32(255, 210, 90, 255), "E");
+	// ループするところ（ループの頭からサンプルの終わりまで）を薄く塗り、頭に紫の線
+	if (m_loop_on) {
+		const float xl = x_of(double(m_loop_at)), xf = x_of(double(frames));
+		dl->AddRectFilled(ImVec2(xl, p.y + sz.y - fs * 0.5f), ImVec2(xf, p.y + sz.y), IM_COL32(200, 120, 255, 120));
+		dl->AddLine(ImVec2(xl, p.y), ImVec2(xl, p.y + sz.y), IM_COL32(200, 120, 255, 255), m_drag == 4 ? 3.0f : 2.0f);
+		dl->AddText(ImVec2(xl + 3, p.y + sz.y - fs * 1.6f), IM_COL32(200, 120, 255, 255), "L");
+	}
 	if (playing) {
 		const float xp = x_of(double(m_view.preview_pos));
 		dl->AddLine(ImVec2(xp, p.y), ImVec2(xp, p.y + sz.y), IM_COL32(255, 255, 255, 230), 1.5f);

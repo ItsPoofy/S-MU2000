@@ -486,7 +486,7 @@ inline const ui_texts &ja_texts()
 		.smp_trim = "トリム",
 		.smp_trim_clear = "全体を選ぶ",
 		.smp_trimmed_fmt = "サンプル %03d を %.2f 秒にトリムしました",
-		.smp_trim_tip = "左クリックで始点、右クリックで終点をそこへ。線（つまみ）はどちらのボタンでもつまんで動かせる。ホイールで拡大・縮小、中ボタンのドラッグで表示を動かす",
+		.smp_trim_tip = "左クリックで始点、右クリックで終点をそこへ。Shift を押しながらクリックでループの頭。線（つまみ）はどちらのボタンでもつまんで動かせる。ホイールで拡大・縮小、中ボタンのドラッグで表示を動かす",
 		.smp_trim_start = "始点",
 		.smp_trim_end = "終点",
 		.smp_zoom = "表示",
@@ -497,6 +497,9 @@ inline const ui_texts &ja_texts()
 		.smp_play = "再生",
 		.smp_play_stop = "止める",
 		.smp_play_tip = "始点から終点までを、録ったままの音で鳴らす（音色の音量・パン・音程は効かない）",
+		.smp_loop = "ループ",
+		.smp_loop_tip = "鍵盤を押しているあいだ、ループの頭からサンプルの終わりまでをくり返す。切ると 1 度だけ鳴らす",
+		.smp_loop_at = "ループの頭",
 	};
 	return t;
 }

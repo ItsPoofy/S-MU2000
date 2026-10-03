@@ -226,6 +226,37 @@ int main(int argc, char **argv)
 			std::printf("measure rms %.4f  330 %.5f 440 %.5f 660 %.5f 880 %.5f  peak %.2f Hz\n",
 			            std::sqrt(sum / std::max<size_t>(1, g.out.size())),
 			            tone(g.out, 330), tone(g.out, 440), tone(g.out, 660), tone(g.out, 880), best_f);
+		} else if (cmd == "add") {
+			// add <名前> <周波数1> <ms1> [<周波数2> <ms2>]: 正弦をつないだサンプルを直に足す（src/sampling.cpp）
+			std::string name;
+			double f1 = 440, f2 = 0;
+			u32 ms1 = 0, ms2 = 0;
+			ss >> name >> f1 >> ms1 >> f2 >> ms2;
+			std::vector<s16> pcm;
+			for (u32 i = 0; i < ms1 * RATE / 1000; i++)
+				pcm.push_back(s16(std::lround(12000 * std::sin(2 * PI * f1 * i / RATE))));
+			for (u32 i = 0; i < ms2 * RATE / 1000; i++)
+				pcm.push_back(s16(std::lround(12000 * std::sin(2 * PI * f2 * i / RATE))));
+			std::string err;
+			const int n = g.mu.sampling_add(pcm.data(), pcm.size(), name, err);
+			std::printf("add    %s → %d %s (%zu)\n", name.c_str(), n, err.c_str(), pcm.size());
+		} else if (cmd == "tones") {
+			// tones <ms> <区切り ms>: ms のあいだ出力を集め、区切りごとに大きさと 440/660 の成分を出す
+			u32 ms = 0, step = 100;
+			ss >> ms >> step;
+			g.out.clear();
+			g.collect = true;
+			g.pump(ms);
+			g.collect = false;
+			const size_t w = size_t(step) * RATE / 1000;
+			for (size_t i = 0; i + w <= g.out.size(); i += w) {
+				const std::vector<double> seg(g.out.begin() + long(i), g.out.begin() + long(i + w));
+				double sum = 0;
+				for (double v : seg)
+					sum += v * v;
+				std::printf("  %5zums rms %.4f  440 %.4f 660 %.4f\n", i * 1000 / RATE, std::sqrt(sum / double(w)),
+				            tone(seg, 440), tone(seg, 660));
+			}
 		} else if (cmd == "lcd") {
 			std::printf("lcd    [%s]\n", g.lcd().c_str());
 		} else {

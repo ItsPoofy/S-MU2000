@@ -55,8 +55,11 @@ private:
 	int m_selected = 0;
 	float m_gain_db = 6.0f;
 	// トリムで残す所 [m_start, m_end)（サンプルの位置）と、表示している範囲（拡大・縮小）。
-	// m_trim_for のサンプル（長さ m_trim_frames）のもの。m_drag は 1 = 始点、2 = 終点、3 = 表示を動かす
+	// m_trim_for のサンプル（長さ m_trim_frames）のもの。m_drag は 1 = 始点、2 = 終点、3 = 表示を動かす、
+	// 4 = ループの頭。ループは選んだときに表から読み、変えたらすぐ書く
 	u32 m_start = 0, m_end = 0;
+	bool m_loop_on = false;
+	u32 m_loop_at = 0;
 	double m_view0 = 0.0, m_view1 = 0.0;
 	int m_drag = 0;
 	int m_trim_for = 0;

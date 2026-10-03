@@ -531,6 +531,9 @@ struct ui_texts {
 	const char *smp_play;
 	const char *smp_play_stop;
 	const char *smp_play_tip;
+	const char *smp_loop;
+	const char *smp_loop_tip;
+	const char *smp_loop_at;
 };
 
 // Each language file defines one of these (never included directly).

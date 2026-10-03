@@ -3521,7 +3521,8 @@ void mu2000::run_sample(s32 &left, s32 &right)
 			const s32 o = s32(s64(v) * DAC_FULL_SCALE / 32768);
 			left += o;
 			right += o;
-			m_prev_pos++;
+			if (++m_prev_pos >= m_prev_end && m_prev_loop != ~0u)
+				m_prev_pos = m_prev_loop;
 		} else {
 			m_prev_on = false;
 		}

@@ -28,7 +28,7 @@ constexpr u32 DRAM = 0x1000000;
 constexpr u32 WORD_FLAG = 0x01000000;   // 語の位置に付いている上の印
 
 u32 sample_rec(int n) { return sp::TAB_SAMPLE + 36 * u32(n - 1) - DRAM; }
-u32 play_rec(int n)   { return sp::TAB_PLAY + 16 * u32(n) - DRAM; }
+u32 play_rec(int n)   { return sp::TAB_PLAY + 16 * u32(n - 1) - DRAM; }
 u32 voice_rec(int slot) { return sp::TAB_VOICE + sp::VOICE_SIZE * u32(slot) - DRAM; }
 
 // 表の名前（空白か 0 で終わる）を std::string に
@@ -54,6 +54,21 @@ void put_text(std::vector<u8> &m, u32 off, int len, const std::string &s, u8 fil
 	}
 }
 
+// 鳴らす表の 1 項目を書く。start・end は語、loop_from はサンプル（偶数に切り下げる）。
+// 鳴り始めはいつも start（+4 の下を loop_from にして、ループの頭からそのぶん手前へ戻す）
+void put_play(std::vector<u8> &m, u32 p, u32 start, u32 end, bool loop, u32 loop_from)
+{
+	const u32 frames = (end - start) * 2;
+	loop_from &= ~1u;
+	if (loop_from + 8 > frames)
+		loop_from = 0;
+	static const u8 HEAD[4] = { 0x00, 0x3c, 0x00, 0xff };
+	std::memcpy(&m[p], HEAD, 4);
+	wr32(m, p + 4, (loop ? 0u : 0x40000000u) | loop_from);
+	wr32(m, p + 8, frames - loop_from - 4);
+	wr32(m, p + 12, (start + loop_from / 2) | WORD_FLAG);
+}
+
 } // namespace
 
 std::vector<sp::sample> mu2000::sampling_list() const
@@ -69,6 +84,10 @@ std::vector<sp::sample> mu2000::sampling_list() const
 		s.start = rd32(m_dram, o + 16) & 0xffffff;
 		s.end = rd32(m_dram, o + 20) & 0xffffff;
 		s.name = text(m_dram, o + 28, 8);
+		const u32 p = play_rec(n);
+		s.loop = !(m_dram[p + 4] & 0x40);
+		const u32 head = rd32(m_dram, p + 12) & 0xffffff;
+		s.loop_from = head > s.start && head < s.end ? (head - s.start) * 2 : 0;
 		out.push_back(s);
 	}
 	return out;
@@ -128,14 +147,14 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 		ram[(size_t(start) * 2 + frames) * 2] = 0;
 		ram[(size_t(start) * 2 + frames) * 2 + 1] = 0;
 	}
-	auto set_range = [&](int n, u32 st, u32 en) {
-		const u32 p = play_rec(n), o = sample_rec(n);
-		wr32(m_dram, p, (en - st) * 2 - 4);
-		wr32(m_dram, p + 4, st | WORD_FLAG);
+	// ループの頭は残した所の中での位置へ（切り落とした所にあれば頭へ）
+	auto set_range = [&](const sp::sample &x, u32 st, u32 en, u32 loop_from) {
+		const u32 o = sample_rec(x.number);
+		put_play(m_dram, play_rec(x.number), st, en, x.loop, loop_from);
 		wr32(m_dram, o + 16, st | WORD_FLAG);
 		wr32(m_dram, o + 20, en | WORD_FLAG);
 	};
-	set_range(number, start, new_end);
+	set_range(*s, start, new_end, s->loop_from >= from && s->loop_from < to ? s->loop_from - from : 0);
 	// 後ろにあるものを前へ詰める（番地の若い順に）
 	const u32 gap = old_end - new_end;
 	if (gap) {
@@ -146,7 +165,7 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 		std::sort(later.begin(), later.end(), [](const sp::sample &a, const sp::sample &b) { return a.start < b.start; });
 		for (const sp::sample &x : later) {
 			std::memmove(ram + size_t(x.start - gap) * 4, ram + size_t(x.start) * 4, size_t(x.end - x.start) * 4);
-			set_range(x.number, x.start - gap, x.end - gap);
+			set_range(x, x.start - gap, x.end - gap, x.loop_from);
 		}
 		const u32 next = rd32(m_dram, sp::NEXT_FREE - DRAM) & 0xffffff;
 		if (next >= gap) {
@@ -155,6 +174,20 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 		}
 	}
 	return true;
+}
+
+bool mu2000::sampling_loop(int number, bool on, u32 loop_from)
+{
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		put_play(m_dram, play_rec(number), s.start, s.end, on, loop_from);
+		// EDIT → SAMPLE の Loop と同じく記録の印にも 0x02（パネルの表示が合う）
+		const u32 o = sample_rec(number);
+		m_dram[o + 2] = u8(on ? m_dram[o + 2] | 0x02 : m_dram[o + 2] & ~0x02);
+		return true;
+	}
+	return false;
 }
 
 bool mu2000::sampling_bounds(int number, double ratio, u32 &from, u32 &to) const
@@ -262,11 +295,7 @@ int mu2000::sampling_add(const s16 *pcm, size_t frames, const std::string &name,
 		m_sampram[at + 1] = u8(v >> 8);
 	}
 	// 鳴らすための表
-	const u32 p = play_rec(n);
-	wr32(m_dram, p, (end - start) * 2 - 4);
-	wr32(m_dram, p + 4, start | WORD_FLAG);
-	static const u8 PLAY_TAIL[8] = { 0x00, 0x3c, 0x00, 0xff, 0x40, 0x00, 0x00, 0x00 };
-	std::memcpy(&m_dram[p + 8], PLAY_TAIL, 8);
+	put_play(m_dram, play_rec(n), start, end, false, 0);
 	// サンプルの記録
 	const u32 o = sample_rec(n);
 	m_dram[o] = u8((n - 1) >> 8);
@@ -335,7 +364,7 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 	return true;
 }
 
-bool mu2000::preview_start(int number, u32 from, u32 to)
+bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 {
 	for (const sp::sample &s : sampling_list()) {
 		if (s.number != number)
@@ -347,6 +376,7 @@ bool mu2000::preview_start(int number, u32 from, u32 to)
 		m_prev_base = s.start * 2;
 		m_prev_pos = from;
 		m_prev_end = to;
+		m_prev_loop = loop_at < to ? loop_at : ~0u;
 		m_prev_on = true;
 		return true;
 	}
