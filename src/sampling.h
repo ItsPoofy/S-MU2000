@@ -54,8 +54,11 @@ struct sample
 	u32 start = 0, end = 0;  // サンプリング RAM の語の位置
 	u32 rate = SAMPLE_RATE;
 	int peak = -1;           // 波形の最大の絶対値（16bit）。-1 はまだ測っていない（sampling_peak）
-	bool loop = false;       // 押しているあいだループの頭から終わりまでをくり返す
-	u32 loop_from = 0;       // ループの頭（start からのサンプル数、偶数）
+	// 鳴らす所（波形は切らず、鳴らすための表だけで決める。firmware の EDIT → SAMPLE の Start・End・Loop と同じ欄）。
+	// play_from から鳴り始め、play_to で鳴り終わる。loop なら押しているあいだ loop_from から play_to までをくり返す。
+	// どれも頭からのサンプル数。loop_from は偶数で play_from 以上
+	bool loop = false;
+	u32 play_from = 0, play_to = 0, loop_from = 0;
 	u32 frames() const { return (end - start) * 2; }
 };
 

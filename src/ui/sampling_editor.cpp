@@ -341,18 +341,37 @@ void sampling_editor::wave_pane(bridge &br)
 	const float fs = ImGui::GetFontSize();
 	const bool busy = m_view.rec_state != 0;
 
-	// 選んだサンプルが替わったら（トリムや音量の後で長さが変わったときも）、全体を表示・全体を選ぶ
+	// 選んだサンプルが替わったら（トリムで長さが変わったときも）、全体を表示し、鳴らす所を表から読む
 	if (m_trim_for != num || m_trim_frames != frames) {
 		m_trim_for = num;
 		m_trim_frames = frames;
-		m_start = 0;
-		m_end = frames;
+		m_start = sel->play_from;
+		m_end = sel->play_to ? sel->play_to : frames;
 		m_view0 = 0.0;
 		m_view1 = double(frames);
 		m_drag = 0;
 		m_loop_on = sel->loop;
 		m_loop_at = sel->loop_from;
 	}
+	// 鳴り始め S・鳴り終わり E・ループの頭 L をそろえる（src/sampling.cpp の fit_points と同じ）。
+	// moved は今動かしたもの（1 = S、2 = E、4 = L）。L は S と E の 8 手前のあいだで、S や E に押されて動く
+	auto fit = [&](int moved) {
+		m_end = std::clamp(m_end, std::min(frames, 8u), frames);
+		m_start = std::min(m_start, m_end >= 8 ? m_end - 8 : 0);
+		const u32 lo = (m_start + 1) & ~1u, hi = m_end >= 8 ? (m_end - 8) & ~1u : 0;
+		m_loop_at = std::clamp(m_loop_at & ~1u, std::min(lo, hi), hi);
+		if (moved == 4 && m_loop_at < m_start)
+			m_start = m_loop_at;
+	};
+	// 鳴らす所は変えたらすぐ表へ（波形は切らない）
+	auto post_points = [&]() {
+		const u32 f0 = m_start, f1 = m_end, at = m_loop_at;
+		const bool on = m_loop_on;
+		br.post([num, f0, f1, on, at](mu2000 &mu) {
+			mu.sampling_points(num, f0, f1, on, at);
+			return std::string();
+		});
+	};
 	// 表示の範囲。いちばん細かくて 32 サンプル
 	const double min_span = std::min(32.0, double(frames));
 	auto clamp_view = [&]() {
@@ -396,7 +415,7 @@ void sampling_editor::wave_pane(bridge &br)
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_gain_note, "Rewrites the sample in place. Turning it down and up again loses detail, and turning it up past full scale clips."));
 
-	// ---- トリムの始点と終点（サンプル単位で打ち込める。Shift を押しながら +/- で 10ms）
+	// ---- 鳴り始めと鳴り終わり（サンプル単位で打ち込める。Shift を押しながら +/- で 10ms）
 	ImGui::BeginDisabled(busy);
 	const int step_fast = int(sp::SAMPLE_RATE / 100);
 	int st = int(m_start), en = int(m_end);
@@ -404,16 +423,22 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::TextUnformatted(UI_TEXT(smp_trim_start, "Start"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(fs * 7);
-	if (ImGui::InputInt("##tstart", &st, 1, step_fast))
-		m_start = u32(std::clamp(st, 0, int(m_end) - 8));
+	if (ImGui::InputInt("##tstart", &st, 1, step_fast)) {
+		m_start = u32(std::max(st, 0));
+		fit(1);
+		post_points();
+	}
 	ImGui::SameLine();
 	ImGui::Text("%.3f s", double(m_start) / rate);
 	ImGui::SameLine(0, fs * 1.2f);
 	ImGui::TextUnformatted(UI_TEXT(smp_trim_end, "End"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(fs * 7);
-	if (ImGui::InputInt("##tend", &en, 1, step_fast))
-		m_end = u32(std::clamp(en, int(m_start) + 8, int(frames)));
+	if (ImGui::InputInt("##tend", &en, 1, step_fast)) {
+		m_end = u32(std::max(en, 0));
+		fit(2);
+		post_points();
+	}
 	ImGui::SameLine();
 	ImGui::Text("%.3f s (%.3f s)", double(m_end) / rate, double(m_end - m_start) / rate);
 
@@ -423,6 +448,8 @@ void sampling_editor::wave_pane(bridge &br)
 		if (r != ~u64(1)) {
 			m_start = u32(r >> 32);
 			m_end = u32(r);
+			fit(1);
+			post_points();
 		}
 		m_auto.reset();
 	}
@@ -439,10 +466,15 @@ void sampling_editor::wave_pane(bridge &br)
 	if (ImGui::Button(UI_TEXT(smp_trim_clear, "Select all"))) {
 		m_start = 0;
 		m_end = frames;
+		fit(1);
+		post_points();
 	}
 	ImGui::SameLine();
 	ImGui::BeginDisabled(m_start == 0 && m_end == frames);
-	if (ImGui::Button(UI_TEXT(smp_trim, "Trim"))) {
+	const bool trim = ImGui::Button(UI_TEXT(smp_trim, "Trim"));
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_trim_note, "Cuts away the sound before the start and after the end to free sampling memory. Start and end already work without trimming."));
+	if (trim) {
 		const u32 f0 = m_start, f1 = m_end;
 		std::string trimmed = UI_TEXT(smp_trimmed_fmt, "Sample %03d trimmed to %.2f s");
 		br.post([num, f0, f1, trimmed](mu2000 &mu) {
@@ -456,20 +488,11 @@ void sampling_editor::wave_pane(bridge &br)
 	}
 	ImGui::EndDisabled();
 
-	// ---- ループ。鍵盤を押しているあいだ、ループの頭からサンプルの終わりまでをくり返す（変えたらすぐ表へ）
-	const u32 loop_max = frames > 8 ? (frames - 8) & ~1u : 0;
-	auto post_loop = [&]() {
-		const bool on = m_loop_on;
-		const u32 at = m_loop_at;
-		br.post([num, on, at](mu2000 &mu) {
-			mu.sampling_loop(num, on, at);
-			return std::string();
-		});
-	};
+	// ---- ループ。鍵盤を押しているあいだ、ループの頭から鳴り終わり（E）までをくり返す（変えたらすぐ表へ）
 	if (ImGui::Checkbox(UI_TEXT(smp_loop, "Loop"), &m_loop_on))
-		post_loop();
+		post_points();
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(smp_loop_tip, "While a key is held, repeat from the loop point to the end of the sample. Off plays the sample once."));
+		ImGui::SetTooltip("%s", UI_TEXT(smp_loop_tip, "While a key is held, repeat from the loop point to the end point. Off plays from the start to the end once."));
 	ImGui::SameLine();
 	ImGui::BeginDisabled(!m_loop_on);
 	ImGui::TextUnformatted(UI_TEXT(smp_loop_at, "Loop point"));
@@ -477,8 +500,9 @@ void sampling_editor::wave_pane(bridge &br)
 	ImGui::SetNextItemWidth(fs * 7);
 	int la = int(m_loop_at);
 	if (ImGui::InputInt("##loopat", &la, 2, step_fast)) {
-		m_loop_at = u32(std::clamp(la, 0, int(loop_max))) & ~1u;
-		post_loop();
+		m_loop_at = u32(std::max(la, 0));
+		fit(4);
+		post_points();
 	}
 	ImGui::SameLine();
 	ImGui::Text("%.3f s", double(m_loop_at) / rate);
@@ -490,7 +514,7 @@ void sampling_editor::wave_pane(bridge &br)
 	if (!playing) {
 		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
 			const u32 f0 = m_start, f1 = m_end;
-			const u32 lp = m_loop_on ? std::max(m_loop_at, m_start) : ~0u;
+			const u32 lp = m_loop_on ? m_loop_at : ~0u;
 			br.post([num, f0, f1, lp](mu2000 &mu) {
 				mu.preview_start(num, f0, f1, lp);
 				return std::string();
@@ -578,14 +602,15 @@ void sampling_editor::wave_pane(bridge &br)
 				else if (m_drag == 2)
 					m_end = u32(std::clamp(f, long(m_start) + 8, long(frames)));
 				else {
-					m_loop_at = u32(std::clamp(f, 0L, long(loop_max))) & ~1u;
+					m_loop_at = u32(f);
 					m_loop_on = true;
 				}
+				fit(m_drag);
 			}
 		}
-		// ループの頭は放したときに表へ
-		if (ImGui::IsItemDeactivated() && m_drag == 4)
-			post_loop();
+		// S・E・L は放したときに表へ
+		if (ImGui::IsItemDeactivated() && (m_drag == 1 || m_drag == 2 || m_drag == 4))
+			post_points();
 		if (!ImGui::IsItemActive())
 			m_drag = 0;
 	}
@@ -636,7 +661,7 @@ void sampling_editor::wave_pane(bridge &br)
 			}
 		}
 	}
-	// 残さない所を暗く。始点は緑、終点は黄の線
+	// 鳴らさない所を暗く。鳴り始めは緑、鳴り終わりは黄の線
 	const float xs = x_of(double(m_start)), xe = x_of(double(m_end));
 	if (m_start > 0 || m_end < frames) {
 		dl->AddRectFilled(p, ImVec2(std::max(p.x, xs), p.y + sz.y), IM_COL32(0, 0, 0, 150));
@@ -646,9 +671,9 @@ void sampling_editor::wave_pane(bridge &br)
 	dl->AddLine(ImVec2(xe, p.y), ImVec2(xe, p.y + sz.y), IM_COL32(255, 210, 90, 255), m_drag == 2 ? 3.0f : 2.0f);
 	dl->AddText(ImVec2(xs + 3, p.y + 2), IM_COL32(110, 230, 120, 255), "S");
 	dl->AddText(ImVec2(xe - fs * 0.8f, p.y + 2), IM_COL32(255, 210, 90, 255), "E");
-	// ループするところ（ループの頭からサンプルの終わりまで）を薄く塗り、頭に紫の線
+	// ループするところ（ループの頭から鳴り終わりまで）を薄く塗り、頭に紫の線
 	if (m_loop_on) {
-		const float xl = x_of(double(m_loop_at)), xf = x_of(double(frames));
+		const float xl = x_of(double(m_loop_at)), xf = xe;
 		dl->AddRectFilled(ImVec2(xl, p.y + sz.y - fs * 0.5f), ImVec2(xf, p.y + sz.y), IM_COL32(200, 120, 255, 120));
 		dl->AddLine(ImVec2(xl, p.y), ImVec2(xl, p.y + sz.y), IM_COL32(200, 120, 255, 255), m_drag == 4 ? 3.0f : 2.0f);
 		dl->AddText(ImVec2(xl + 3, p.y + sz.y - fs * 1.6f), IM_COL32(200, 120, 255, 255), "L");

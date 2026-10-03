@@ -534,6 +534,7 @@ struct ui_texts {
 	const char *smp_loop;
 	const char *smp_loop_tip;
 	const char *smp_loop_at;
+	const char *smp_trim_note;
 	const char *smp_env;
 	const char *smp_env_tip;
 	const char *smp_env_attack;

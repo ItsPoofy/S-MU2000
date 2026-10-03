@@ -302,7 +302,10 @@ public:
 	// [from, to) のサンプル（44.1kHz の位置）だけを残す。縮めて空いた所は詰める（後ろにあるサンプルを前へずらし、
 	// 表の番地も書き直す）。できなければ false（理由は err）
 	bool sampling_trim(int number, u32 from, u32 to, std::string &err);
-	// ループ。on なら押しているあいだ loop_from（頭からのサンプル数、偶数に切り下げ）から終わりまでをくり返す
+	// 鳴らす所。from から鳴り始め to で鳴り終わる（to が 0 なら終わりまで）。on なら押しているあいだ
+	// loop_from（偶数に切り下げ、from 以上）から to までをくり返す。波形は切らない（sp::sample の play_from など）
+	bool sampling_points(int number, u32 from, u32 to, bool on, u32 loop_from);
+	// 鳴り始め・鳴り終わりはそのままでループだけ
 	bool sampling_loop(int number, bool on, u32 loop_from);
 	// 前後の無音を除いた範囲 [from, to)。最大の絶対値の ratio 倍以上になる最初と最後（無音なら false）
 	bool sampling_bounds(int number, double ratio, u32 &from, u32 &to) const;

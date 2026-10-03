@@ -686,6 +686,36 @@ int main(int argc, char **argv)
 			k.mu.preview_stop();
 			check(still, "ループ: 試聴も止めるまで続く", std::to_string(k.mu.preview_pos()));
 
+			// 鳴り始め・鳴り終わり（波形は切らない）。440Hz の所は [0, at - 1000)、660Hz はその後
+			const u32 mid = at - 1000;
+			k.mu.sampling_points(n5, 0, mid, true, 0);   // 440Hz だけをくり返す
+			hold();
+			const double p440 = tone(k.out, 440), p660 = tone(k.out, 660);
+			k.mu.sampling_points(n5, mid, 0, false, 0);  // 660Hz から 1 度だけ
+			for (u8 b : pc3)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			k.out.clear();
+			k.collect = true;
+			for (u8 b : on)
+				k.mu.midi_in(b, 0);
+			k.pump(150);
+			k.collect = false;
+			for (u8 b : off)
+				k.mu.midi_in(b, 0);
+			k.pump(300);
+			const double q440 = tone(k.out, 440), q660 = tone(k.out, 660);
+			sp::sample s6;
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n5)
+					s6 = x;
+			check(p440 > 0.01 && p440 > 10 * p660 && q660 > 0.01 && q660 > 10 * q440 && s6.play_from == mid &&
+			      s6.play_to == s6.frames() && !s6.loop && s6.loop_from == mid,
+			      "鳴り始め・鳴り終わり: 終点までループ、始点から鳴る",
+			      "E まで 440 " + std::to_string(p440) + " 660 " + std::to_string(p660) + "、S から 440 " +
+			      std::to_string(q440) + " 660 " + std::to_string(q660));
+			k.mu.sampling_points(n5, 0, 0, true, at - 1000);
+
 			// エンベロープ（ループの入った PGM003 で）。押して 0.8 秒あとと離して 0.15 秒あとの大きさを、既定と比べる
 			auto env = [&](double &held, double &after, double &first) {
 				for (u8 b : pc3)
