@@ -23,6 +23,9 @@ namespace ui {
 class driver
 {
 	bridge::sampling_view m_samp;     // sampling_tick の写し（入れ替えて渡す）
+	// 直前の仕事の結果。写しの入れ物は bridge と入れ替えて 2 つを交互に使うので、結果は外に持って
+	// 毎回入れ直す（入れ物に置くと、新しい結果と古い結果が交互に窓へ届いて表示が行き来した）
+	std::string m_samp_msg;
 	int m_samp_tick = 0;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
@@ -44,13 +47,14 @@ public:
 		bridge::sampling_job job;
 		bool did = false;
 		while (br.take_job(job)) {
-			m_samp.message = job(mu);
+			m_samp_msg = job(mu);
 			did = true;
 		}
 		if (!did && mu.rec_state() == 0 && ++m_samp_tick < 8)
 			return;
 		m_samp_tick = 0;
 		m_samp.ready = mu.midi_ready();
+		m_samp.message = m_samp_msg;
 		m_samp.samples = mu.sampling_list();
 		for (int i = 0; i < smu2000::sampling::MAX_VOICES; i++)
 			mu.sampling_voice(i, m_samp.voices[size_t(i)]);

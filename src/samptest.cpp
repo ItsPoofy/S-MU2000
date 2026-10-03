@@ -499,6 +499,15 @@ int main(int argc, char **argv)
 		check(view.samples.size() == 3 && view.samples[2].name == "wav880" && view.voices[1].name == "Wav880" &&
 		      view.message == "voice",
 		      "窓の道: 仕事を渡して表を読む", view.message);
+		// 写しの入れ物は bridge と driver で入れ替えて使う。何度受け取っても、結果の一言は最後の仕事のまま
+		// （入れ物に置いていたときは、新しい一言と古い一言が交互に届いた）
+		bool steady = true;
+		for (int i = 0; i < 40; i++) {
+			drv.pump_midi(k.mu, br);
+			br.get_sampling(view);
+			steady = steady && view.message == "voice";
+		}
+		check(steady, "窓の道: 結果の一言が行き来しない", view.message);
 		const u8 pc2[] = { 0xc0, 0x01 };
 		for (u8 b : pc2)
 			k.mu.midi_in(b, 0);
