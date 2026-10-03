@@ -517,6 +517,7 @@ void engine::set_output_rate(double rate)
 	m_in_rs.configure(rate, NATIVE_RATE);
 	m_in_w = m_in_r = 0;
 	flush_resampler();
+	m_cpu_meter.reset();
 }
 
 void engine::flush_resampler()
@@ -750,10 +751,11 @@ void engine::publish_load(std::chrono::steady_clock::time_point t0, int n, doubl
 	if (n <= 0 || rate <= 0.0)
 		return;
 	const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-	const double pct = spent * rate / double(n) * 100.0;
-	// 大きい側はそのまま、小さい側はゆっくり（読める動きにする）
-	m_load = pct > m_load ? pct : m_load * 0.9 + pct * 0.1;
-	m_bridge.set_cpu(float(m_load));
+	// MIDI event splitting can make fill() as short as one sample. Accumulate
+	// all such pieces by audio time so a small piece cannot become a fake
+	// 100%+ CPU spike.
+	if (m_cpu_meter.add(spent, double(n) / rate))
+		m_bridge.set_cpu(float(m_cpu_meter.value()));
 	m_bridge.set_engine(m_native_engine.load(std::memory_order_relaxed) ? 1 : 0);
 }
 

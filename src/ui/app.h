@@ -678,7 +678,7 @@ public:
 	{
 		panel.tick(br);
 		if (out && out->produced())
-			br.set_cpu(float(out->cpu_percent()));
+			br.set_cpu(float(out->cpu_recent()));   // 直近の重さ（平均は終わりの集計に）
 		br.set_engine(eng ? eng->native_engine.load() : -1);
 		card_tick();
 		report_drops();

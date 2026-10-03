@@ -14,6 +14,7 @@
 #pragma once
 
 #include "ui/bridge.h"
+#include "ui/cpu_meter.h"
 #include "ui/driver.h"
 #include "ui/resampler.h"
 
@@ -308,7 +309,7 @@ private:
 	std::atomic<void *> m_wg_want{nullptr};
 	void *m_wg_sent = nullptr;
 	std::atomic<int> m_native_engine{0};
-	double m_load = 0.0;           // 一覧に出す重さ（%）
+	ui::cpu_meter m_cpu_meter;     // recent CPU load, measured in audio time
 	ui::driver m_drv;
 
 	// MIDI OUT mirror. pump_out() inside fill() drains the machine queue
