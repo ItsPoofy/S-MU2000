@@ -252,7 +252,7 @@ bool fx_type_menu(const std::vector<xg::fx_type> &types, int current, int &chose
 		}
 		const bool here = current >= 0 && (current >> 7) == msb;
 		char label[64];
-		std::snprintf(label, sizeof(label), "%s（%d）", list[0]->name, int(list.size()));
+		std::snprintf(label, sizeof(label), UI_TEXT(cap_count_fmt, "%s (%d)"), list[0]->name, int(list.size()));
 		const bool open = ImGui::BeginMenu(label);
 		if (help_on() && ImGui::IsItemHovered() && !open)
 			if (const char *h = fx_type_help(msb, list[0]->lsb))
@@ -914,7 +914,7 @@ std::string voice_text(int msb, int lsb, int prog)
 	else if (msb == 0 && lsb == 0)
 		std::snprintf(buf, sizeof(buf), "%3d  %s", prog + 1, gm_name(prog));
 	else
-		std::snprintf(buf, sizeof(buf), "%3d  %s（%d/%d）", prog + 1, gm_name(prog), msb, lsb);
+		std::snprintf(buf, sizeof(buf), UI_TEXT(cap_bank_fmt, "%3d  %s (%d/%d)"), prog + 1, gm_name(prog), msb, lsb);
 	return buf;
 }
 
@@ -1140,7 +1140,7 @@ void program_menu(int part, xg::model &m, const xg_snapshot *ram, bridge &br)
 					continue;
 				}
 				char with_count[80];
-				std::snprintf(with_count, sizeof(with_count), "%s（%d）", label, int(list->size()));
+				std::snprintf(with_count, sizeof(with_count), UI_TEXT(cap_count_fmt, "%s (%d)"), label, int(list->size()));
 				if (ImGui::BeginMenu(with_count)) {
 					for (const bank_choice &c : *list) {
 						char item[64];
@@ -2011,9 +2011,9 @@ std::string official_name(const char *key)
 	if (const xg::param *p = xg::find(key)) {
 		char b[24];
 		if (p->where == xg::area::part)
-			std::snprintf(b, sizeof(b), "（%02X pp %02X）", p->hi, p->lo);
+			std::snprintf(b, sizeof(b), UI_TEXT(cap_pgm_fmt, "(%02X pp %02X)"), p->hi, p->lo);
 		else
-			std::snprintf(b, sizeof(b), "（%02X %02X %02X）", p->hi, p->mid, p->lo);
+			std::snprintf(b, sizeof(b), UI_TEXT(cap_pgm3_fmt, "(%02X %02X %02X)"), p->hi, p->mid, p->lo);
 		name += b;
 	}
 	return name;

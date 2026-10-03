@@ -465,6 +465,13 @@ struct ui_texts {
 	const char *ps_fold_close_hint;  // may contain \n
 	const char *ps_fold_char1;
 	const char *ps_fold_char2;
+	const char *cap_range_fmt;      // "%s %s (%d-%d)"
+	const char *cap_range1_fmt;     // "%s (%d-%d)"
+	const char *cap_count_fmt;      // "%s (%d)"
+	const char *cap_bank_fmt;       // "%3d  %s (%d/%d)"
+	const char *cap_pgm_fmt;        // "(pp pp)"
+	const char *cap_pgm3_fmt;       // "(pp pp pp)"
+	const char *cap_insertion_fmt;  // "%s (INSERTION -> %s)"
 	// Spectrum backdrop fallback (overview.cpp).
 	const char *ov_silent;
 	// Sampling window (sampling_editor.cpp) and its toolbar button.

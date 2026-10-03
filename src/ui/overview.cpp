@@ -440,7 +440,7 @@ void overview::cell(const column &c, int part, xg::model &m, const xg_snapshot &
 		if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 			ImGui::OpenPopup("##type");
 		if (ImGui::BeginPopup("##type")) {
-			ImGui::TextDisabled("%s %s（%d-%d）", master ? "MASTER" : part_name(part).c_str(), p ? p->label : c.title, lo, hi);
+			ImGui::TextDisabled(UI_TEXT(cap_range_fmt, "%s %s (%d-%d)"), master ? "MASTER" : part_name(part).c_str(), p ? p->label : c.title, lo, hi);
 			const ImGuiID typed_id = ImGui::GetID("typed");
 			ImGuiStorage *st = ImGui::GetStateStorage();
 			int typed = st->GetInt(typed_id, v);
@@ -4230,7 +4230,7 @@ void overview::variation_label(int part, xg::model &m, bridge &br, float x0, flo
 	char text[96];
 	const std::string name = has_type ? xg::fx_name(type) : std::string("--");
 	if (conn == 0)
-		std::snprintf(text, sizeof(text), "%s（INSERTION → %s）", name.c_str(),
+		std::snprintf(text, sizeof(text), UI_TEXT(cap_insertion_fmt, "%s (INSERTION -> %s)"), name.c_str(),
 		              who < PARTS + 2 ? part_name(who).c_str() : "OFF");
 	else
 		std::snprintf(text, sizeof(text), "%s", name.c_str());
