@@ -769,6 +769,44 @@ int main(int argc, char **argv)
 					worst = std::max(worst, std::abs(raw(18000 - 16 + i) - before_l[i]));
 				check(xok && worst <= 300 && raw(18000 - 1000) != mid_before,
 				      "つなぎ目: クロスフェード", "終点の手前とループの頭の手前の差 " + std::to_string(worst));
+				// 等パワーの曲線も、終わりではループの頭の手前と同じ形
+				std::vector<int> before_l2;
+				for (u32 i = 0; i < 16; i++)
+					before_l2.push_back(raw(4000 - 16 + i));
+				const bool pok = k.mu.sampling_crossfade(n7, 4000, 12000, 3000, true);
+				int worst2 = 0;
+				for (u32 i = 0; i < 16; i++)
+					worst2 = std::max(worst2, std::abs(raw(12000 - 16 + i) - before_l2[i]));
+				check(pok && worst2 <= 300, "つなぎ目: 等パワーのクロスフェード", "差 " + std::to_string(worst2));
+			}
+
+			// ループ区間を探す。音程がゆっくり揺れる（±1% のビブラート 5Hz）220Hz の中で、0.3 秒以上の組。
+			// 見つかった組は、つなぎ目のまわりの形の差が、適当に選んだ組（周期の整数倍の長さ）より小さい
+			{
+				std::vector<s16> vib(RATE * 2);
+				double ph = 0;
+				for (size_t i = 0; i < vib.size(); i++) {
+					const double f = 220.0 * (1.0 + 0.01 * std::sin(2 * PI * 5.0 * double(i) / RATE));
+					ph += 2 * PI * f / RATE;
+					vib[i] = s16(std::lround(12000 * std::sin(ph)));
+				}
+				u32 l = 0, e = 0;
+				const bool fok = sp::find_loop(vib, 0, u32(vib.size()), RATE * 3 / 10, l, e);
+				auto mismatch = [&](u32 a, u32 b) {
+					double d = 0, s = 0;
+					for (int k2 = -256; k2 < 256; k2++) {
+						const double x = vib[size_t(long(a) + k2)], y = vib[size_t(long(b) + k2)];
+						d += (x - y) * (x - y);
+						s += x * x + y * y;
+					}
+					return d / s;
+				};
+				// 比べる組: 頭 10000、長さは 220Hz の 80 周期（ビブラートで周期がずれる）
+				const double found = fok ? mismatch(l, e) : 1.0, naive = mismatch(10000, 10000 + u32(80 * RATE / 220));
+				check(fok && !(l & 1) && e - l >= RATE * 3 / 10 && found < naive * 0.2 && found < 0.01,
+				      "ループ区間を探す",
+				      std::to_string(l) + " - " + std::to_string(e) + "、差 " + std::to_string(found) + "（適当な組 " +
+				      std::to_string(naive) + "）");
 			}
 
 			// エンベロープ（ループの入った PGM003 で）。押して 0.8 秒あとと離して 0.15 秒あとの大きさを、既定と比べる

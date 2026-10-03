@@ -20,6 +20,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ui {
@@ -27,6 +28,11 @@ namespace ui {
 class sampling_editor : public imgui_view
 {
 public:
+	~sampling_editor() override
+	{
+		if (m_find_thread.joinable())
+			m_find_thread.join();
+	}
 	const wchar_t *title() const override
 	{
 		return get_lang() == lang::ja ? L"S-MU2000 サンプリング" : L"S-MU2000 Sampling";
@@ -67,7 +73,21 @@ private:
 	double m_det_center[3] = {};
 	u32 m_det_last[3] = { ~0u, ~0u, ~0u };   // 前のコマの点の位置（動いたら中心を合わせる）
 	int m_det_drag = -1;
-	int m_xfade_ms = 20;
+	int m_xfade_ms = 150;
+	bool m_xfade_power = true;
+	// ループ区間を探す。stage 0 = 波形を待つ、1 = 写せた（糸を立てる）、2 = 答えが出た
+	struct find_job
+	{
+		std::atomic<int> stage{ 0 };
+		int number = 0;
+		u32 from = 0, to = 0, min_len = 0;
+		std::vector<s16> pcm;
+		bool ok = false;
+		u32 loop_from = 0, loop_to = 0;
+	};
+	std::shared_ptr<find_job> m_find;
+	std::thread m_find_thread;
+	int m_find_ms = 300;
 	// 表へ書いた後の S・E・L（音源の側でそろえた値。吸い付けや E を合わせるで動いたものを窓へ戻す）
 	struct points_result
 	{

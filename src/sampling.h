@@ -13,6 +13,7 @@
 #include "compat/mamecompat.h"
 
 #include <string>
+#include <vector>
 
 namespace smu2000::sampling {
 
@@ -79,6 +80,10 @@ struct voice
 
 // 録音で入力のどれを録るか（firmware の InputSrc と同じ並び）
 enum class source { ad1, ad2, both };
+
+// ループ区間を探す。pcm の [from, to) の中で、長さ min_len 以上の組 (loop_from, loop_to) のうち、
+// つなぎ目のまわりの形がいちばん似ているもの。loop_from は偶数。見つからなければ false（src/sampling.cpp）
+bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &loop_from, u32 &loop_to);
 
 } // namespace smu2000::sampling
 

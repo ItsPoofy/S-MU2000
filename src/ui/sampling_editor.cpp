@@ -645,20 +645,88 @@ void sampling_editor::wave_pane(bridge &br)
 		post_points(8);
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_match_tip, "Moves the end point (within 50 ms) to where the wave looks most like the wave around the loop point, so the jump back is smooth. Works best on a steady, pitched part."));
+	ImGui::EndDisabled();
+
+	// ループ区間を探す（始点から終点のあいだで、長さが決めた ms 以上の組）。重いので波形を写して別の糸で
+	if (m_find && m_find->stage.load(std::memory_order_acquire) == 1 && !m_find_thread.joinable()) {
+		auto f = m_find;
+		m_find_thread = std::thread([f]() {
+			f->ok = sp::find_loop(f->pcm, f->from, f->to, f->min_len, f->loop_from, f->loop_to);
+			f->stage.store(2, std::memory_order_release);
+		});
+	}
+	if (m_find && m_find->stage.load(std::memory_order_acquire) == 2) {
+		if (m_find_thread.joinable())
+			m_find_thread.join();
+		if (m_find->number == num && m_find->ok) {
+			m_loop_on = true;
+			m_loop_at = m_find->loop_from;
+			m_end = m_find->loop_to;
+			fit(4);
+			post_points(0);
+			char buf[160];
+			std::snprintf(buf, sizeof(buf), UI_TEXT(smp_find_done_fmt, "Loop found: %.3f - %.3f s (%.3f s)"),
+			              double(m_loop_at) / rate, double(m_end) / rate, double(m_end - m_loop_at) / rate);
+			m_note = buf;
+		} else if (m_find->number == num) {
+			m_note = UI_TEXT(smp_find_fail, "No loop found: make the range between start and end longer, or the minimum length shorter");
+		}
+		m_find.reset();
+	}
+	const bool finding = m_find != nullptr;
+	ImGui::BeginDisabled(finding);
+	if (ImGui::Button(finding ? UI_TEXT(smp_finding, "Searching...") : UI_TEXT(smp_find, "Find loop"))) {
+		auto f = std::make_shared<find_job>();
+		f->number = num;
+		f->from = m_start;
+		f->to = m_end;
+		f->min_len = u32(m_find_ms) * sp::SAMPLE_RATE / 1000;
+		m_find = f;
+		br.post([num, f](mu2000 &mu) {
+			mu.sampling_pcm(num, f->pcm);
+			f->stage.store(1, std::memory_order_release);
+			return std::string();
+		});
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_find_tip, "Searches between the start and the end for the loop point and end whose waves match best, at least this long. Sets the loop point and the end and turns the loop on."));
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::TextUnformatted(UI_TEXT(smp_find_min, "at least"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(fs * 6);
-	ImGui::InputInt("##xfade", &m_xfade_ms, 5, 20);
-	m_xfade_ms = std::clamp(m_xfade_ms, 1, 500);
+	ImGui::InputInt("##findms", &m_find_ms, 50, 200);
+	m_find_ms = std::clamp(m_find_ms, 10, 5000);
+	ImGui::SameLine(0, 2);
+	ImGui::TextUnformatted("ms");
+
+	ImGui::SameLine(0, fs * 1.2f);
+	ImGui::BeginDisabled(!m_loop_on);
+	ImGui::SetNextItemWidth(fs * 6);
+	ImGui::InputInt("##xfade", &m_xfade_ms, 10, 50);
+	m_xfade_ms = std::clamp(m_xfade_ms, 1, 1000);
 	ImGui::SameLine(0, 2);
 	ImGui::TextUnformatted("ms");
 	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 9);
+	const char *curves[2] = { UI_TEXT(smp_xfade_gain, "Matching waves"), UI_TEXT(smp_xfade_power, "Wavering sound") };
+	if (ImGui::BeginCombo("##xcurve", curves[m_xfade_power ? 1 : 0])) {
+		for (int i = 0; i < 2; i++)
+			if (ImGui::Selectable(curves[i], m_xfade_power == (i == 1)))
+				m_xfade_power = i == 1;
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_xfade_curve_tip, "Matching waves: for a seam whose waves already line up (the level stays even). Wavering sound: for sound whose pitch or tone drifts, with a long crossfade (the sound does not thin out in the middle)."));
+	ImGui::SameLine();
 	if (ImGui::Button(UI_TEXT(smp_xfade, "Crossfade"))) {
 		const u32 l = m_loop_at, e = m_end, len = u32(m_xfade_ms) * sp::SAMPLE_RATE / 1000;
+		const bool power = m_xfade_power;
 		std::string done_x = UI_TEXT(smp_xfade_done_fmt, "Sample %03d: crossfaded %.0f ms before the end");
 		std::string fail_x = UI_TEXT(smp_xfade_fail, "Nothing to crossfade: the loop point needs sound before it");
-		br.post([num, l, e, len, done_x, fail_x](mu2000 &mu) {
+		br.post([num, l, e, len, power, done_x, fail_x](mu2000 &mu) {
 			const u32 use = std::min({ len, l, e > l ? e - l : 0u });
-			if (!mu.sampling_crossfade(num, l, e, len))
+			if (!mu.sampling_crossfade(num, l, e, len, power))
 				return fail_x;
 			char buf[120];
 			std::snprintf(buf, sizeof(buf), done_x.c_str(), num, double(use) * 1000.0 / sp::SAMPLE_RATE);

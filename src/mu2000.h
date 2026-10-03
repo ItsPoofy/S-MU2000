@@ -312,8 +312,11 @@ public:
 	bool sampling_snap(int number, u32 at, bool even, u32 range, u32 &out) const;
 	// match_end: near から range 以内で、まわりの形が loop_from のまわりといちばん似ている鳴り終わり
 	bool sampling_match_end(int number, u32 loop_from, u32 near, u32 range, u32 &out) const;
-	// crossfade: to の手前 len を loop_from の手前 len と混ぜて書き換える（元に戻せない）
-	bool sampling_crossfade(int number, u32 loop_from, u32 to, u32 len);
+	// crossfade: to の手前 len を loop_from の手前 len と混ぜて書き換える（元に戻せない）。
+	// power なら等パワーの曲線（音程が揺れていて形が合わない音向け）、でなければ足して 1（形の似た音向け）
+	bool sampling_crossfade(int number, u32 loop_from, u32 to, u32 len, bool power = false);
+	// サンプルの波形を写す（ループ区間を探すなど、重い計算を別の糸でするため）
+	bool sampling_pcm(int number, std::vector<s16> &out) const;
 	// 前後の無音を除いた範囲 [from, to)。最大の絶対値の ratio 倍以上になる最初と最後（無音なら false）
 	bool sampling_bounds(int number, double ratio, u32 &from, u32 &to) const;
 	// 見取り図: 波形の [from, to)（0, 0 なら全体）を buckets 個に分けた、それぞれの最小と最大。

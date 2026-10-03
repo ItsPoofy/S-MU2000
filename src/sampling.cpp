@@ -300,7 +300,100 @@ bool mu2000::sampling_match_end(int number, u32 loop_from, u32 near, u32 range, 
 	return false;
 }
 
-bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len)
+bool mu2000::sampling_pcm(int number, std::vector<s16> &out) const
+{
+	out.clear();
+	for (const sp::sample &s : sampling_list()) {
+		if (s.number != number)
+			continue;
+		out.resize(s.frames());
+		for (u32 i = 0; i < s.frames(); i++)
+			out[i] = pcm_at(m_sampram, s, i);
+		return true;
+	}
+	return false;
+}
+
+namespace smu2000::sampling {
+
+bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &loop_from, u32 &loop_to)
+{
+	// 候補は下から上へ 0 を横切る所。L と E のまわり ±W の形を比べ（差の 2 乗の和を両方の大きさで割る）、
+	// いちばん似ている組を選ぶ。まず 4 つおきに粗く比べ、よかった組の E を 1 サンプルずつ詰める。
+	// 小さすぎる所（区間の中でいちばん大きい所の 1/20 未満の大きさ）は候補にしない（無音どうしは似て見える）
+	const long W = 256;
+	to = std::min<u32>(to, u32(pcm.size()));
+	if (to <= from || to - from < min_len + 2 * W)
+		return false;
+	auto at = [&](long i) { return i >= 0 && i < long(pcm.size()) ? double(pcm[size_t(i)]) : 0.0; };
+	auto energy = [&](long c) {
+		double e = 0;
+		for (long k = -W; k < W; k += 4)
+			e += at(c + k) * at(c + k);
+		return e;
+	};
+	std::vector<u32> cand;
+	for (u32 i = std::max<u32>(from, W) + 1; i + W < to; i++)
+		if (pcm[i - 1] < 0 && pcm[i] >= 0)
+			cand.push_back(i);
+	if (cand.size() < 2)
+		return false;
+	// 多すぎれば等間隔に間引く（組の数が候補の 2 乗になる）
+	const size_t MAX = 320;
+	if (cand.size() > MAX) {
+		std::vector<u32> thin;
+		for (size_t j = 0; j < MAX; j++)
+			thin.push_back(cand[j * cand.size() / MAX]);
+		cand.swap(thin);
+	}
+	std::vector<double> en(cand.size());
+	double emax = 0;
+	for (size_t j = 0; j < cand.size(); j++)
+		emax = std::max(emax, en[j] = energy(cand[j]));
+	auto score = [&](long l, long e, long step) {
+		double diff = 0, sum = 0;
+		for (long k = -W; k < W; k += step) {
+			const double x = at(l + k), y = at(e + k);
+			diff += (x - y) * (x - y);
+			sum += x * x + y * y;
+		}
+		return sum > 0 ? diff / sum : 1e30;
+	};
+	double best = 1e30;
+	long bl = -1, be = -1;
+	for (size_t a = 0; a < cand.size(); a++) {
+		if (en[a] < emax * 0.05)
+			continue;
+		for (size_t b = a + 1; b < cand.size(); b++) {
+			if (cand[b] - cand[a] < min_len || en[b] < emax * 0.05)
+				continue;
+			const double s = score(cand[a], cand[b], 4);
+			if (s < best) {
+				best = s;
+				bl = cand[a];
+				be = cand[b];
+			}
+		}
+	}
+	if (bl < 0)
+		return false;
+	// ループの頭は偶数（語の境）。E をそれに合わせて 1 サンプルずつ詰める
+	bl &= ~1L;
+	double fine = 1e30;
+	long fe = be;
+	for (long e = std::max<long>(bl + long(min_len), be - 24); e <= std::min<long>(long(to), be + 24); e++)
+		if (const double s = score(bl, e, 1); s < fine) {
+			fine = s;
+			fe = e;
+		}
+	loop_from = u32(bl);
+	loop_to = u32(fe);
+	return true;
+}
+
+} // namespace smu2000::sampling
+
+bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len, bool power)
 {
 	for (const sp::sample &s : sampling_list()) {
 		if (s.number != number)
@@ -312,10 +405,13 @@ bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len)
 		if (len < 2)
 			return false;
 		const double PI = 3.14159265358979323846;
+		// 似た波形どうしは足して 1 の曲線（音量が揃う）。揺れのある音は 2 乗して足して 1 の曲線（途中で痩せない）
 		for (u32 k = 0; k < len; k++) {
-			const double w = 0.5 - 0.5 * std::cos(PI * double(k + 1) / double(len));
+			const double t = double(k + 1) / double(len);
+			const double wa = power ? std::cos(PI * 0.5 * t) : 0.5 + 0.5 * std::cos(PI * t);
+			const double wb = power ? std::sin(PI * 0.5 * t) : 1.0 - wa;
 			const double a = pcm_at(m_sampram, s, to - len + k), b = pcm_at(m_sampram, s, loop_from - len + k);
-			pcm_put(m_sampram, s, to - len + k, std::lround(a * (1 - w) + b * w));
+			pcm_put(m_sampram, s, to - len + k, std::lround(a * wa + b * wb));
 		}
 		// 鳴らすときに E の少し先まで読むことがあるので、E の後ろ（鳴らさない所）を L の後ろと同じに
 		for (u32 k = 0; k < 4 && to + k < n; k++)

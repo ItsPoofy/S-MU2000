@@ -535,6 +535,15 @@ struct ui_texts {
 	const char *smp_loop_tip;
 	const char *smp_loop_at;
 	const char *smp_trim_note;
+	const char *smp_find;
+	const char *smp_finding;
+	const char *smp_find_min;
+	const char *smp_find_tip;
+	const char *smp_find_done_fmt;
+	const char *smp_find_fail;
+	const char *smp_xfade_gain;
+	const char *smp_xfade_power;
+	const char *smp_xfade_curve_tip;
 	const char *smp_audition;
 	const char *smp_audition_tip;
 	const char *smp_audition_key;
