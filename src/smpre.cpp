@@ -318,6 +318,27 @@ int main(int argc, char **argv)
 				g.mu.poke(at, orig);
 				std::fflush(stdout);
 			}
+		} else if (cmd == "card") {
+			// card <MB>: 空のカードを作って差す
+			u32 mb = 32;
+			ss >> mb;
+			std::printf("card   %u MB %s\n", mb, g.mu.card().create(mb) ? "ok" : "だめ");
+		} else if (cmd == "cardfmt") {
+			// cardfmt: 差したカードに smartmedia::format の論理の書式を書く
+			std::printf("cardfmt %s\n", g.mu.card().format() ? "ok" : "だめ");
+		} else if (cmd == "cardsave") {
+			// cardsave <名前>: カードの生の並びを <名前>.sm に
+			std::string name, err;
+			ss >> name;
+			std::printf("cardsave %s %s\n", name.c_str(), g.mu.card().save(out + "/" + name + ".sm", err) ? "ok" : err.c_str());
+		} else if (cmd == "waitgone") {
+			// waitgone <文字列> <最大 ms>: 液晶からその文字列が消えるまで回す
+			std::string what;
+			u32 ms = 10000;
+			ss >> what >> ms;
+			for (u32 t = 0; t < ms && g.lcd().find(what) != std::string::npos; t += 100)
+				g.pump(100);
+			std::printf("wait   [%s]\n", g.lcd().c_str());
 		} else if (cmd == "lcd") {
 			std::printf("lcd    [%s]\n", g.lcd().c_str());
 		} else {

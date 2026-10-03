@@ -36,6 +36,9 @@ public:
 
 	// megabytes は 16 / 32 / 64 / 128。中身は全部 0xFF（書式化されていない）
 	bool create(u32 megabytes);
+	// 作ったばかりのカードに、MU2000 の UTIL → CARD → Format と同じ論理の書式（区画表・ブート・FAT）を書く。
+	// create の直後に呼ぶ（使ったカードの書式化ではない）
+	bool format();
 	// 生の並びのファイルを読む / 書く。大きさから容量を決める
 	bool load(const std::string &path, std::string &err);
 	bool save(const std::string &path, std::string &err) const;

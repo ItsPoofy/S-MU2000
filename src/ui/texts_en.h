@@ -113,8 +113,8 @@ inline const ui_texts &en_texts()
 		.dlg_metal_fail = "Cannot use Metal",
 		.dlg_d3d_fail_fmt = "Cannot use Direct3D 11 (0x%08lx)",
 		.dlg_card_create_fail = "Cannot create the SmartMedia image",
-		.dlg_fresh_card = "Inserted a blank SmartMedia image.\n"
-		                  "Before use, format it on the machine: UTIL → CARD → Format.",
+		.dlg_fresh_card = "Inserted a new SmartMedia image.\n"
+		                  "It is already formatted (as UTIL → CARD → Format leaves it), so it can be saved to right away.",
 		.dlg_cancel = "Cancel",
 		.note_exported_fmt = "Exported (%zu bytes)",
 		.note_export_fail = "Cannot export",

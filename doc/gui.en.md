@@ -35,7 +35,7 @@ colours live in a text file, `panel.txt`. The procedure is in
 Left- or right-click the **card slot** (bottom left) for a menu. The top
 three entries are SmartMedia.
 
-* `Create a new SmartMedia and insert it` → 16 MB / 32 MB / 64 MB / 128 MB. Choose where to save it and an empty card file (`.img`) is created and inserted. Format it in the unit with `UTIL → CARD → Format` before use
+* `Create a new SmartMedia and insert it` → 16 MB / 32 MB / 64 MB / 128 MB. Choose where to save it and a card file (`.img`) is created and inserted. It comes formatted the same way `UTIL → CARD → Format` leaves a card, so it can be saved to right away. While a card is in, its edge shows in the panel's slot
 * `Insert SmartMedia...` inserts a card file made earlier
 * `Eject SmartMedia` writes back to the file, then ejects
 

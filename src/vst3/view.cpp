@@ -392,11 +392,11 @@ void plug_view::card_error(const std::string &err)
 
 void plug_view::card_make(const std::string &path, int mb)
 {
-	// An empty card, in the physical layout a new one comes in: the machine
-	// still has to format it (UTIL -> CARD -> Format) before it stores anything
+	// A new card, already formatted the way the machine's UTIL -> CARD ->
+	// Format leaves it (smartmedia::format), so it can be saved to at once
 	std::string err;
 	smartmedia card;
-	if (!card.create(u32(mb)) || !card.save(path, err)) {
+	if (!card.create(u32(mb)) || !card.format() || !card.save(path, err)) {
 		card_error(err.empty() ? UI_TEXT(dlg_card_create_fail, "Cannot create the SmartMedia image") : err);
 		return;
 	}
@@ -404,12 +404,10 @@ void plug_view::card_make(const std::string &path, int mb)
 		card_error(err);
 		return;
 	}
-	// A fresh card only carries the physical layout, so it has to be formatted
-	// on the machine before it holds anything. gui.cpp says the same thing when
-	// one is made there
+	// Same note as the standalone (app.h new_card)
 	if (m_window)
-		m_window->alert(UI_TEXT(dlg_fresh_card, "Inserted a blank SmartMedia image.\n"
-		                                        "Before use, format it on the machine: UTIL → CARD → Format."));
+		m_window->alert(UI_TEXT(dlg_fresh_card, "Inserted a new SmartMedia image.\n"
+		                                        "It is already formatted (as UTIL → CARD → Format leaves it), so it can be saved to right away."));
 }
 
 void plug_view::card_insert_path(const std::string &path)

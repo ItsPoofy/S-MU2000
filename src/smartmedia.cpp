@@ -95,7 +95,107 @@ void ecc256(const u8 *d, u8 out[3])
 	out[2] = u8(((~reg1) << 2) | 0x03);
 }
 
+// 論理の書式（SSFDC の FAT）。MU2000 の UTIL → CARD → Format が書くものと同じにする
+// （エミュの firmware に 4 つの容量で書式化させて、書かれたページを突き合わせて決めた）。
+// 区画表の CHS・隠しセクター数・FAT の大きさ・ヘッド数などは容量ごとに規格で決まっている
+struct logical_format
+{
+	u32 megabytes;
+	u8  chs_start[3], type, chs_end[3];
+	u32 hidden, total;       // 区画の頭（論理セクター）と、区画のセクター数
+	u16 fat_sectors, sectors_per_track, heads;
+	bool fat16;
+};
+constexpr logical_format FORMATS[] = {
+	{ 16,  { 0x02, 0x0a, 0x00 }, 0x01, { 0x03, 0x50, 0xf3 }, 41, 31959,  3,  16, 4,  false },
+	{ 32,  { 0x02, 0x04, 0x00 }, 0x01, { 0x07, 0x50, 0xf3 }, 35, 63965,  6,  16, 8,  false },
+	{ 64,  { 0x01, 0x18, 0x00 }, 0x01, { 0x07, 0x60, 0xf3 }, 55, 127945, 12, 32, 8,  false },
+	{ 128, { 0x01, 0x10, 0x00 }, 0x06, { 0x0f, 0x60, 0xf3 }, 47, 255953, 32, 32, 16, true },
+};
+
+void put16(u8 *p, u32 v) { p[0] = u8(v); p[1] = u8(v >> 8); }
+void put32(u8 *p, u32 v) { put16(p, v); put16(p + 2, v >> 16); }
+
 } // namespace
+
+bool smartmedia::format()
+{
+	const logical_format *f = nullptr;
+	for (const logical_format &x : FORMATS)
+		if (x.megabytes == megabytes())
+			f = &x;
+	if (!f)
+		return false;
+	// 区画の頭からブート 1 + FAT 2 組 + ルートディレクトリ 256 項目（16 セクター）までを書く。
+	// 論理ブロック n は物理ブロック n + 1（0 は CIS）。書くブロックは全部のページを 0 で埋める
+	const u32 used = f->hidden + 1 + 2 * u32(f->fat_sectors) + 16;
+	const u32 blocks = (used + PAGES_PER_BLOCK - 1) / PAGES_PER_BLOCK;
+	std::vector<u8> sec(size_t(blocks) * PAGES_PER_BLOCK * PAGE, 0);
+	// MBR の区画表（1 つ目の項目）
+	u8 *mbr = sec.data();
+	mbr[446] = 0x80;
+	std::copy(f->chs_start, f->chs_start + 3, mbr + 447);
+	mbr[450] = f->type;
+	std::copy(f->chs_end, f->chs_end + 3, mbr + 451);
+	put32(mbr + 454, f->hidden);
+	put32(mbr + 458, f->total);
+	mbr[510] = 0x55;
+	mbr[511] = 0xaa;
+	// ブートセクター。名前の欄は空白、拡張の印は無し（firmware と同じ）
+	u8 *bs = sec.data() + size_t(f->hidden) * PAGE;
+	bs[0] = 0xe9;
+	std::fill(bs + 3, bs + 11, u8(' '));
+	put16(bs + 11, PAGE);
+	bs[13] = 32;                      // 1 クラスタ 32 セクター
+	put16(bs + 14, 1);                // 予約 1
+	bs[16] = 2;                       // FAT 2 組
+	put16(bs + 17, 256);              // ルートの項目数
+	if (f->total < 0x10000)
+		put16(bs + 19, f->total);
+	else
+		put32(bs + 32, f->total);
+	bs[21] = 0xf8;
+	put16(bs + 22, f->fat_sectors);
+	put16(bs + 24, f->sectors_per_track);
+	put16(bs + 26, f->heads);
+	put32(bs + 28, f->hidden);
+	std::copy_n(f->fat16 ? "FAT16   " : "FAT12   ", 8, bs + 54);
+	bs[510] = 0x55;
+	bs[511] = 0xaa;
+	// FAT の頭（2 組）
+	for (u32 k = 0; k < 2; k++) {
+		u8 *fat = sec.data() + size_t(f->hidden + 1 + k * f->fat_sectors) * PAGE;
+		fat[0] = 0xf8;
+		fat[1] = fat[2] = 0xff;
+		if (f->fat16)
+			fat[3] = 0xff;
+	}
+	// 物理のページへ。予備の領域はブロックの番地（0001 0bbb bbbb bbbp、p で 1 の数を偶数に）と ECC
+	for (u32 lb = 0; lb < blocks; lb++) {
+		u16 addr = u16(0x1000 | (lb << 1));
+		int ones = 0;
+		for (u16 v = addr; v; v &= u16(v - 1))
+			ones++;
+		if (ones & 1)
+			addr |= 1;
+		for (u32 pg = 0; pg < PAGES_PER_BLOCK; pg++) {
+			u8 *p = m_data.data() + (size_t(lb + 1) * PAGES_PER_BLOCK + pg) * page_bytes();
+			const u8 *src = sec.data() + (size_t(lb) * PAGES_PER_BLOCK + pg) * PAGE;
+			std::copy(src, src + PAGE, p);
+			u8 *sp = p + PAGE;
+			std::fill(sp, sp + SPARE, u8(0xff));
+			u8 e1[3], e2[3];
+			ecc256(p, e1);
+			ecc256(p + 256, e2);
+			sp[6] = sp[11] = u8(addr >> 8);
+			sp[7] = sp[12] = u8(addr);
+			sp[8] = e2[0]; sp[9] = e2[1]; sp[10] = e2[2];
+			sp[13] = e1[0]; sp[14] = e1[1]; sp[15] = e1[2];
+		}
+	}
+	m_dirty = true;
+	return true;
+}
 
 bool smartmedia::create(u32 megabytes)
 {

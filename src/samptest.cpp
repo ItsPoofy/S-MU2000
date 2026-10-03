@@ -222,6 +222,17 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 100 && g.lcd().find("Executing") != std::string::npos; i++)
 		g.pump(100);
 	expect("書式化を終えた", "Format");
+	// 新しいカードを作るとき（smartmedia::format）に書く論理の書式は、firmware の書式化と同じ
+	{
+		for (int i = 0; i < 50; i++)
+			g.pump(100);   // 書式化の後片付けが残っていれば待つ
+		smu2000::smartmedia fresh;
+		const bool made = fresh.create(32) && fresh.format();
+		const bool same = made && fresh.raw() == g.mu.card().raw();
+		std::printf("%s 新しいカードの書式が firmware の書式化と同じ\n", same ? "合" : "NG");
+		if (!same)
+			bad++;
+	}
 	g.press(B::exit);
 	g.press(B::exit);
 	g.press(B::exit);

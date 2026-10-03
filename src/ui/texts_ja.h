@@ -113,8 +113,8 @@ inline const ui_texts &ja_texts()
 		.dlg_metal_fail = "Metal を使えない",
 		.dlg_d3d_fail_fmt = "Direct3D 11 を使えない（0x%08lx）",
 		.dlg_card_create_fail = "SmartMedia を作れない",
-		.dlg_fresh_card = "空の SmartMedia を差しました。\n"
-		                  "使う前に、本体の UTIL → CARD → Format で書式化してください。",
+		.dlg_fresh_card = "新しい SmartMedia を差しました。\n"
+		                  "本体の UTIL → CARD → Format と同じ書式化を済ませてあるので、すぐに保存できます。",
 		.dlg_cancel = "キャンセル",
 		.note_exported_fmt = "書き出した（%zu バイト）",
 		.note_export_fail = "書き出せない",
