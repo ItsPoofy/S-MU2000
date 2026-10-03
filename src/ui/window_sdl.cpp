@@ -206,12 +206,13 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 	// Tell the editor windows we are closing, then tear their SDL
 	// resources down here: SDL_Quit below would strand them. (The shared
 	// shutdown runs afterwards; on closed windows its calls do nothing.)
-	pc_shutdown_all(gui.list, gui.pc, gui.fx, gui.shapes, gui.master, gui.br);
+	pc_shutdown_all(gui.list, gui.pc, gui.fx, gui.shapes, gui.master, gui.sampling, gui.br);
 	gui.list.close();
 	gui.pc.close();
 	gui.fx.close();
 	gui.shapes.close();
 	gui.master.close();
+	gui.sampling.close();
 	g_linux = nullptr;
 
 	ui::imshell::sdl_stop(im);

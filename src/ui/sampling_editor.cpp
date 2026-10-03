@@ -962,7 +962,7 @@ void sampling_editor::wave_pane(bridge &br)
 			if (ImGui::IsItemHovered()) {
 				if (io.MouseWheel != 0.0f)
 					dspan *= io.MouseWheel > 0 ? 0.8 : 1.25;
-				ImGui::SetTooltip("%s", UI_TEXT(smp_det_tip, "Left-click or drag to place this point. Wheel zooms."));
+				ImGui::SetTooltip("%s", UI_TEXT(smp_det_tip, "Left-click or drag to place this point. Wheel zooms. With the loop on, the faint wave shows what plays on the other side of the jump."));
 			}
 			if (ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 				m_det_drag = w;
