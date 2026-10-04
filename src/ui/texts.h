@@ -634,6 +634,10 @@ struct ui_texts {
 	const char *smp_key_range;
 	const char *smp_vel_range;
 	const char *smp_tab_make;
+	const char *smp_tab_prepare;
+	const char *smp_tab_record;
+	const char *smp_tab_process;
+	const char *smp_tab_voice;
 	const char *smp_make;
 	const char *smp_make_basic;
 	const char *smp_make_bars;
