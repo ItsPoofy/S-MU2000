@@ -32,6 +32,7 @@
 #import <TargetConditionals.h>
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -192,11 +193,17 @@ std::string rom_dir()
 	// layoutSubviews refits the panel from the real size every time.
 	panel_view.translatesAutoresizingMaskIntoConstraints = NO;
 	[vc.view addSubview:panel_view];
+	// Pinned to the safe area on all four sides, not the view edges: the panel's
+	// top strip (List/Editor/... buttons) went under the iPad menu bar and the
+	// status area with edge pins, making the editor-launching buttons visible
+	// but untappable. The bars this leaves are UIKit's problem (letterbox), and
+	// every control stays reachable - which is the whole point of a panel.
+	UILayoutGuide *safe = vc.view.safeAreaLayoutGuide;
 	[NSLayoutConstraint activateConstraints:@[
-		[panel_view.leadingAnchor constraintEqualToAnchor:vc.view.leadingAnchor],
-		[panel_view.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor],
-		[panel_view.topAnchor constraintEqualToAnchor:vc.view.topAnchor],
-		[panel_view.bottomAnchor constraintEqualToAnchor:vc.view.bottomAnchor],
+		[panel_view.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+		[panel_view.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
+		[panel_view.topAnchor constraintEqualToAnchor:safe.topAnchor],
+		[panel_view.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor],
 	]];
 
 // Touch works now (one finger = mouse, held second finger = right button), so

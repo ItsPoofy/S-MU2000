@@ -24,16 +24,17 @@
 
 #import "audio_unit.h"
 
-// The panel is AppKit. iOS builds this extension as com.apple.AudioUnit - principal
-// class NSObject, no view - until there is a UIKit panel (src/auv3/factory_ios.mm,
-// doc/ios-auv3.md), so the whole view path is compiled out rather than ported.
-// Nothing else in this file is AppKit: AUAudioUnit, AUMIDIEventList and AUEventBlock
-// are all there on iOS. Adding the panel means dropping the guard below and adding
-// the UIKit view controller alongside it.
+// The panel is view_controller.h (AppKit) on macOS, view_controller_ios.h
+// (UIKit) on iOS: same shared editor through src/vst3/panel_uiview.mm, only the
+// host-side view class differs. Nothing else in this file is AppKit:
+// AUAudioUnit, AUMIDIEventList and AUEventBlock are all there on iOS.
 #import <TargetConditionals.h>
 #if !TARGET_OS_IPHONE
 #import "view_controller.h"
 #import <Cocoa/Cocoa.h>
+#import <CoreAudioKit/CoreAudioKit.h>
+#else
+#import "view_controller_ios.h"
 #import <CoreAudioKit/CoreAudioKit.h>
 #endif
 
@@ -546,9 +547,39 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 }
 #endif
 
-#if !TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
+// The iOS twin of the method above: same contract (main thread, logged answer),
+// UIViewController instead of NSViewController. Hosts that embed through the
+// principal AUViewController never call this; hosts that ask (auval-style
+// validation, some DAWs) get the same panel.
+- (void)requestViewControllerWithCompletionHandler:(void (^)(UIViewController * __nullable))completionHandler
+{
+	// **view を触るのは主の糸で。** The mac twin's note applies unchanged:
+	// loadView lays out preferredContentSize, which throws off-main-thread.
+	smu2000::vst3::engine *eng = _engine.get();
+	AUAudioUnit *au = self;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		eng->log_line("画面を頼まれた");
+		SMU2000ViewControllerV3 *vc =
+		    [[SMU2000ViewControllerV3 alloc] initWithEngine:eng audioUnit:au];
+		UIViewController *answer = (vc && vc.view) ? vc : nil;
+		char b[96];
+		if (answer)
+			std::snprintf(b, sizeof(b), "画面を渡した %g x %g",
+			              answer.view.frame.size.width, answer.view.frame.size.height);
+		else
+			std::snprintf(b, sizeof(b), "画面を渡せない");
+		eng->log_line(b);
+		if (completionHandler)
+			completionHandler(answer);
+	});
+}
+#endif
+
 // 画面の置き方。パネルは決まった大きさ（1400x360）1 枚だけなので、
-// どれを渡されても全部使えると答える
+// どれを渡されても全部使えると答える。Foundation only (NSIndexSet/NSArray),
+// so this compiles on iOS as it stands - the guard that used to be here was
+// AppKit by association, not by content.
 - (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations
 {
 	_engine->log_line("置き方を聞かれた");
@@ -557,7 +588,6 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 		[s addIndex:i];
 	return s;
 }
-#endif
 
 // The one factory preset, like the AUv2's. Choosing it puts the defaults
 // back; anything else is ignored

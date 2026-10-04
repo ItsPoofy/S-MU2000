@@ -21,6 +21,7 @@
 #include "ui/window_ios.h"
 
 #include "ui/app_ios.h"
+#include "ui/menu_ios.h"
 
 // imgui_shell.h imports Metal and QuartzCore itself now, so nothing here has to
 // remember to do it first - which is what ui/app.h -> ui/shot.h -> imgui_shell.h
@@ -234,17 +235,12 @@
 // The context menu, from the same menu_groups the desktop renders into HMENU
 // and NSMenu, acted on through the same menu_chosen(id).
 //
-// An action sheet is the honest iOS mapping, with three documented flattenings
-// where sheets cannot do what menus do:
-//   titled groups have no submenus on a sheet, so the title goes in as a
-//     disabled header action and the items follow at top level (macOS nests
-//     them: the four MIDI ports live under their titles there);
-//   separators have no equivalent and are skipped;
-//   checked items get a "✓ " prefix (macOS has a real checkmark state).
-// The shortcut hint keeps macOS's （...） shape so both read the same.
-//
-// iPad popover anchoring is load-bearing, not cosmetic: presenting an action
-// sheet on iPad without sourceView/sourceRect crashes. The tap point anchors it.
+// A UIEditMenuInteraction presents it: the compact anchored bubble iOS uses for
+// pop-up menus (checkmarks, real submenus, no Cancel row). The menu is the
+// app's own - every group in context_menu() rendered in order, titled groups
+// nested with chevrons exactly as NSMenu nests them on macOS. The presenting
+// lives in the shared menu_ios helper; see it for the one documented difference
+// (UIMenu has no separator element, so separator items render as nothing).
 - (void)showMenuAt:(CGPoint)p
 {
 	ui::gui_app *theApp = self->app;
@@ -253,58 +249,9 @@
 	std::vector<ui::menu_group> groups = theApp->context_menu((int)p.x, (int)p.y);
 	if (groups.empty())
 		return;
-
-	UIAlertController *sheet = [UIAlertController
-		alertControllerWithTitle:nil
-		                 message:nil
-		          preferredStyle:UIAlertControllerStyleActionSheet];
-	for (const ui::menu_group &g : groups) {
-		if (!g.title.empty()) {
-			NSString *head = [NSString stringWithUTF8String:g.title.c_str()];
-			UIAlertAction *h = [UIAlertAction actionWithTitle:head
-			                                            style:UIAlertActionStyleDefault
-			                                          handler:nil];
-			h.enabled = NO;
-			[sheet addAction:h];
-		}
-		for (const ui::menu_item &item : g.items) {
-			if (item.separator)
-				continue;
-			NSString *title = [NSString stringWithUTF8String:item.label.c_str()];
-			if (!item.shortcut.empty()) {
-				NSString *hint = [NSString stringWithUTF8String:item.shortcut.c_str()];
-				title = [[title stringByAppendingString:@"（"] stringByAppendingString:hint];
-				title = [title stringByAppendingString:@"）"];
-			}
-			if (item.checked)
-				title = [@"✓ " stringByAppendingString:title];
-			const int itemId = item.id;
-			const BOOL enabled = item.enabled ? YES : NO;
-			UIAlertAction *a = [UIAlertAction
-				actionWithTitle:title
-				          style:UIAlertActionStyleDefault
-				        handler:^(UIAlertAction *act) {
-					        (void)act;
-					        theApp->menu_chosen(itemId);
-				        }];
-			a.enabled = enabled;
-			[sheet addAction:a];
-		}
-	}
-	[sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
-	                                          style:UIAlertActionStyleCancel
-	                                        handler:nil]];
-
-	UIViewController *vc = self.window.rootViewController;
-	if (!vc)
-		return;
-	UIPopoverPresentationController *pop = sheet.popoverPresentationController;
-	if (pop) {
-		pop.sourceView = vc.view;
-		pop.sourceRect = CGRectMake(p.x, p.y, 1, 1);
-		pop.permittedArrowDirections = UIPopoverArrowDirectionAny;
-	}
-	[vc presentViewController:sheet animated:YES completion:nil];
+	show_menu_groups(self, p, groups, [theApp](int itemId) {
+		theApp->menu_chosen(itemId);
+	});
 }
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event

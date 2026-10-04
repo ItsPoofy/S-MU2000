@@ -13,7 +13,7 @@
                                 prefix-extension of its app's - installing gave
                                 "Mismatched bundle IDs" with the macOS-style
                                 com.tarboh.smu2000.auv3.au.ios, because the app is
-                                com.tarboh.smu2000.ios
+                                com.tarboh.smu2000.ios.app
 
   MinimumOSVersion is 17.0. The AUv3 itself only needs 14 - AUMIDIEventList with
   64-bit words (MIDI 1.0 UMP), which the four virtual MIDI cables want, arrived
@@ -37,10 +37,18 @@
 	<key>CFBundleExecutable</key>
 	<string>S-MU2000AU</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.tarboh.smu2000.ios.auv3</string>
+	<string>com.tarboh.smu2000.ios.app.auv3</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
+	<string>S-MU2000 AUv3</string>
+	<!--
+	  CFBundleDisplayName is required on device: installd refuses an appex
+	  without one (MIInstallerErrorDomain 53, MissingBundleDisplayNameString).
+	  The simulator never checks, so this was invisible until the first device
+	  install of the extension.
+	-->
+	<key>CFBundleDisplayName</key>
 	<string>S-MU2000 AUv3</string>
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
@@ -84,14 +92,14 @@
 			</array>
 		</dict>
 		<!--
-		  com.apple.AudioUnit, not -UI, for now: principal class is NSObject +
-		  AUAudioUnitFactory (see src/auv3/factory_ios.mm). The extension sounds the
-		  same either way; only the host's request for a view never arrives. That buys a
-		  working iOS plug-in before the UIKit view layer exists. Switch both this line
-		  and the principal class to the AUViewController form once there is a panel.
+		  com.apple.AudioUnit-UI: principal class is SMU2000FactoryV3, an
+		  AUViewController that is also the AUAudioUnitFactory (see
+		  src/auv3/factory_ios.mm) - the same one-class shape as macOS. The panel
+		  is view_controller_ios.mm's, the same shared editor through
+		  src/vst3/panel_uiview.mm.
 		-->
 		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.AudioUnit</string>
+		<string>com.apple.AudioUnit-UI</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>SMU2000FactoryV3</string>
 	</dict>

@@ -1429,7 +1429,7 @@ IOS_CXXFLAGS := $(filter-out -mmacosx-version-min=% -O3,$(CXXFLAGS)) $(IOS_OPTFL
 # CTFontDescriptorCreateWithAttributes / CTFontDescriptorCopyAttribute to find the CJK
 # face. The header compiles on iOS; it is the link that needs the framework.
 IOS_FW := -framework Foundation -framework AudioToolbox -framework AVFoundation \
-          -framework AVFAudio \
+          -framework AVFAudio -framework CoreAudioKit -framework UniformTypeIdentifiers \
           -framework CoreAudio -framework CoreMIDI -framework UIKit -framework Metal \
           -framework QuartzCore -framework CoreGraphics -framework CoreText
 
@@ -1450,9 +1450,18 @@ IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
                src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
                src/ui/master_editor.cpp src/ui/fx_icons.cpp
 
+# The AUv3-UI: factory_ios.mm is the AUViewController + factory (one class,
+# like macOS), view_controller_ios.mm hosts the shared panel through
+# src/vst3/panel_uiview.mm, and view.cpp is the shared plug_view both draw.
+# view_mac.mm / panel_nsview.mm stay mac-only; this is their UIKit twin.
+# pc_window_ios.mm is the editors' iOS host: the plugin UI opens the same five
+# editors through it (ios_window::open_pc_window), so it links here, not only
+# in the standalone.
 IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
+                 src/auv3/view_controller_ios.mm \
                  src/mu2000.cpp \
-                 src/vst3/engine.cpp src/vst3/iids.cpp \
+                 src/vst3/engine.cpp src/vst3/iids.cpp src/vst3/view.cpp \
+                 src/vst3/panel_uiview.mm src/vst3/view_ios.mm src/ui/menu_ios.mm src/ui/pc_window_ios.mm \
                  $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
 IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
@@ -1464,7 +1473,7 @@ IOS_IMGUI_OBJS := $(IMGUI_CORE:%.cpp=$(IOS_BUILD)/%.o) \
 
 $(IOS_BUILD)/$(IMGUI_DIR)/backends/imgui_impl_metal.o: $(IMGUI_DIR)/backends/imgui_impl_metal.mm
 	@mkdir -p $(dir $@)
-	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -c -o $@ $<
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -fobjc-arc -c -o $@ $<
 
 $(IOS_BUILD)/%.o: %.cpp
 	@mkdir -p $(dir $@)
@@ -1496,9 +1505,104 @@ IOS_APPEX_STAMP := $(IOS_ROOT)/.appex.stamp
 # definition gives an empty target name and make reports nothing to do, silently.
 IOS_APPEX_PLIST := $(IOS_APPEX)/Info.plist
 
-$(IOS_APPEX_STAMP): $(IOS_BIN) $(IOS_APPEX_PLIST) ios-auv3-roms
+# Device provisioning lives HERE, above first use: every SIGN_DEPS/SIGN_FLAGS
+# below is :=-expanded at its rule, and a use above the definition silently
+# expands empty (the fourth time this trap has bitten - see the comment inside).
+# ---- device provisioning (iphoneos only) --------------------------------------
+# A real device's installd refuses a bundle without embedded.mobileprovision:
+# "Application is missing the application-identifier entitlement". The profile
+# comes from one manual Xcode pass (team + run on the device) and lives in
+# ~/Library/MobileDevice/Provisioning Profiles/. This finds it by the bundle id
+# read from the packaging plist (so renames propagate) and fails LOUDLY when
+# absent, instead of producing an app that installs nowhere. The simulator needs
+# ad-hoc and nothing else, so all of it is iphoneos-only.
+#
+# Only the app profile is handled: whether installd also demands one for the
+# appex id is unknown until an install says so - that is the next round IF the
+# error names it, not a structure built on a guess.
+ifeq ($(IOS_SDK_NAME),iphoneos)
+IOS_BUNDLE_ID := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" packaging/ios-app-Info.plist)
+IOS_APPEX_ID  := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" packaging/auv3-ios-appex-Info.plist)
+# Two locations: Xcode 27 keeps managed profiles under UserData, older Xcode (and
+# manual downloads) under MobileDevice. Both are searched; the bundle id decides.
+IOS_PROV_DIRS := $(HOME)/Library/Developer/Xcode/UserData/Provisioning\ Profiles $(HOME)/Library/MobileDevice/Provisioning\ Profiles
+
+# The embedded profiles, found by bundle id in both Xcode profile locations
+# (UserData for Xcode 27 managed profiles, MobileDevice for older/manual ones).
+# File targets so they copy once; IOS_PROFILE / IOS_APPEX_PROFILE override with
+# explicit paths when several match or the wrong one wins. The printed basename
+# says which one won, so a surprise is visible rather than silent.
+$(IOS_APP)/embedded.mobileprovision:
+	@prof="$(IOS_PROFILE)"; \
+	if [ -z "$$prof" ]; then \
+	  for d in "$(HOME)/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+	           "$(HOME)/Library/MobileDevice/Provisioning Profiles"; do \
+	    for f in "$$d"/*.mobileprovision; do \
+	      [ -f "$$f" ] || continue; \
+	      if security cms -D -i "$$f" 2>/dev/null | grep -q "<string>[A-Z0-9]*\.$(IOS_BUNDLE_ID)</string>"; then \
+	        prof="$$f"; break 2; \
+	      fi; \
+	    done; \
+	  done; \
+	fi; \
+	if [ -z "$$prof" ]; then \
+	  echo "ios: no provisioning profile for $(IOS_BUNDLE_ID) - Xcode once (team + run on the device) first"; \
+	  exit 1; \
+	fi; \
+	cp -f "$$prof" $@; \
+	echo "ios: embedded $$(basename "$$prof")"
+
+# The appex carries its own profile too (its id differs): installd checks nested
+# code, so hoping the app's profile covers it is a guess the error would bill.
+# Same search, same loud failure, its own override.
+$(IOS_APPEX)/embedded.mobileprovision:
+	@prof="$(IOS_APPEX_PROFILE)"; \
+	if [ -z "$$prof" ]; then \
+	  for d in "$(HOME)/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+	           "$(HOME)/Library/MobileDevice/Provisioning Profiles"; do \
+	    for f in "$$d"/*.mobileprovision; do \
+	      [ -f "$$f" ] || continue; \
+	      if security cms -D -i "$$f" 2>/dev/null | grep -q "<string>[A-Z0-9]*\.$(IOS_APPEX_ID)</string>"; then \
+	        prof="$$f"; break 2; \
+	      fi; \
+	    done; \
+	  done; \
+	fi; \
+	if [ -z "$$prof" ]; then \
+	  echo "ios: no provisioning profile for $(IOS_APPEX_ID) - Xcode needs an extension target, or the portal"; \
+	  exit 1; \
+	fi; \
+	cp -f "$$prof" $@; \
+	echo "ios: embedded $$(basename "$$prof") in appex"
+
+# The entitlements the profiles carry (application-identifier above all).
+# PlistBuddy prints the Entitlements subdict as XML, which is what --entitlements
+# wants at top level.
+$(IOS_ROOT)/app.xcent: $(IOS_APP)/embedded.mobileprovision
+	@security cms -D -i $< -o $(IOS_ROOT)/prov.plist
+	@/usr/libexec/PlistBuddy -x -c "Print :Entitlements" $(IOS_ROOT)/prov.plist > $@
+
+$(IOS_ROOT)/appex.xcent: $(IOS_APPEX)/embedded.mobileprovision
+	@security cms -D -i $< -o $(IOS_ROOT)/prov-appex.plist
+	@/usr/libexec/PlistBuddy -x -c "Print :Entitlements" $(IOS_ROOT)/prov-appex.plist > $@
+
+IOS_APP_SIGN_DEPS  := $(IOS_APP)/embedded.mobileprovision $(IOS_ROOT)/app.xcent
+IOS_APP_SIGN_FLAGS := --entitlements $(IOS_ROOT)/app.xcent
+IOS_APPEX_SIGN_DEPS  := $(IOS_APPEX)/embedded.mobileprovision $(IOS_ROOT)/appex.xcent
+IOS_APPEX_SIGN_FLAGS := --entitlements $(IOS_ROOT)/appex.xcent
+else
+IOS_APP_SIGN_DEPS  :=
+IOS_APP_SIGN_FLAGS :=
+# Simulator: the shipped (empty) entitlements file. One --entitlements only -
+# codesign takes a single one, so the device branch above replaces this rather
+# than adding to it.
+IOS_APPEX_SIGN_DEPS  :=
+IOS_APPEX_SIGN_FLAGS := --entitlements packaging/auv3-ios-appex.entitlements
+endif
+
+$(IOS_APPEX_STAMP): $(IOS_BIN) $(IOS_APPEX_PLIST) ios-auv3-roms $(IOS_APPEX)/art/real/panel.txt $(IOS_APPEX_SIGN_DEPS)
 	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none \
-	          --entitlements packaging/auv3-ios-appex.entitlements $(IOS_APPEX)
+	          $(IOS_APPEX_SIGN_FLAGS) $(IOS_APPEX)
 	@touch $@
 
 .PHONY: ios-auv3-signed
@@ -1559,6 +1663,7 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
                 src/xg/model.cpp \
                 src/ui/window_ios.mm src/ui/app_ios.cpp src/ui/pc_window_ios.mm \
+                src/ui/menu_ios.mm \
                 src/ios/app.mm
 
 # MIDI: the Mac ports, used by iOS UNCHANGED. CoreMIDI.h is complete on iOS -
@@ -1631,7 +1736,7 @@ $(IOS_STANDALONE): $(IOS_GUI_OBJS) $(IOS_APPLE_PORT_OBJS) $(IOS_AUDIO_OBJS) \
 
 $(IOS_BUILD)/src/ios/smoke.o: src/ios/smoke.mm
 	@mkdir -p $(dir $@)
-	$(CXX) $(IOS_CXXFLAGS) -c -o $@ $<
+	$(CXX) $(IOS_CXXFLAGS) -fobjc-arc -c -o $@ $<
 
 $(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
 	@mkdir -p $(dir $@)
@@ -1645,7 +1750,7 @@ $(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
 # Simulator first: no signing, no certificate, no device.
 #   make ios-standalone IOS_SDK_NAME=iphonesimulator
 #   xcrun simctl install booted build-ios/simulator/S-MU2000.app
-#   xcrun simctl launch booted com.tarboh.smu2000.ios
+#   xcrun simctl launch booted com.tarboh.smu2000.ios.app
 #   make ios-app IOS_SDK_NAME=iphonesimulator
 #   xcrun simctl boot "iPhone 18 Pro"
 #   xcrun simctl install booted build-ios/simulator/S-MU2000.app
@@ -1679,13 +1784,14 @@ ios-app-info: $(IOS_APP)/Info.plist
 # standalone's stamp was defined 25 lines below its own rule.
 IOS_PANEL_DIR   := $(IOS_APP)/art/real
 
+
 IOS_SMOKE_STAMP := $(IOS_ROOT)/.smoke.stamp
 IOS_APP_STAMP  := $(IOS_ROOT)/.standalone.stamp
 
-$(IOS_SMOKE_STAMP): $(IOS_APP_BIN) $(IOS_APP)/Info.plist $(IOS_APPEX_STAMP)
+$(IOS_SMOKE_STAMP): $(IOS_APP_BIN) $(IOS_APP)/Info.plist $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable S-MU2000" \
 	    $(IOS_APP)/Info.plist
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP)
+	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
 	@touch $@
 
 .PHONY: ios-app
@@ -1709,10 +1815,10 @@ ios-app: $(IOS_SMOKE_STAMP)
 # a phony prerequisite simply always runs, and running it with an empty IOS_ROMS
 # does nothing.
 $(IOS_APP_STAMP): $(IOS_STANDALONE) $(IOS_APP)/Info.plist \
-                  $(IOS_PANEL_DIR)/panel.txt ios-app-roms $(IOS_APPEX_STAMP)
+                  $(IOS_PANEL_DIR)/panel.txt ios-app-roms $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Standalone" \
 	    $(IOS_APP)/Info.plist
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP)
+	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
 	@touch $@
 
 .PHONY: ios-app-stamp
@@ -1746,6 +1852,19 @@ $(IOS_PANEL_DIR)/panel.txt: $(wildcard art/real/*.png) art/real/panel.txt
 .PHONY: ios-panel-art
 
 ios-panel-art: $(IOS_PANEL_DIR)/panel.txt
+
+# The appex gets its own copy: S-MU2000AU.appex/art/real/. The extension is a
+# separate process with its own module_dir (the appex root), so the app's copy is
+# unreachable from it - and without this the AUv3 UI would silently fall back to
+# built-in defaults while the standalone shows full art. Same step-4 lookup, same
+# top-level shape that signs. Duplicated bytes, zero shared-container wrangling.
+$(IOS_APPEX)/art/real/panel.txt: $(wildcard art/real/*.png) art/real/panel.txt
+	@mkdir -p $(dir $@)
+	@cp -f art/real/*.png art/real/panel.txt $(dir $@)
+
+.PHONY: ios-appex-art
+
+ios-appex-art: $(IOS_APPEX)/art/real/panel.txt
 
 # The standalone's ROMs. Beside the binary (S-MU2000.app/roms/), which is engine
 # candidate 3b (module_dir + "roms" in src/vst3/engine.cpp) - so no code change is

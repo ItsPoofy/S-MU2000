@@ -117,10 +117,14 @@
 - (void)viewDidLoad
 {
 	[super viewDidLoad];
-	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
-		initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-		                     target:self
-		                     action:@selector(done:)];
+	// Plain titled button, not the system Done item: on current iOS the system
+	// item renders as a blue circle-checkmark, which reads as decoration rather
+	// than "close this". Text that says Done needs no interpretation.
+	UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"Done"
+	                                                         style:UIBarButtonItemStyleDone
+	                                                        target:self
+	                                                        action:@selector(done:)];
+	self.navigationItem.leftBarButtonItem = done;
 }
 
 - (void)done:(id)sender
@@ -160,10 +164,14 @@ NSString *title_of_view(const imgui_view &view)
 // so an editor opened from a menu (no view at hand) still lands correctly.
 UIViewController *top_presenter()
 {
+	// Preferred: the foreground-active scene's key window. Strictly, because a
+	// background scene's window must not present.
+	// Fallback: any window scene's key window. At scene-connect time (and in
+	// tests that open windows from startup) nothing is foreground-active yet,
+	// and refusing there turns a timing detail into a hard failure.
 	UIViewController *top = nil;
+	UIViewController *fallback = nil;
 	for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-		if ([scene activationState] != UISceneActivationStateForegroundActive)
-			continue;
 		if (![scene isKindOfClass:UIWindowScene.class])
 			continue;
 		UIWindow *win = nil;
@@ -175,9 +183,14 @@ UIViewController *top_presenter()
 		}
 		if (!win)
 			continue;
-		top = win.rootViewController;
-		break;
+		if ([scene activationState] == UISceneActivationStateForegroundActive) {
+			top = win.rootViewController;
+			break;
+		}
+		if (!fallback)
+			fallback = win.rootViewController;
 	}
+	top = top ? top : fallback;
 	while (top && [top presentedViewController])
 		top = [top presentedViewController];
 	return top;
@@ -244,7 +257,20 @@ bool pc_window::create(std::string &err)
 
 	PCEditController *vc = [[PCEditController alloc] init];
 	vc.title = title_of_view(*m_view);
-	vc.view = view;
+	// Subview pinned to the safe area, not the root view: edge-to-edge puts
+	// content under the status bar and home indicator (the main panel had the
+	// same bug with its editor-launching buttons untappable). Same pattern as
+	// the standalone's panel for the same reason.
+	vc.view.backgroundColor = UIColor.blackColor;
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	[vc.view addSubview:view];
+	UILayoutGuide *safe = vc.view.safeAreaLayoutGuide;
+	[NSLayoutConstraint activateConstraints:@[
+		[view.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+		[view.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
+		[view.topAnchor constraintEqualToAnchor:safe.topAnchor],
+		[view.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor],
+	]];
 	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
 	nav.modalPresentationStyle = UIModalPresentationFullScreen;
 	h->vc = nav;

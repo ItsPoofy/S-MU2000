@@ -124,7 +124,7 @@ static const AudioComponentDescription kDesc = {
 		[self log:@"FAIL setFormat: %@", err];
 		return;
 	}
-	if (![au allocateRenderResourcesWithError:&err]) {
+	if (![au allocateRenderResourcesAndReturnError:&err]) {
 		[self log:@"FAIL allocateRenderResources: %@", err];
 		return;
 	}
