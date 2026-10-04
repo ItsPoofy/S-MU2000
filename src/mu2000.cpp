@@ -3224,6 +3224,24 @@ void mu2000::run_sample(s32 &left, s32 &right)
 	    !(++m_scope_tick & 0xff))
 		scope_refresh_owner();
 
+	// パートのミュート。消すパートの声を SWP30 に伝える（外したときは 1 度だけ空にする）
+	if (const u64 pm = m_part_mute.load(std::memory_order_relaxed); pm || m_mute_live) {
+		if (!pm || !(++m_mute_tick & 0x1f)) {
+			u64 vm[2] = { 0, 0 };
+			if (pm) {
+				scope_refresh_owner();
+				for (int v = 0; v < 128; v++) {
+					const int o = m_scope_owner[size_t(v)].load(std::memory_order_relaxed);
+					if (o >= 0 && ((pm >> o) & 1))
+						vm[v / 64] |= u64(1) << (v % 64);
+				}
+			}
+			m_swpm.m_voice_mute.store(vm[0], std::memory_order_relaxed);
+			m_swps.m_voice_mute.store(vm[1], std::memory_order_relaxed);
+			m_mute_live = pm != 0;
+		}
+	}
+
 	// 台数が変わっていたら別スレッドの使い方を見直す（8192 サンプルごと）
 	if (m_want_threaded && !(++m_thread_check & 0x1fff))
 		apply_threading();

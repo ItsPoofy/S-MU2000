@@ -3203,7 +3203,7 @@ void overview::row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, f
 		                   m.get(P("part.program"), part, prog);
 		msb = shown_bank_msb(part, m, msb);      // GS のドラム（issue #52）
 		bool has_rcv = m.get(P("part.rcv_channel"), part, rcv);
-		const bool silenced = m_saved_rcv[part] >= 0;
+		const bool silenced = this->silenced(part);
 		if (silenced) {
 			rcv = m_saved_rcv[part];                 // 表示は元のチャンネル
 			has_rcv = true;
@@ -4321,42 +4321,27 @@ void overview::mute_buttons(int part, float px, float py, float w, float h)
 }
 
 
+// ミュートとソロ。消すパートを音源に伝え、音源がそのパートの声をミックスの手前で 0 にする（mu2000::set_part_mute）。
+// 前は XG の受信チャンネルを OFF にしていたが、firmware が MIDI を受けないデモ曲の再生中は効かなかった（イシュー #113）。
+// いまは MIDI を通さないので、曲の設定も書き換えない
 void overview::apply_mutes(xg::model &m, bridge &br)
 {
-	bool any_solo = false;
+	(void)m;
+	u64 mask = 0;
 	for (int p = 0; p < PARTS; p++)
-		any_solo |= m_solo[p];
-	const xg::param &prcv = P("part.rcv_channel");
-	for (int p = 0; p < PARTS; p++) {
-		const bool want = m_mute[p] || (any_solo && !m_solo[p]);
-		int rcv = 127;
-		const bool known = m.get(prcv, p, rcv);
-		if (m_saved_rcv[p] >= 0 && known && rcv != 127)
-			m_saved_rcv[p] = -1;                    // 曲などが受信チャンネルを書き換えた
-		if (want && m_saved_rcv[p] < 0 && known && rcv < PARTS) {
-			// 鳴っている音を先に止める（受信を切るとノートオフも届かなくなるため）
-			const u8 off[3] = { u8(0xb0 | (rcv & 15)), 120, 0 };
-			br.send_port(rcv / 16, off, 3);
-			br.send(m.set(prcv, p, 127));
-			m_saved_rcv[p] = rcv;
-		} else if (!want && m_saved_rcv[p] >= 0) {
-			br.send(m.set(prcv, p, m_saved_rcv[p]));
-			m_saved_rcv[p] = -1;
-		}
-	}
+		if (silenced(p))
+			mask |= u64(1) << p;
+	br.set_part_mute(mask);
 }
 
 
 void overview::hidden(bridge &br)
 {
 	release_keys(br);
-	// ミュートとソロは、この窓で聞き比べるためのもの。閉じたら外す（受信チャンネルを戻す）
-	for (int p = 0; p < PARTS; p++) {
+	// ミュートとソロは、この窓で聞き比べるためのもの。閉じたら外す
+	for (int p = 0; p < PARTS; p++)
 		m_mute[p] = m_solo[p] = false;
-		if (m_saved_rcv[p] >= 0 && m_model)
-			br.send(m_model->set(P("part.rcv_channel"), p, m_saved_rcv[p]));
-		m_saved_rcv[p] = -1;
-	}
+	br.set_part_mute(0);
 }
 
 

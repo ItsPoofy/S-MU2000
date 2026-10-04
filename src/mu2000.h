@@ -392,6 +392,11 @@ public:
 	// 一覧が見えている間だけ動かす（set_part_scopes(false) で止まる）。音には触らない
 	static constexpr size_t PSCOPE_N = 1024;
 	void set_part_scopes(bool on);
+	// パートを音源の中で消す（bit n = パート n、0-63）。MIDI を通さないので、firmware が MIDI を受けない
+	// デモ曲の再生中でも効く。声 → パートを 32 サンプル（0.7ms）ごとに読み直し、消すパートの声を SWP30 の
+	// ミックスの手前で 0 にする。0 を渡せば元どおり（イシュー #113）。どの糸から呼んでもよい
+	void set_part_mute(u64 mask) { m_part_mute.store(mask, std::memory_order_relaxed); }
+	u64 part_mute() const { return m_part_mute.load(std::memory_order_relaxed); }
 	// part 0-63 はそのパートの声の和、PSCOPE_OUT は最終の出力。直近の n サンプル（n ≤ PSCOPE_N、古い順）
 	static constexpr int PSCOPE_OUT = 64;
 	void part_scope_read(int part, float *out, size_t n) const;
@@ -938,6 +943,9 @@ private:
 	std::array<std::array<float, SCOPE_N>, 2> m_scope_ring{};
 	std::array<std::atomic<u32>, 2> m_scope_w{};          // チップごとの書いた数
 	u32 m_scope_tick = 0;
+	std::atomic<u64> m_part_mute{0};   // set_part_mute
+	bool m_mute_live = false;          // SWP30 に声のミュートを入れてある
+	u32 m_mute_tick = 0;
 	static void scope_tap_fn(void *ctx, const s32 *samples);
 	// インサーションの出口（MEG の m20-m2f。scope_meg_fn）。インサーション 1 はマスタの m28/m29、
 	// 2-4 はスレーブの m28/m29・m2a/m2b・m2c/m2d（firmware が組む MEG の割り付け。エミュで実測）

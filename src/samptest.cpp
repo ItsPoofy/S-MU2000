@@ -1423,6 +1423,20 @@ int main(int argc, char **argv)
 				sp::voice v_vc = base;
 				v_vc.el[0].vel_curve = 2;
 				const double c2 = rms(sound(v_vc), RATE / 2, RATE / 2);
+				// パートのミュート（mu2000::set_part_mute。MIDI を通さず、音源の中でそのパートの声を消す。イシュー #113）。
+				// 鳴らしているのはパート 1。パート 1 を消すと無音、パート 2 だけ消すなら元どおり鳴る
+				k.mu.set_part_mute(1);
+				const double mute1 = rms(sound(base), RATE / 2, RATE / 2);
+				k.mu.set_part_mute(2);
+				const double mute2 = rms(sound(base), RATE / 2, RATE / 2);
+				k.mu.set_part_mute(0);
+				const double mute0 = rms(sound(base), RATE / 2, RATE / 2);
+				const double plain_rms = rms(plain, RATE / 2, RATE / 2);
+				check(mute1 < 0.001 * plain_rms && std::fabs(mute2 / plain_rms - 1.0) < 0.05 && std::fabs(mute0 / plain_rms - 1.0) < 0.05,
+				      "パートのミュート（音源の中で消す）",
+				      "パート 1 を消すと " + std::to_string(mute1 / plain_rms) + " 倍、パート 2 だけ消すと " + std::to_string(mute2 / plain_rms) +
+				      " 倍、外すと " + std::to_string(mute0 / plain_rms) + " 倍");
+
 				// 読み戻し
 				sp::voice wr = base, rd;
 				wr.el[0].lfo_wave = 2;

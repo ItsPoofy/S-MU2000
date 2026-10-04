@@ -355,6 +355,7 @@ public:
 	             bool ready, const char *message)
 	{
 		br.advance_clock(frames, rate);
+		mu.set_part_mute(br.part_mute());           // ミュート・ソロは次のブロックから効く
 		m_since += frames;
 		if (m_since < rate / 40)
 			return;
