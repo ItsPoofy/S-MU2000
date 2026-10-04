@@ -86,6 +86,54 @@ inline void install()
 	std::set_terminate(on_terminate);
 }
 
+// ---- プラグイン（ホストのプロセスに読み込まれる DLL）用
+// abort・std::terminate に加えて、**この DLL の中で**起きたアクセス違反なども書く（ホストやほかのプラグインの
+// ものは書かない）。DLL が外れるときに必ず uninstall すること: 残すと、消えたコードを指す受け口がプロセスに残る
+inline HMODULE &plugin_module() { static HMODULE m = nullptr; return m; }
+inline void *&plugin_veh() { static void *h = nullptr; return h; }
+inline void (*&plugin_prev_abort())(int) { static void (*p)(int) = SIG_DFL; return p; }
+
+inline LONG CALLBACK on_exception(EXCEPTION_POINTERS *x)
+{
+	static LONG count = 0;
+	const DWORD code = x->ExceptionRecord->ExceptionCode;
+	if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO &&
+	    code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_ARRAY_BOUNDS_EXCEEDED)
+		return EXCEPTION_CONTINUE_SEARCH;
+	HMODULE mod = nullptr;
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                        static_cast<LPCSTR>(x->ExceptionRecord->ExceptionAddress), &mod) || mod != plugin_module())
+		return EXCEPTION_CONTINUE_SEARCH;
+	if (InterlockedIncrement(&count) > 4)        // 同じ所でくり返すなら、最初の数回だけ
+		return EXCEPTION_CONTINUE_SEARCH;
+	char why[96];
+	std::snprintf(why, sizeof(why), "exception 0x%08lx at +0x%llx", code,
+	              (unsigned long long)(static_cast<const char *>(x->ExceptionRecord->ExceptionAddress) - reinterpret_cast<const char *>(mod)));
+	write(why);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+inline void install_plugin(HMODULE self)
+{
+	if (plugin_module())
+		return;
+	plugin_module() = self;
+	plugin_prev_abort() = std::signal(SIGABRT, on_abort);
+	std::set_terminate(on_terminate);
+	plugin_veh() = AddVectoredExceptionHandler(0, on_exception);
+}
+
+inline void uninstall_plugin()
+{
+	if (!plugin_module())
+		return;
+	if (plugin_veh())
+		RemoveVectoredExceptionHandler(plugin_veh());
+	plugin_veh() = nullptr;
+	std::signal(SIGABRT, plugin_prev_abort());
+	plugin_module() = nullptr;
+}
+
 } // namespace smu2000::crash_log
 
 #endif

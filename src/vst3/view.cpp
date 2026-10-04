@@ -198,6 +198,7 @@ tresult PLUGIN_API plug_view::isPlatformTypeSupported(FIDString type)
 
 tresult PLUGIN_API plug_view::attached(void *parent, FIDString type)
 {
+	engine::trace("view attached", this);
 	if (isPlatformTypeSupported(type) != kResultTrue || !parent)
 		return kResultFalse;
 	if (m_window)
@@ -210,11 +211,13 @@ tresult PLUGIN_API plug_view::attached(void *parent, FIDString type)
 		return kResultFalse;
 	}
 	m_impl->panel.resize(m_w, m_h);
+	engine::trace("view attached done", this);
 	return kResultOk;
 }
 
 tresult PLUGIN_API plug_view::removed()
 {
+	engine::trace("view removed", this);
 	// The card file is the project's data, so the last of it is written back
 	// before the window goes: a host that closes the editor and never saves
 	// still keeps what the machine wrote
@@ -225,6 +228,7 @@ tresult PLUGIN_API plug_view::removed()
 		m_window = nullptr;
 	}
 	m_engine.notify_idle(true);
+	engine::trace("view removed done", this);
 	return kResultOk;
 }
 
