@@ -323,6 +323,11 @@ int main(int argc, char **argv)
 			u32 mb = 32;
 			ss >> mb;
 			std::printf("card   %u MB %s\n", mb, g.mu.card().create(mb) ? "ok" : "だめ");
+		} else if (cmd == "cardload") {
+			// cardload <ファイル>: カードの画像ファイルを差す
+			std::string path, err;
+			ss >> path;
+			std::printf("cardload %s %s\n", path.c_str(), g.mu.card().load(path, err) ? "ok" : err.c_str());
 		} else if (cmd == "cardfmt") {
 			// cardfmt: 差したカードに smartmedia::format の論理の書式を書く
 			std::printf("cardfmt %s\n", g.mu.card().format() ? "ok" : "だめ");

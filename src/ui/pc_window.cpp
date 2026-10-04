@@ -33,8 +33,11 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	if (ask == xgui::file_ask::save)
 		wcscpy_s(path, L"S-MU2000.syx");
 	const bool wav = ask == xgui::file_ask::open && xgui::file_ask_is_wav();
+	const bool card = ask == xgui::file_ask::open && xgui::file_ask_is_card();
 	// Bound here: the dialog reads the filter while it runs.
-	const std::wstring filter = wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio"), "*.wav",
+	const std::wstring filter = card ? dlg_filter(UI_TEXT(dlg_smartmedia_desc, "SmartMedia image"), "*.img;*.sm",
+	                                              UI_TEXT(dlg_all_files, "All files"), "*.*")
+	                          : wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio"), "*.wav",
 	                                             UI_TEXT(dlg_all_files, "All files"), "*.*")
 	                                 : dlg_filter(UI_TEXT(dlg_sysex_desc, "SysEx"), "*.syx",
 	                                              UI_TEXT(dlg_all_files, "All files"), "*.*");
@@ -61,6 +64,11 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 	if (!GetOpenFileNameW(&o))
 		return;
+	// カードの画像は大きい（最大 132MB）ので読まずに、場所だけを返す（読むのはサンプリングの窓）
+	if (card) {
+		xgui::give_opened_card(to_utf8(path));
+		return;
+	}
 	std::vector<u8> in;
 	if (std::FILE *f = _wfopen(path, L"rb")) {
 		u8 buf[65536];

@@ -615,6 +615,7 @@ bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 		to = std::min(to ? to : s.frames(), s.frames());
 		if (from >= to)
 			return false;
+		m_prev_ext.clear();
 		m_prev_number = number;
 		m_prev_base = s.start * 2;
 		m_prev_pos = from;
@@ -624,6 +625,20 @@ bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 		return true;
 	}
 	return false;
+}
+
+void mu2000::preview_pcm(std::vector<s16> pcm, u32 loop_at)
+{
+	m_prev_on = false;
+	if (pcm.empty())
+		return;
+	m_prev_ext = std::move(pcm);
+	m_prev_number = -1;
+	m_prev_base = 0;
+	m_prev_pos = 0;
+	m_prev_end = u32(m_prev_ext.size());
+	m_prev_loop = loop_at < m_prev_end ? loop_at : ~0u;
+	m_prev_on = true;
 }
 
 void mu2000::rec_start(sp::source src, int trigger, u32 max_frames)

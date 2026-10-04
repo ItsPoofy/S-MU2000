@@ -270,6 +270,8 @@ public:
 	// 中身は状態の保存に入れないので、使う側がファイルに書き出す（take_dirty_blocks / write_blocks）
 	smu2000::smartmedia &card() { return m_card; }
 	bool card_inserted() const { return m_card.inserted(); }
+	// 電源を入れてから回したサンプル数（ボタンのマクロなど、音源の時間で待つ用）
+	u64 samples_run() const { return m_sample_count; }
 	// サンプリング RAM（4MB）。確かめる用
 	const std::vector<u8> &sample_ram() const { return m_sampram; }
 	// サンプリングの管理情報（サンプルの一覧・音色）を見るため
@@ -345,6 +347,9 @@ public:
 	// 編集の確かめ用で、実機には無い道（音色の Level・Pan・音程は効かない）
 	// loop_at が to より前なら、to まで来たら loop_at へ戻って止めるまで続ける
 	bool preview_start(int number, u32 from, u32 to, u32 loop_at = ~0u);
+	// 外の PCM（カードの M2A の波形など、サンプリング RAM に無いもの）を同じように鳴らす。
+	// 44.1kHz・16bit・モノラルで渡す。鳴らしている間 preview_number() は -1
+	void preview_pcm(std::vector<s16> pcm, u32 loop_at = ~0u);
 	void preview_stop() { m_prev_on = false; }
 	int preview_number() const { return m_prev_on ? m_prev_number : 0; }
 	u32 preview_pos() const { return m_prev_pos; }
@@ -963,6 +968,7 @@ private:
 	bool m_prev_on = false;
 	int m_prev_number = 0;
 	u32 m_prev_base = 0, m_prev_pos = 0, m_prev_end = 0, m_prev_loop = ~0u;
+	std::vector<s16> m_prev_ext;   // preview_pcm の波形（空ならサンプリング RAM から）
 	s32 m_ad_in[2] = {};            // A/D INPUT（set_audio_input）
 	s32 m_ad_peak[2] = {};          // A/D INPUT のピーク（レベルメーター、AN0 / AN2）。状態の保存には入れない
 	u16 ad_level_adc(int i) const

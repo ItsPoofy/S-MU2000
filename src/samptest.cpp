@@ -13,6 +13,9 @@
 #include "ui/bridge.h"
 #include "ui/driver.h"
 #include "wav_in.h"
+#include "card_fs.h"
+#include "m2a.h"
+#include "ui/panel_macro.h"
 
 #include <cmath>
 #include <cstdio>
@@ -253,6 +256,50 @@ int main(int argc, char **argv)
 		g.pump(100);
 	expect("書き終えた", "<SAVE>");
 
+	// カードの中身を本体を通さずに読む（サンプリングの窓の「カード」。card_fs.h・m2a.h）。
+	// 書いた M2A の波形が、firmware の表のサンプル 1 と同じ長さ・同じ音で、そのまま試聴できる
+	{
+		std::vector<smu2000::cardfs::entry> files;
+		std::vector<u8> m2a;
+		std::vector<smu2000::m2a::wave> waves;
+		std::string err;
+		bool listed = smu2000::cardfs::list(g.mu.card().raw(), files, err);
+		bool found = false;
+		for (const auto &e : files)
+			found |= e.path == "ALL_SEQ.M2A";
+		const bool read = found && smu2000::cardfs::read(g.mu.card().raw(), "ALL_SEQ.M2A", m2a, err);
+		const bool parsed = read && smu2000::m2a::parse(m2a, waves, err);
+		const auto list = g.mu.sampling_list();
+		const bool same_len = parsed && waves.size() == 1 && !list.empty() &&
+		                      waves[0].frames + 2 >= list[0].frames() && waves[0].frames <= list[0].frames();
+		std::vector<s16> pcm = same_len ? smu2000::m2a::pcm(m2a, waves[0]) : std::vector<s16>();
+		std::vector<double> x;
+		for (size_t i = RATE / 10; i < pcm.size() && i < RATE / 2; i++)
+			x.push_back(pcm[i] / 32768.0);
+		const bool tone_ok = !x.empty() && tone(x, 440) > 10 * std::max(tone(x, 330), tone(x, 587));
+		std::printf("%s カードを外から読む             %zu ファイル、波形 %zu 個、%u / %u サンプル %s\n",
+		            listed && tone_ok ? "合" : "NG", files.size(), waves.size(), waves.empty() ? 0u : waves[0].frames,
+		            list.empty() ? 0u : list[0].frames(), err.c_str());
+		if (!(listed && tone_ok))
+			bad++;
+
+		// 外の PCM の試聴（preview_pcm）。音源を通さずに鳴り、終われば止まる
+		g.out.clear();
+		const size_t n = pcm.size();
+		g.mu.preview_pcm(std::move(pcm));
+		g.collect = true;
+		g.pump(200);
+		g.collect = false;
+		const bool playing = g.mu.preview_number() == -1;
+		const double p440 = tone(g.out, 440), p330 = tone(g.out, 330);
+		g.pump(u32(n * 1000 / RATE) + 100);
+		const bool stopped = g.mu.preview_number() == 0;
+		const bool prev_ok = n && playing && stopped && p440 > 0.01 && p440 > 10 * p330;
+		std::printf("%s 外の PCM の試聴                440Hz %.4f / 330Hz %.5f\n", prev_ok ? "合" : "NG", p440, p330);
+		if (!prev_ok)
+			bad++;
+	}
+
 	static rig h;
 	if (!h.mu.load_program(dir + "/mu2000_flash.bin") || !h.mu.load_wave(dir + "/dump")) {
 		std::fprintf(stderr, "%s\n", h.mu.error().c_str());
@@ -265,21 +312,20 @@ int main(int argc, char **argv)
 		h.pump(10);
 	h.mu.card() = g.mu.card();
 	h.pump(1500);
-	h.press(B::sampling_mode);
-	h.press(B::select_right);
-	h.press(B::enter);
-	h.pump(1000);
-	h.press(B::enter);                  // ディレクトリの中
-	h.pump(1000);
+	// 読み戻しは、サンプリングの窓の「この M2A を読み込む」と同じボタンの押し方（ui::panel_macro）で
 	{
-		const std::string s = h.lcd();
-		const bool ok = s.find("ALL_SEQ.M2A") != std::string::npos;
-		std::printf("%s %-28s [%s]\n", ok ? "合" : "NG", "カードにファイルがある", s.c_str());
+		ui::panel_macro macro;
+		macro.start(ui::panel_macro::load_m2a("ALL_SEQ.M2A"), "done");
+		std::string msg;
+		bool finished = false;
+		for (int i = 0; i < 200 * 100 && !finished; i++) {
+			h.pump(10);
+			finished = macro.tick(h.mu, msg);
+		}
+		const bool ok = finished && msg == "done";
+		std::printf("%s %-28s [%s] %s\n", ok ? "合" : "NG", "ボタンのマクロで LOAD", h.lcd().c_str(), msg.c_str());
 		if (!ok) bad++;
 	}
-	h.press(B::enter);
-	for (int i = 0; i < 100 && h.lcd().find("LOADING") != std::string::npos; i++)
-		h.pump(100);
 	// 録音の最後の 1 語の後ろ半分（サンプルの長さの外）は書き出されないので、そこだけは違ってよい
 	const auto &a = g.mu.sample_ram(), &b = h.mu.sample_ram();
 	size_t differ = 0, used = 0;

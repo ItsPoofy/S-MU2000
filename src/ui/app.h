@@ -578,6 +578,14 @@ public:
 				choose_ain(want);
 				list_ain_async();
 			});
+		// サンプリングの窓の「カード」: 頼まれたカードを差し、差しているカードの場所を知らせる
+		std::string card;
+		if (br.take_card_request(card))
+			defer_outside_paint([this, card] {
+				if (insert_card(card))
+					save_settings();
+			});
+		br.set_card_path(card_path);
 	}
 	// 描画の外で行う仕事。Windows は窓のメッセージで（app_win.h）、ほかは次のコマの頭で
 	std::vector<std::function<void()>> m_deferred;

@@ -36,6 +36,7 @@ class driver
 	std::array<bridge::sampling_view::slice, bridge::DETAIL_SLOTS> m_details{};
 	bool m_details_fresh = false;
 	int m_samp_tick = 0;
+	panel_macro m_macro;               // 前面のボタンを決まった順に押す（bridge::request_macro）
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
 	void apply_buttons(mu2000 &mu, const bridge &br)
@@ -58,6 +59,21 @@ public:
 		while (br.take_job(job)) {
 			m_samp_msg = job(mu);
 			did = true;
+		}
+		// ボタンのマクロ。頼まれたら始め、回っている間は 1 ブロックずつ進める
+		{
+			std::vector<panel_macro::step> steps;
+			std::string done;
+			if (br.take_macro_request(steps, done)) {
+				m_macro.cancel(mu);
+				m_macro.start(std::move(steps), std::move(done));
+				did = true;
+			}
+			std::string msg;
+			if (m_macro.tick(mu, msg)) {
+				m_samp_msg = msg;
+				did = true;   // 読み込みでサンプルの表が変わる
+			}
 		}
 		if (did) {
 			// 波形を書き換える仕事もあるので、測ったものは捨てる
@@ -102,6 +118,8 @@ public:
 		m_samp.free_frames = mu.sampling_free_frames();
 		m_samp.rec_state = mu.rec_state();
 		m_samp.rec_frames = mu.rec_frames();
+		m_samp.macro_busy = m_macro.active();
+		m_samp.card_in = mu.card_inserted();
 		if (new_wave) {
 			mu.sampling_overview(want_wave.number, bridge::WAVE_BUCKETS, m_wave_lo, m_wave_hi, m_wave_frames,
 			                      want_wave.from, want_wave.to);
