@@ -2,9 +2,12 @@
 #include "sampling_editor.h"
 
 #include "wav_in.h"
+#include "smartmedia.h"
+#include "compat/paths.h"
 #include "imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -1318,13 +1321,79 @@ std::vector<s16> to_44k(const std::vector<s16> &in, u32 rate)
 	return out;
 }
 
+std::filesystem::path u8path(const std::string &s)
+{
+	return std::filesystem::path(reinterpret_cast<const char8_t *>(s.c_str()));
+}
+
+std::string u8name(const std::filesystem::path &p)
+{
+	const std::u8string s = p.filename().u8string();
+	return std::string(s.begin(), s.end());
+}
+
+bool ends_with_m2a(const std::string &path)
+{
+	if (path.size() < 4)
+		return false;
+	std::string ext = path.substr(path.size() - 4);
+	for (char &c : ext)
+		c = char(std::toupper(u8(c)));
+	return ext == ".M2A";
+}
+
+// カードに置く 8.3 の名前（「NAME.M2A」）。使えない字は _、全部使えなければ FROMPC
+std::string short_m2a_name(const std::string &path)
+{
+	const std::u8string stem8 = u8path(path).stem().u8string();
+	std::string stem;
+	for (char8_t c8 : stem8) {
+		const char c = char(c8);
+		if (stem.size() >= 8)
+			break;
+		if (u8(c) >= 0x80)
+			continue;   // 日本語などは落とす（8.3 に入らない）
+		const char up = char(std::toupper(u8(c)));
+		stem += ((up >= 'A' && up <= 'Z') || (up >= '0' && up <= '9') || up == '_' || up == '-') ? up : '_';
+	}
+	if (stem.find_first_not_of('_') == std::string::npos)
+		stem = "FROMPC";
+	return stem + ".M2A";
+}
 
 } // namespace
+
+// M2A から作ったカード（m_card_img）を、設定の場所の cards に書く。差すにはファイルが要る
+bool sampling_editor::card_materialize(std::string &err)
+{
+	if (!m_card_file.empty() || m_card_m2a.empty())
+		return true;
+	std::error_code ec;
+	const std::string base = smu2000::config_dir();
+	const std::filesystem::path dir = u8path(base.empty() ? std::string(".") : base) / "cards";
+	std::filesystem::create_directories(dir, ec);
+	const std::string stem = short_m2a_name(m_card_m2a).substr(0, short_m2a_name(m_card_m2a).size() - 4);
+	std::filesystem::path p = dir / (stem + ".sm");
+	for (int i = 2; std::filesystem::exists(p, ec) && i < 1000; i++)
+		p = dir / (stem + "-" + std::to_string(i) + ".sm");
+	std::ofstream f(p, std::ios::binary);
+	f.write(reinterpret_cast<const char *>(m_card_img.data()), std::streamsize(m_card_img.size()));
+	f.close();
+	if (!f) {
+		err = UI_TEXT(smp_card_write_fail, "Could not write the new card");
+		return false;
+	}
+	const std::u8string s = p.u8string();
+	m_card_file.assign(s.begin(), s.end());
+	return true;
+}
 
 void sampling_editor::card_refresh(bridge &br)
 {
 	m_card_files.clear();
 	m_card_sel = -1;
+	m_m2a_lo.clear();
+	m_m2a_hi.clear();
 	m_m2a.clear();
 	m_m2a_waves.clear();
 	m_m2a_sel = -1;
@@ -1425,13 +1494,34 @@ void sampling_editor::card_pane(bridge &br)
 	// 開いた画像（ファイルの窓から）
 	std::string picked;
 	if (xgui::take_opened_card(picked)) {
-		std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t *>(picked.c_str())), std::ios::binary);
-		m_card_img.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-		m_card_file = picked;
+		std::ifstream f(u8path(picked), std::ios::binary);
+		std::vector<u8> bytes;
+		bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 		m_card_src = 1;
 		m_card_stale = true;
-		if (m_card_img.empty())
-			m_card_note = UI_TEXT(smp_card_read_fail, "Could not read the card image");
+		m_card_img.clear();
+		m_card_file.clear();
+		m_card_m2a.clear();
+		if (ends_with_m2a(picked)) {
+			// M2A のファイル。入るいちばん小さいカードを作り、一番上に置く（差すまではメモリの中だけ）
+			std::vector<smu2000::smartmedia::root_file> put(1);
+			put[0].name = short_m2a_name(picked);
+			put[0].bytes = std::move(bytes);
+			smu2000::smartmedia sm;
+			const u32 mb = smu2000::smartmedia::megabytes_for(put[0].bytes.size());
+			if (!put[0].bytes.empty() && mb && sm.create(mb) && sm.format(put)) {
+				m_card_img = sm.raw();
+				m_card_m2a = picked;
+			} else {
+				m_card_note = put[0].bytes.empty() ? UI_TEXT(smp_card_read_fail, "Could not read the card image")
+				                                   : UI_TEXT(smp_card_too_big, "This file does not fit on a 128MB card");
+			}
+		} else {
+			m_card_img = std::move(bytes);
+			m_card_file = picked;
+			if (m_card_img.empty())
+				m_card_note = UI_TEXT(smp_card_read_fail, "Could not read the card image");
+		}
 	}
 	// 差しているカードが変わったら（差す・抜く・読み込みで書かれた）一覧を作り直す
 	if (m_card_src == 0 && slot != m_card_seen) {
@@ -1454,9 +1544,8 @@ void sampling_editor::card_pane(bridge &br)
 	if (ImGui::RadioButton(UI_TEXT(smp_card_slot, "Card in the slot"), m_card_src == 0))
 		m_card_src = 0;
 	ImGui::SameLine();
-	ImGui::TextDisabled("%s", slot.empty() ? UI_TEXT(smp_card_none, "(none)")
-	                                        : std::filesystem::path(reinterpret_cast<const char8_t *>(slot.c_str())).filename().string().c_str());
-	if (ImGui::RadioButton(UI_TEXT(smp_card_image, "Card image file"), m_card_src == 1))
+	ImGui::TextDisabled("%s", slot.empty() ? UI_TEXT(smp_card_none, "(none)") : u8name(u8path(slot)).c_str());
+	if (ImGui::RadioButton(UI_TEXT(smp_card_image, "Card image or M2A file"), m_card_src == 1))
 		m_card_src = 1;
 	ImGui::SameLine();
 	if (xgui::file_dialogs()) {
@@ -1469,9 +1558,14 @@ void sampling_editor::card_pane(bridge &br)
 		if (ImGui::Button(UI_TEXT(smp_card_open_path, "Open")) && m_card_input[0])
 			xgui::give_opened_card(m_card_input);
 	}
-	if (!m_card_file.empty()) {
+	if (!m_card_m2a.empty()) {
 		ImGui::SameLine();
-		ImGui::TextDisabled("%s", std::filesystem::path(reinterpret_cast<const char8_t *>(m_card_file.c_str())).filename().string().c_str());
+		ImGui::TextDisabled("%s", u8name(u8path(m_card_m2a)).c_str());
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_card_m2a_tip, "Shown as a new card holding this file. Inserting or loading saves that card in the cards folder of the settings folder."));
+	} else if (!m_card_file.empty()) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("%s", u8name(u8path(m_card_file)).c_str());
 	}
 	if (was != bool(m_card_src))
 		m_card_stale = true;
@@ -1610,9 +1704,16 @@ void sampling_editor::card_pane(bridge &br)
 	                    file->path.compare(file->path.size() - 4, 4, ".M2A") == 0;
 	const bool at_root = file && file->path.find('/') == std::string::npos;
 	const bool busy = m_view.macro_busy || m_view.rec_state != 0 || !m_load_after_insert.empty();
-	ImGui::BeginDisabled(m_card_src != 1 || m_card_file.empty() || m_card_file == slot || busy);
-	if (ImGui::Button(UI_TEXT(smp_card_insert, "Insert this card")))
-		br.request_card(m_card_file);
+	const bool from_m2a = !m_card_m2a.empty();
+	ImGui::BeginDisabled(m_card_src != 1 || (m_card_file.empty() && !from_m2a) || (!m_card_file.empty() && m_card_file == slot) ||
+	                     m_card_img.empty() || busy);
+	if (ImGui::Button(UI_TEXT(smp_card_insert, "Insert this card"))) {
+		std::string err;
+		if (card_materialize(err))
+			br.request_card(m_card_file);
+		else
+			m_card_note = err;
+	}
 	ImGui::EndDisabled();
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_card_insert_tip, "Puts this card image into the MU2000's slot (the card in it now comes out)"));
@@ -1625,16 +1726,25 @@ void sampling_editor::card_pane(bridge &br)
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_card_load_tip, "Presses SAMPLING > LOAD > ALL+SEQ on the front panel for you and picks this file, as you would on the real unit. Only files at the top of the card can be picked this way."));
 	if (m_load_confirm) {
-		ImGui::OpenPopup("load_confirm");
+		ImGui::OpenPopup("###load_confirm");
 		m_load_confirm = false;
 	}
-	if (ImGui::BeginPopupModal("load_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+	// 見出しは訳した文言、ID は ### の後ろで固定
+	const std::string confirm_title = std::string(UI_TEXT(smp_card_load, "Load this M2A into the MU2000")) + "###load_confirm";
+	if (ImGui::BeginPopupModal(confirm_title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (m_card_src == 1 && from_m2a && (m_card_file.empty() || m_card_file != slot))
+			ImGui::TextUnformatted(UI_TEXT(smp_card_m2a_warn, "A new card holding this file is made and inserted (the card in the slot comes out)."));
 		ImGui::TextUnformatted(UI_TEXT(smp_card_load_warn, "Loading replaces the samples and sample voices in the MU2000 now. Go on?"));
 		if (ImGui::Button("OK", ImVec2(fs * 6, 0)) && file) {
 			// 8.3 の名前（一番上のファイルなので path そのもの）
-			if (m_card_src == 1 && m_card_file != slot) {
-				m_load_after_insert = file->path;   // 先に差して、差し終わったら読み込む
-				br.request_card(m_card_file);
+			std::string err;
+			if (m_card_src == 1 && (m_card_file.empty() || m_card_file != slot)) {
+				if (card_materialize(err)) {
+					m_load_after_insert = file->path;   // 先に差して、差し終わったら読み込む
+					br.request_card(m_card_file);
+				} else {
+					m_card_note = err;
+				}
 			} else {
 				br.request_macro(panel_macro::load_m2a(file->path), UI_TEXT(smp_card_loaded, "Loaded from the card"));
 			}

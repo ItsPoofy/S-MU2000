@@ -70,7 +70,9 @@ private:
 		int index = -1;                              // 読んだファイルの番号（-1 は一覧）
 	};
 	int m_card_src = 0;
-	std::string m_card_file;                    // 開いた画像の場所
+	std::string m_card_file;                    // 開いた画像の場所（M2A から作ったカードは、差すまで空）
+	std::string m_card_m2a;                     // 開いた M2A の場所（そこから m_card_img を作った）
+	bool card_materialize(std::string &err);    // M2A から作ったカードをファイルにする（差す前に）
 	std::vector<u8> m_card_img;                 // 開いた画像の中身
 	char m_card_input[512] = {};                // 画像の場所（ファイルの窓が無い所で）
 	std::vector<smu2000::cardfs::entry> m_card_files;

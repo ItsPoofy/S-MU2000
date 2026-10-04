@@ -728,6 +728,7 @@ public:
 		{
 			const std::lock_guard<std::mutex> hold(eng->card_lock);
 			eng->mu.card() = std::move(card);
+			eng->mu.card_swapped();   // firmware に抜けたのを見せる（前のカードの FAT を忘れさせる）
 		}
 		card_path = path;
 		std::printf("SmartMedia を差した: %s（%uMB）\n",

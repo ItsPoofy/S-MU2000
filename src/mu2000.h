@@ -270,6 +270,10 @@ public:
 	// 中身は状態の保存に入れないので、使う側がファイルに書き出す（take_dirty_blocks / write_blocks）
 	smu2000::smartmedia &card() { return m_card; }
 	bool card_inserted() const { return m_card.inserted(); }
+	// 差しているカードを別のものに替えたら呼ぶ。しばらく（音の時間で ms）差し込みの線を落として「抜けた」と見せる。
+	// firmware はカードの FAT を覚えていて、抜けたのを見ないと前のカードの FAT のまま新しいカードを読む
+	// （抜いてすぐ差すと、見回りのあいだに済んでしまう）
+	void card_swapped(u32 ms = 500) { m_card_back_at = m_sample_count + u64(ms) * 44100 / 1000; }
 	// 電源を入れてから回したサンプル数（ボタンのマクロなど、音源の時間で待つ用）
 	u64 samples_run() const { return m_sample_count; }
 	// サンプリング RAM（4MB）。確かめる用
@@ -957,6 +961,7 @@ private:
 	std::vector<u8>  m_dram;        // DRAM        0x1000000-0x107ffff
 	std::vector<u8>  m_iram;        // CPU 内蔵    0xfffff000-0xffffffff
 	smu2000::smartmedia m_card;     // 前面のカードの差し込み口（SmartMedia）
+	u64 m_card_back_at = 0;         // card_swapped: この数のサンプルまでは差し込みの線を落とす
 	std::vector<u8>  m_sampram;     // SWP30 のサンプリング RAM（4MB、SWP30 から見て 0x1000000 語目から）
 	// 録音（rec_start）。状態は rec_state と同じ、引き金は 16bit の絶対値
 	int m_rec_state = 0;

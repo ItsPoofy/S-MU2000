@@ -550,7 +550,7 @@ inline const ui_texts &en_texts()
 		.smp_card_loaded = "Loaded from the card",
 		.smp_card_slot = "Card in the slot",
 		.smp_card_none = "(none)",
-		.smp_card_image = "Card image file",
+		.smp_card_image = "Card image or M2A file",
 		.smp_card_open = "Open...",
 		.smp_card_path = "Card image path",
 		.smp_card_open_path = "Open",
@@ -569,6 +569,11 @@ inline const ui_texts &en_texts()
 		.smp_card_load = "Load this M2A into the MU2000",
 		.smp_card_load_tip = "Presses SAMPLING > LOAD > ALL+SEQ on the front panel for you and picks this file, as you would on the real unit. Only files at the top of the card can be picked this way.",
 		.smp_card_load_warn = "Loading replaces the samples and sample voices in the MU2000 now. Go on?",
+		.smp_card_write_fail = "Could not write the new card",
+		.smp_card_too_big = "This file does not fit on a 128MB card",
+		.smp_card_m2a_tip = "Shown as a new card holding this file. Inserting or loading saves that card in the cards folder of the settings folder.",
+		.smp_card_m2a_warn = "A new card holding this file is made and inserted (the card in the slot comes out).",
+		.dlg_card_or_m2a_desc = "SmartMedia image or M2A file",
 	};
 	return t;
 }
