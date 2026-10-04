@@ -198,8 +198,12 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		import_wav(opened, br);
 
 	const float fs = ImGui::GetFontSize();
-	const float left_w = std::min(fs * 22.0f, ImGui::GetContentRegionAvail().x * 0.4f);
-	// 左は入力・録音とサンプルの一覧（残りの高さを全部）、右は波形と音色への割り当て
+	// 3 列。左 = 入力・録音とサンプルの一覧、中 = サンプルの加工（波形・トリム・ループ）とカード・波形を作る、
+	// 右 = 音色（要素ごとの割り当て）。右はどのタブでも出しておく（作った波形やカードのサンプルをすぐ割り当てられる）
+	const float full_w = ImGui::GetContentRegionAvail().x, gap = ImGui::GetStyle().ItemSpacing.x;
+	const float left_w = std::min(fs * 20.0f, full_w * 0.25f);
+	const float right_w = std::min(fs * 27.0f, full_w * 0.32f);
+	const float mid_w = std::max(fs * 10.0f, full_w - left_w - right_w - gap * 2);
 	if (ImGui::BeginChild("left", ImVec2(left_w, 0))) {
 		if (ImGui::BeginChild("inrec", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY)) {
 			input_pane(br);
@@ -213,16 +217,11 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
-	// 右は 2 つのタブ: 選んだサンプルの波形と音色への割り当て / SmartMedia の中身（カード）
-	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
+	if (ImGui::BeginChild("middle", ImVec2(mid_w, 0))) {
 		if (ImGui::BeginTabBar("right_tabs")) {
 			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_edit, "Sample"))) {
-				const float h = ImGui::GetContentRegionAvail().y * 0.64f;
-				if (ImGui::BeginChild("wave", ImVec2(0, h), ImGuiChildFlags_Borders))
+				if (ImGui::BeginChild("wave", ImVec2(0, 0), ImGuiChildFlags_Borders))
 					wave_pane(br);
-				ImGui::EndChild();
-				if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
-					assign_pane(br);
 				ImGui::EndChild();
 				ImGui::EndTabItem();
 			}
@@ -241,6 +240,10 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			ImGui::EndTabBar();
 		}
 	}
+	ImGui::EndChild();
+	ImGui::SameLine();
+	if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
+		assign_pane(br);
 	ImGui::EndChild();
 	ImGui::End();
 }
@@ -1156,8 +1159,10 @@ void sampling_editor::assign_pane(bridge &br)
 	const float fs = ImGui::GetFontSize();
 	float lab = fs * 7.0f;   // 項目の名前の幅（右の列は「レベル 2（サステイン）」が入るよう広げる）
 	// 左の列は音色・サンプル・音量・音程、右の列はエンベロープと試聴・書き込み（スクロールしなくても届くように）
+	// 幅が狭いとき（3 列の右の列）は、2 つを縦に積む
+	const bool stacked = ImGui::GetContentRegionAvail().x < fs * 44.0f;
 	const float col_w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-	ImGui::BeginChild("assign_l", ImVec2(col_w, 0));
+	ImGui::BeginChild("assign_l", ImVec2(stacked ? 0 : col_w, 0), stacked ? ImGuiChildFlags_AutoResizeY : ImGuiChildFlags_None);
 
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted("Bank#");
@@ -1349,8 +1354,9 @@ void sampling_editor::assign_pane(bridge &br)
 		m_dirty = true;
 
 	ImGui::EndChild();
-	ImGui::SameLine();
-	ImGui::BeginChild("assign_r", ImVec2(0, 0));
+	if (!stacked)
+		ImGui::SameLine();
+	ImGui::BeginChild("assign_r", ImVec2(0, 0), stacked ? ImGuiChildFlags_AutoResizeY : ImGuiChildFlags_None);
 	lab = fs * 10.0f;
 
 	// エンベロープ。速さは大きいほど速く 0 は動かない、レベルは 127 が最大。値の下に形の目安
