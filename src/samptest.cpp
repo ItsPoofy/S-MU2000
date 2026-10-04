@@ -1231,6 +1231,127 @@ int main(int argc, char **argv)
 			      std::to_string(su.first) + "（" + std::to_string(su.second) + "）、あ の 3 倍音 " + std::to_string(va.mag(3) / va.mag(1)) +
 			      " 倍、ローファイの値 " + std::to_string(kinds.size()) + " 種類、ノイズの荒さ 白 " + std::to_string(rw) + " ピンク " +
 			      std::to_string(rp) + " ブラウン " + std::to_string(rb));
+
+			// 音色のエディット（LFO・フィルター・ピッチ EG・フィルター EG）。PGM015 にノコギリを入れて欄を変え、鍵 60 を 1.5 秒鳴らす。
+			// 50ms ごとの大きさと、頭と終わりの高さで効き目を見る
+			{
+				auto sound = [&](const sp::voice &vv) {
+					std::string err;
+					k.mu.sampling_set_voice(14, vv, err);
+					const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x0e };
+					for (u8 b : sel)
+						k.mu.midi_in(b, 0);
+					k.pump(300);
+					k.out.clear();
+					k.collect = true;
+					for (u8 b : { u8(0x90), u8(60), u8(100) })
+						k.mu.midi_in(b, 0);
+					k.pump(1500);
+					k.collect = false;
+					for (u8 b : { u8(0x80), u8(60), u8(64) })
+						k.mu.midi_in(b, 0);
+					k.pump(500);
+					return k.out;
+				};
+				auto rms = [](const std::vector<double> &x, size_t from, size_t n) {
+					double s = 0;
+					for (size_t i = from; i < from + n && i < x.size(); i++)
+						s += x[i] * x[i];
+					return std::sqrt(s / double(n));
+				};
+				auto part = [](const std::vector<double> &x, size_t from, size_t n) {
+					return std::vector<double>(x.begin() + long(from), x.begin() + long(std::min(from + n, x.size())));
+				};
+				sp::voice base;
+				base.name = "Edit";
+				base.el[0].assigned = true;
+				base.el[0].sample = n1;
+				const std::vector<double> plain = sound(base);
+				// 音量の LFO: 50ms ごとの大きさが大きく上下する
+				sp::voice v_lfo = base;
+				v_lfo.el[0].lfo_wave = 1;
+				v_lfo.el[0].lfo_speed = 20;
+				v_lfo.el[0].lfo_amp = 127;
+				const std::vector<double> o_lfo = sound(v_lfo);
+				double lo_p = 1e9, hi_p = 0, lo_l = 1e9, hi_l = 0;
+				for (size_t i = RATE / 10; i + RATE / 20 <= plain.size(); i += RATE / 20) {
+					lo_p = std::min(lo_p, rms(plain, i, RATE / 20));
+					hi_p = std::max(hi_p, rms(plain, i, RATE / 20));
+					lo_l = std::min(lo_l, rms(o_lfo, i, RATE / 20));
+					hi_l = std::max(hi_l, rms(o_lfo, i, RATE / 20));
+				}
+				// ピッチ EG: 始めのレベル -64・デプス 64 で、頭は 1 オクターブ下（130.8Hz）、終わりは元の高さ
+				sp::voice v_peg = base;
+				v_peg.el[0].peg_depth = 64;
+				v_peg.el[0].peg_level[0] = -64;
+				v_peg.el[0].peg_rate[0] = 30;
+				const std::vector<double> o_peg = sound(v_peg);
+				const auto peg_head = part(o_peg, 0, RATE / 10), peg_tail = part(o_peg, RATE * 12 / 10, RATE / 4);
+				const auto pl_head = part(plain, 0, RATE / 10);
+				// フィルター: カットオフを下げると小さくなる。フィルター EG の始めを -64 にすると、頭は閉じていて後で開く
+				sp::voice v_cut = base;
+				v_cut.el[0].cutoff = 30;
+				const std::vector<double> o_cut = sound(v_cut);
+				sp::voice v_feg = base;
+				v_feg.el[0].cutoff = 60;
+				v_feg.el[0].feg_level[0] = -64;
+				v_feg.el[0].feg_rate[0] = 25;
+				const std::vector<double> o_feg = sound(v_feg);
+				// レゾナンスを上げると大きくなる（切る高さの近くが持ち上がる）
+				sp::voice v_res = base;
+				v_res.el[0].cutoff = 60;
+				const double r0 = rms(sound(v_res), RATE / 2, RATE / 2);
+				v_res.el[0].resonance = 60;
+				const double r1 = rms(sound(v_res), RATE / 2, RATE / 2);
+				// 読み戻し
+				sp::voice wr = base, rd;
+				wr.el[0].lfo_wave = 2;
+				wr.el[0].lfo_phase_init = false;
+				wr.el[0].lfo_speed = 40;
+				wr.el[0].lfo_delay = 55;
+				wr.el[0].lfo_pitch = 11;
+				wr.el[0].lfo_filter = 22;
+				wr.el[0].lfo_amp = 33;
+				wr.el[0].cutoff = 77;
+				wr.el[0].resonance = 44;
+				wr.el[0].peg_depth = 50;
+				for (int i = 0; i < 4; i++) {
+					wr.el[0].peg_rate[i] = 10 + i;
+					wr.el[0].feg_rate[i] = 20 + i;
+				}
+				for (int i = 0; i < 5; i++) {
+					wr.el[0].peg_level[i] = -20 + 10 * i;
+					wr.el[0].feg_level[i] = 30 - 15 * i;
+				}
+				std::string err;
+				k.mu.sampling_set_voice(14, wr, err);
+				k.mu.sampling_voice(14, rd);
+				const sp::element &a = wr.el[0], &b = rd.el[0];
+				bool same = a.lfo_wave == b.lfo_wave && a.lfo_phase_init == b.lfo_phase_init && a.lfo_speed == b.lfo_speed &&
+				            a.lfo_delay == b.lfo_delay && a.lfo_pitch == b.lfo_pitch && a.lfo_filter == b.lfo_filter &&
+				            a.lfo_amp == b.lfo_amp && a.cutoff == b.cutoff && a.resonance == b.resonance && a.peg_depth == b.peg_depth;
+				for (int i = 0; i < 4; i++)
+					same = same && a.peg_rate[i] == b.peg_rate[i] && a.feg_rate[i] == b.feg_rate[i];
+				for (int i = 0; i < 5; i++)
+					same = same && a.peg_level[i] == b.peg_level[i] && a.feg_level[i] == b.feg_level[i];
+				// 既定の音色は、firmware が作ったままの値で読める（LFO 三角・位相あり・速さ 31、カットオフ 127、レゾナンス 8、EG は動かない）
+				sp::voice def;
+				k.mu.sampling_voice(40, def);
+				const sp::element &d = def.el[0];
+				const bool defaults = d.lfo_wave == 1 && d.lfo_phase_init && d.lfo_speed == 31 && d.lfo_amp == 0 && d.cutoff == 127 &&
+				                      d.resonance == 8 && d.peg_depth == 1 && d.peg_rate[0] == 63 && d.peg_level[0] == 0 && d.feg_level[4] == 0;
+				check(hi_p < 1.3 * lo_p && hi_l > 8 * lo_l &&
+				      tone(peg_head, 130.81) > 1.5 * tone(peg_head, 261.63) && tone(pl_head, 261.63) > 3 * tone(pl_head, 130.81) &&
+				      tone(peg_tail, 261.63) > 10 * tone(peg_tail, 130.81) &&
+				      rms(o_cut, RATE / 2, RATE / 2) < 0.2 * rms(plain, RATE / 2, RATE / 2) &&
+				      rms(o_feg, RATE / 10, RATE / 5) < 0.1 * rms(o_feg, RATE * 12 / 10, RATE / 4) && r1 > 1.5 * r0 && same && defaults,
+				      "音色のエディット: LFO・フィルター・EG",
+				      "LFO なし 最大/最小 " + std::to_string(hi_p / lo_p) + "、音量の LFO " + std::to_string(hi_l / lo_l) +
+				      "、ピッチ EG の頭 130Hz/261Hz " + std::to_string(tone(peg_head, 130.81) / tone(peg_head, 261.63)) +
+				      "、カットオフ 30 で " + std::to_string(rms(o_cut, RATE / 2, RATE / 2) / rms(plain, RATE / 2, RATE / 2)) +
+				      " 倍、フィルター EG の頭/終わり " + std::to_string(rms(o_feg, RATE / 10, RATE / 5) / rms(o_feg, RATE * 12 / 10, RATE / 4)) +
+				      "、レゾナンス " + std::to_string(r1 / r0) + " 倍");
+			}
 		}
 
 		// サンプリングの中身まるごとを SysEx にする（sp::memory_sysex）。新しい機械にサンプルを 2 つ（片方はループと
