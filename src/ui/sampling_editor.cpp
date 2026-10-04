@@ -443,7 +443,7 @@ void sampling_editor::samples_pane(bridge &br)
 	if (!found)
 		m_selected = m_view.samples.back().number;
 	const float fs = ImGui::GetFontSize();
-	const float foot = ImGui::GetFrameHeightWithSpacing() * (m_sx_queue.empty() ? 1.0f : 2.0f);
+	const float foot = ImGui::GetFrameHeightWithSpacing() * (m_sx_queue.empty() ? 2.0f : 3.0f);
 	if (ImGui::BeginTable("samples", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
 	                      ImVec2(0, -foot))) {
 		ImGui::TableSetupScrollFreeze(0, 1);
@@ -491,13 +491,12 @@ void sampling_editor::samples_pane(bridge &br)
 	};
 	const char *tip = UI_TEXT(smp_mem_tip, "Turns everything here (waves, samples and the voices that play them) into SysEx (Yamaha model 0x68 bulk dumps) that a real MU2000 loads into its sampling memory. The first message erases the samples and sample voices on the receiving unit.");
 	ImGui::BeginDisabled(m_sx_job != nullptr || !m_sx_queue.empty());
-	if (ImGui::Button(UI_TEXT(smp_mem_save, "Save all as SysEx...")))
+	if (ImGui::Button(UI_TEXT(smp_mem_save, "Save all as SysEx..."), ImVec2(-1, 0)))
 		make_sysex(true);
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", tip);
-	ImGui::SameLine();
 	ImGui::BeginDisabled(!xgui::out_ready());
-	if (ImGui::Button(UI_TEXT(smp_mem_send, "Send all to MIDI out")))
+	if (ImGui::Button(UI_TEXT(smp_mem_send, "Send all to MIDI out"), ImVec2(-1, 0)))
 		m_mem_confirm = true;
 	ImGui::EndDisabled();
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
