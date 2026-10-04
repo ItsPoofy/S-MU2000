@@ -109,6 +109,20 @@ bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &
 // rec は音色の記録 350 バイト。slot はそれを書く先（0-255）。1 通ずつ返す
 std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device = 0);
 
+// サンプリングの中身まるごと（波形・サンプルの記録・鳴らすための表・サンプルを鳴らす音色）を、別の MU2000 に
+// 写す SysEx（機種 0x68 の一括ダンプ。doc/sampling-ram.md）。受け取った側の前の中身は消える。
+//   F0 43 0n 68 <数の上> <数の下> <AH> <AM> <AL> <データ…> <検査の和> F7
+//   1 通目  パラメータチェンジ 00 00 7F = 00: サンプリングの中身を全部消す（この後 1 秒待つこと。INIT_WAIT_MS）
+//   00 00 00  波形を書く位置（64 バイトの塊の番号、7bit × 4）
+//   00 01 00  波形 64 バイト（ビッグエンディアンの 16bit）を 74 バイトに詰めたもの。書く位置は 1 通ごとに進む
+//   00 00 10  次に録る語（7bit × 5）
+//   10+(n>>7) n&7F 00  サンプル n（0 から）の記録 22 バイト、同 70 = 名前 8 文字、同 20 = 鳴らすための表 24 バイト
+// 並びは shingo45endo さんの M2A to SMF Converter（MIT）で知り、firmware 自身のダンプと突き合わせて確かめた。
+// dram は CPU の DRAM（0x1000000 から）、pcm はサンプリング RAM。voices ならサンプルを鳴らす音色も付ける（voice_sysex）
+constexpr u32 INIT_WAIT_MS = 1000;
+std::vector<std::vector<u8>> memory_sysex(const std::vector<u8> &dram, const std::vector<u8> &pcm, bool voices,
+                                          int device = 0);
+
 } // namespace smu2000::sampling
 
 #endif

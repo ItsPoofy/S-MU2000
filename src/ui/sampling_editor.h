@@ -49,7 +49,8 @@ public:
 private:
 	void input_pane(bridge &br);
 	void record_pane(bridge &br);
-	void samples_pane();
+	void samples_pane(bridge &br);
+	void pump_sysex(bridge &br);
 	void wave_pane(bridge &br);
 	void assign_pane(bridge &br);
 	void card_pane(bridge &br);
@@ -175,11 +176,15 @@ private:
 	struct sx_job {
 		std::atomic<bool> done{ false };
 		bool to_file = false;
+		bool wipes = false;      // 1 通目が受け取る側の中身を消す（その後 1 秒待つ）
 		std::vector<std::vector<u8>> msgs;
 	};
 	std::shared_ptr<sx_job> m_sx_job;
 	std::deque<std::vector<u8>> m_sx_queue;
 	size_t m_sx_total = 0;
+	double m_sx_next = 0;     // 次の 1 通を送ってよい時刻（ImGui::GetTime）。実機が受けきれる速さに抑える
+	bool m_sx_wipe_wait = false;
+	bool m_mem_confirm = false;
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;

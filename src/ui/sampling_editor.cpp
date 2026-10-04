@@ -190,6 +190,8 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		return;
 	}
 
+	pump_sysex(br);
+
 	// WAV のファイルの窓から読んだ中身
 	std::vector<u8> opened;
 	if (xgui::take_opened_wav(opened))
@@ -206,7 +208,7 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		}
 		ImGui::EndChild();
 		if (ImGui::BeginChild("samples", ImVec2(0, 0), ImGuiChildFlags_Borders))
-			samples_pane();
+			samples_pane(br);
 		ImGui::EndChild();
 	}
 	ImGui::EndChild();
@@ -388,7 +390,42 @@ void sampling_editor::import_wav(const std::vector<u8> &bytes, bridge &br)
 	});
 }
 
-void sampling_editor::samples_pane()
+// 外へ送る SysEx の列を、実機が受けきれる速さで少しずつ渡す（どのタブを開いていても進むように draw から呼ぶ）。
+// 速さは shingo45endo さんの M2A to SMF Converter の既定と同じ 1 秒に 2800 バイト
+void sampling_editor::pump_sysex(bridge &br)
+{
+	constexpr double BYTES_PER_S = 2800.0;
+	const double now = ImGui::GetTime();
+	if (m_sx_job && m_sx_job->done.load(std::memory_order_acquire)) {
+		std::shared_ptr<sx_job> job = std::move(m_sx_job);
+		if (job->to_file) {
+			std::vector<u8> bytes;
+			for (const auto &m : job->msgs)
+				bytes.insert(bytes.end(), m.begin(), m.end());
+			if (!bytes.empty())
+				xgui::ask_save_file(std::move(bytes));
+		} else {
+			m_sx_queue.assign(job->msgs.begin(), job->msgs.end());
+			m_sx_total = m_sx_queue.size();
+			m_sx_wipe_wait = job->wipes;
+			m_sx_next = now;
+		}
+	}
+	while (!m_sx_queue.empty() && now >= m_sx_next) {
+		const size_t n = m_sx_queue.front().size();
+		if (!xgui::out_send(br, m_sx_queue.front()))
+			break;
+		m_sx_queue.pop_front();
+		// コマが遅れても、取り戻すのは 0.1 秒ぶんまで
+		m_sx_next = std::max(m_sx_next, now - 0.1) + double(n) / BYTES_PER_S;
+		if (m_sx_wipe_wait) {
+			m_sx_next = now + sp::INIT_WAIT_MS / 1000.0;
+			m_sx_wipe_wait = false;
+		}
+	}
+}
+
+void sampling_editor::samples_pane(bridge &br)
 {
 	heading(UI_TEXT(smp_samples, "Samples"));
 	if (m_view.samples.empty()) {
@@ -402,7 +439,10 @@ void sampling_editor::samples_pane()
 		found = found || s.number == m_selected;
 	if (!found)
 		m_selected = m_view.samples.back().number;
-	if (ImGui::BeginTable("samples", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV)) {
+	const float fs = ImGui::GetFontSize();
+	const float foot = ImGui::GetFrameHeightWithSpacing() * (m_sx_queue.empty() ? 1.0f : 2.0f);
+	if (ImGui::BeginTable("samples", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
+	                      ImVec2(0, -foot))) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn(UI_TEXT(smp_col_no, "No."), ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn(UI_TEXT(smp_name, "Name"));
@@ -427,6 +467,62 @@ void sampling_editor::samples_pane()
 				ImGui::Text("%.1f dB", double(db(s.peak)));
 		}
 		ImGui::EndTable();
+	}
+
+	// 実機へ: サンプリングの中身まるごと（波形・サンプル・サンプルを鳴らす音色）を SysEx にする（sp::memory_sysex）。
+	// 波形 64 バイトが 85 バイトの 1 通になるので、1 秒ぶんの波形（88KB）を送るのに 42 秒かかる
+	u32 words = 0;
+	for (const sp::sample &s : m_view.samples)
+		words = std::max(words, s.end);
+	const int secs = int(double(words) * 4.0 / 64.0 * 85.0 / 2800.0) + 2;
+	auto make_sysex = [&](bool to_file) {
+		auto job = std::make_shared<sx_job>();
+		job->to_file = to_file;
+		job->wipes = true;
+		m_sx_job = job;
+		br.post([job](mu2000 &mu) {
+			job->msgs = sp::memory_sysex(mu.dram(), mu.sample_ram(), true);
+			job->done.store(true, std::memory_order_release);
+			return std::string();
+		});
+	};
+	const char *tip = UI_TEXT(smp_mem_tip, "Turns everything here (waves, samples and the voices that play them) into SysEx (Yamaha model 0x68 bulk dumps) that a real MU2000 loads into its sampling memory. The first message erases the samples and sample voices on the receiving unit.");
+	ImGui::BeginDisabled(m_sx_job != nullptr || !m_sx_queue.empty());
+	if (ImGui::Button(UI_TEXT(smp_mem_save, "Save all as SysEx...")))
+		make_sysex(true);
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", tip);
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!xgui::out_ready());
+	if (ImGui::Button(UI_TEXT(smp_mem_send, "Send all to MIDI out")))
+		m_mem_confirm = true;
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", tip);
+	ImGui::EndDisabled();
+	if (!m_sx_queue.empty()) {
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled(UI_TEXT(smp_sx_sending_fmt, "Sending %d / %d"), int(m_sx_total - m_sx_queue.size()), int(m_sx_total));
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(smp_sx_stop, "Stop")))
+			m_sx_queue.clear();
+	}
+	if (m_mem_confirm) {
+		ImGui::OpenPopup("###mem_confirm");
+		m_mem_confirm = false;
+	}
+	const std::string title = std::string(UI_TEXT(smp_mem_send, "Send all to MIDI out")) + "###mem_confirm";
+	if (ImGui::BeginPopupModal(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextUnformatted(UI_TEXT(smp_mem_warn, "This erases the samples and sample voices on the receiving MU2000 and replaces them with the ones here. Go on?"));
+		ImGui::Text(UI_TEXT(smp_mem_time_fmt, "It takes about %d min %02d s. Keep this window open until it ends."), secs / 60, secs % 60);
+		if (ImGui::Button("OK", ImVec2(fs * 6, 0))) {
+			make_sysex(false);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(dlg_cancel, "Cancel"), ImVec2(fs * 6, 0)))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
 	}
 }
 
@@ -1404,22 +1500,6 @@ void sampling_editor::assign_pane(bridge &br)
 		});
 		m_dirty = false;
 	};
-	if (m_sx_job && m_sx_job->done.load(std::memory_order_acquire)) {
-		std::shared_ptr<sx_job> job = std::move(m_sx_job);
-		if (job->to_file) {
-			std::vector<u8> bytes;
-			for (const auto &m : job->msgs)
-				bytes.insert(bytes.end(), m.begin(), m.end());
-			if (!bytes.empty())
-				xgui::ask_save_file(std::move(bytes));
-		} else {
-			m_sx_queue.assign(job->msgs.begin(), job->msgs.end());
-			m_sx_total = m_sx_queue.size();
-		}
-	}
-	// 送る列は、外への口の溜め（256 通）に入るぶんずつ毎コマ渡す
-	while (!m_sx_queue.empty() && xgui::out_send(br, m_sx_queue.front()))
-		m_sx_queue.pop_front();
 	const char *sx_tip = UI_TEXT(smp_sx_tip, "Writes the values above to the voice, then turns the whole voice into SysEx (Yamaha model 0x68 parameter changes, 334 messages) that a real MU2000 accepts for its sample voices. A voice that plays a sample points at that sample number on the receiving unit.");
 	ImGui::BeginDisabled(m_sx_job != nullptr || !m_sx_queue.empty());
 	if (ImGui::Button(UI_TEXT(smp_sx_save, "Save as SysEx...")))

@@ -1151,6 +1151,91 @@ int main(int argc, char **argv)
 			      "ノコギリ 261.6Hz " + std::to_string(c3) + "（隣の鍵 " + std::to_string(std::max(b2, cs3)) + "）、2 倍音 " +
 			      std::to_string(saw2 / c3) + " 倍、サインの 2 倍音 " + std::to_string(sine2 / sine1) + " 倍");
 		}
+
+		// サンプリングの中身まるごとを SysEx にする（sp::memory_sysex）。新しい機械にサンプルを 2 つ（片方はループと
+		// 鳴らす範囲つき）と音色を入れ、表と波形を控えてから、できた SysEx を同じ機械に送る。1 通目が全部を消し、
+		// 残りが元どおりに戻す。違ってよいのは鳴らすための表の +3（firmware が録るときは ff、SysEx では 7f になる）と、
+		// 音色の要素の [0]（firmware が付ける印）だけ
+		{
+			namespace wg = smu2000::wavegen;
+			static rig m;
+			if (!m.mu.load_program(dir + "/mu2000_flash.bin") || !m.mu.load_wave(dir + "/dump"))
+				return 1;
+			m.mu.load_sintab(dir + "/standin/sin-table.bin");
+			m.mu.reset();
+			for (u32 i = 0; i < 30 * RATE && !m.mu.midi_ready(); i += RATE / 100)
+				m.pump(10);
+			m.pump(1500);
+			std::vector<s16> ramp(3001);
+			for (size_t i = 0; i < ramp.size(); i++)
+				ramp[i] = s16(0x9000 + i * 7);
+			const std::vector<s16> saw = wg::render(wg::basic(wg::shape::saw));
+			std::string err;
+			m.mu.sampling_add(ramp.data(), ramp.size(), "ramp", err);
+			const int n = m.mu.sampling_add(saw.data(), saw.size(), "saw", err);
+			m.mu.sampling_points(1, 100, 2500, true, 1000);
+			m.mu.sampling_loop(n, true, 0);
+			sp::voice v;
+			v.name = "SxSaw";
+			v.el[0].assigned = true;
+			v.el[0].sample = n;
+			v.el[0].release = 30;
+			m.mu.sampling_set_voice(5, v, err);
+			const std::vector<u8> dram0 = m.mu.dram(), pcm0 = m.mu.sample_ram();
+			const auto msgs = sp::memory_sysex(dram0, pcm0, true);
+			size_t bytes = 0;
+			bool wiped = false;
+			for (size_t i = 0; i < msgs.size(); i++) {
+				for (u8 b : msgs[i])
+					m.mu.midi_in(b, 0);
+				bytes += msgs[i].size();
+				// DIN は 1 秒に 3125 バイト。1 通目（全部を消す）の後は待つ
+				m.pump(i ? u32(msgs[i].size() * 1000 / 3125 + 3) : sp::INIT_WAIT_MS);
+				if (!i)
+					wiped = m.mu.sampling_list().empty();
+			}
+			m.pump(300);
+			const u32 used = (u32(dram0[sp::NEXT_FREE - 0x1000000 + 1]) << 16 | u32(dram0[sp::NEXT_FREE - 0x1000000 + 2]) << 8 |
+			                  dram0[sp::NEXT_FREE - 0x1000000 + 3]) * 4;
+			int d_pcm = 0, d_rec = 0, d_play = 0, d_voice = 0;
+			for (u32 i = 0; i < used; i++)
+				d_pcm += m.mu.sample_ram()[i] != pcm0[i];
+			for (u32 i = 0; i < 36 * 2 + 4; i++) {
+				const u32 at = i < 72 ? sp::TAB_SAMPLE - 0x1000000 + i : sp::NEXT_FREE - 0x1000000 + (i - 72);
+				d_rec += m.mu.dram()[at] != dram0[at];
+			}
+			for (u32 i = 0; i < 16 * 2; i++)
+				if (i % 16 != 3)
+					d_play += m.mu.dram()[sp::TAB_PLAY - 0x1000000 + i] != dram0[sp::TAB_PLAY - 0x1000000 + i];
+			const u32 v5 = sp::TAB_VOICE + sp::VOICE_SIZE * 5 - 0x1000000;
+			for (u32 i = 0; i < sp::VOICE_SIZE; i++)
+				if (!(i >= 12 && i < 12 + 4 * 84 && (i - 12) % 84 == 0))
+					d_voice += m.mu.dram()[v5 + i] != dram0[v5 + i];
+			const auto list = m.mu.sampling_list();
+			check(wiped && msgs.size() > 100 && d_pcm == 0 && d_rec == 0 && d_play == 0 && d_voice == 0 && list.size() == 2 &&
+			      list[0].name == "ramp" && list[0].loop && list[0].play_from == 100 && list[0].play_to == 2500 &&
+			      list[0].loop_from == 1000 && list[1].name == "saw" && list[1].loop,
+			      "まるごとの SysEx で消して戻す",
+			      std::to_string(msgs.size()) + " 通 " + std::to_string(bytes) + " バイト、違い 波形 " + std::to_string(d_pcm) +
+			      " 記録 " + std::to_string(d_rec) + " 表 " + std::to_string(d_play) + " 音色 " + std::to_string(d_voice));
+			// 戻した音色が鳴る（鍵 60 が C3）
+			const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x05 };
+			for (u8 b : sel)
+				m.mu.midi_in(b, 0);
+			m.pump(300);
+			m.out.clear();
+			m.collect = true;
+			for (u8 b : { 0x90, 60, 0x64 })
+				m.mu.midi_in(u8(b), 0);
+			m.pump(700);
+			m.collect = false;
+			for (u8 b : { 0x80, 60, 0x40 })
+				m.mu.midi_in(u8(b), 0);
+			m.pump(400);
+			const double c3 = tone(m.out, 261.63), b2 = tone(m.out, 246.94);
+			check(c3 > 0.003 && c3 > 20 * b2, "まるごとの SysEx: 戻した音色が鳴る",
+			      "261.6Hz " + std::to_string(c3) + "、隣の鍵 " + std::to_string(b2));
+		}
 	}
 
 	std::printf("サンプリング: 食い違い %d\n", bad);

@@ -423,6 +423,112 @@ std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device)
 	return out;
 }
 
+namespace {
+
+// 機種 0x68 の一括ダンプ 1 通。検査の和は、数・番地・データと足して下 7bit が 0 になる値
+std::vector<u8> bulk68(int device, u8 ah, u8 am, u8 al, const std::vector<u8> &data)
+{
+	std::vector<u8> m = { 0xf0, 0x43, u8(device & 0x0f), 0x68, u8(data.size() >> 7 & 0x7f), u8(data.size() & 0x7f), ah, am, al };
+	int sum = 0;
+	for (u8 d : data)
+		m.push_back(d & 0x7f);
+	for (size_t i = 4; i < m.size(); i++)
+		sum += m[i];
+	m.push_back(u8(-sum & 0x7f));
+	m.push_back(0xf7);
+	return m;
+}
+
+// 32bit を 7bit × 5 に（上から）
+void put5(std::vector<u8> &o, u32 v)
+{
+	for (int sh = 28; sh >= 0; sh -= 7)
+		o.push_back(u8(v >> sh & 0x7f));
+}
+
+// 波形 64 バイト → 74 バイト。7 バイトずつ下 7bit を並べ、その後ろに 7 つの上の 1bit（先のバイトが bit 6）。
+// これを 9 組（63 バイト）、最後の 1 バイトは下 7bit・上 1bit の 2 バイト
+std::vector<u8> pack64(const u8 *p)
+{
+	std::vector<u8> o;
+	o.reserve(74);
+	for (int g = 0; g < 9; g++) {
+		u8 top = 0;
+		for (int i = 0; i < 7; i++) {
+			o.push_back(p[g * 7 + i] & 0x7f);
+			top |= u8((p[g * 7 + i] >> 7) << (6 - i));
+		}
+		o.push_back(top);
+	}
+	o.push_back(p[63] & 0x7f);
+	o.push_back(p[63] >> 7);
+	return o;
+}
+
+} // namespace
+
+std::vector<std::vector<u8>> memory_sysex(const std::vector<u8> &dram, const std::vector<u8> &pcm, bool voices, int device)
+{
+	std::vector<std::vector<u8>> out;
+	const u32 next = std::min(rd32(dram, NEXT_FREE - DRAM) & 0xffffff, RAM_WORDS);
+	if (size_t(next) * 4 > pcm.size())
+		return out;
+	out.push_back({ 0xf0, 0x43, u8(0x10 | (device & 0x0f)), 0x68, 0x00, 0x00, 0x7f, 0x00, 0xf7 });
+	// 波形。サンプリング RAM は 16bit の下のバイトが先なので、入れ替えて送る
+	out.push_back(bulk68(device, 0x00, 0x00, 0x00, { 0, 0, 0, 0 }));
+	for (size_t at = 0; at < size_t(next) * 4; at += 64) {
+		u8 blk[64] = {};
+		for (size_t i = 0; i < 64 && at + i < size_t(next) * 4; i++)
+			blk[i] = pcm[(at + i) ^ 1];
+		out.push_back(bulk68(device, 0x00, 0x01, 0x00, pack64(blk)));
+	}
+	std::vector<u8> d;
+	put5(d, next);
+	out.push_back(bulk68(device, 0x00, 0x00, 0x10, d));
+	// サンプルの記録・名前・鳴らすための表
+	for (int n = 1; n <= MAX_SAMPLES; n++) {
+		const u32 r = sample_rec(n), s = play_rec(n);
+		if (!(dram[r + 2] & 0x40))
+			continue;
+		const u8 ah = u8(0x10 | (n - 1) >> 7), am = u8((n - 1) & 0x7f);
+		// ステレオの相手は +4 に記録の番地で入っている（無ければ 0）。送るのは番号で、無しは 0x3fff
+		const u32 pair_at = rd32(dram, r + 4);
+		const u32 pair = pair_at >= TAB_SAMPLE ? (pair_at - TAB_SAMPLE) / 36 & 0x3fff : 0x3fff;
+		d = { dram[r + 2], dram[r + 3], 0x00, u8(pair >> 7), u8(pair & 0x7f) };
+		put5(d, rd32(dram, r + 12));
+		put5(d, rd32(dram, r + 16) & 0xffffff);
+		put5(d, rd32(dram, r + 20) & 0xffffff);
+		d.push_back(dram[r + 25]);
+		d.push_back(dram[r + 24]);
+		out.push_back(bulk68(device, ah, am, 0x00, d));
+		out.push_back(bulk68(device, ah, am, 0x70, std::vector<u8>(dram.begin() + r + 28, dram.begin() + r + 36)));
+		// 鳴らすための表: +0、+3、+1、+2（符号と大きさ）、ループの頭の語、+9〜+11、+5〜+7、+8、+4
+		const int fine = s8(dram[s + 2]);
+		d = { dram[s], dram[s + 3], dram[s + 1], u8((dram[s + 3] & 0x80 ? 0x40 : 0) | (fine < 0 ? 0x01 : 0)),
+		      u8(fine < 0 ? -fine : fine) };
+		put5(d, rd32(dram, s + 12) & 0xffffff);
+		put5(d, rd32(dram, s + 8) & 0xffffff);
+		put5(d, rd32(dram, s + 4) & 0xffffff);
+		for (u8 b : { dram[s + 8], dram[s + 4] }) {
+			d.push_back(b >> 7);
+			d.push_back(b & 0x7f);
+		}
+		out.push_back(bulk68(device, ah, am, 0x20, d));
+	}
+	// サンプルを鳴らす音色（要素のどれかの波形がサンプル）
+	for (int slot = 0; voices && slot < MAX_VOICES; slot++) {
+		const u8 *rec = &dram[voice_rec(slot)];
+		bool uses = false;
+		for (int e = 0; e < VOICE_ELEMENTS; e++)
+			uses = uses || ((rec[0] >> e & 1) && (rec[12 + 84 * e + 2] & 0x40));
+		if (!uses)
+			continue;
+		for (auto &m : voice_sysex(slot, rec, device))
+			out.push_back(std::move(m));
+	}
+	return out;
+}
+
 } // namespace smu2000::sampling
 
 bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len, bool power)
