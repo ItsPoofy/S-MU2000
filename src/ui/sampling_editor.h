@@ -42,7 +42,7 @@ public:
 	{
 		return get_lang() == lang::ja ? L"S-MU2000 サンプリング" : L"S-MU2000 Sampling";
 	}
-	int default_width() const override  { return 1440; }
+	int default_width() const override  { return 1280; }
 	int default_height() const override { return 800; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
 

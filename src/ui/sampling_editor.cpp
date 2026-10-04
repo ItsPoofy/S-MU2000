@@ -203,52 +203,74 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 
 	const float fs = ImGui::GetFontSize();
-	// 3 列。左 = 入力・録音とサンプルの一覧、中 = サンプルの加工（波形・トリム・ループ）とカード・波形を作る、
-	// 右 = 音色（要素ごとの割り当て）。右はどのタブでも出しておく（作った波形やカードのサンプルをすぐ割り当てられる）
-	const float full_w = ImGui::GetContentRegionAvail().x, gap = ImGui::GetStyle().ItemSpacing.x;
-	const float left_w = std::min(fs * 20.0f, full_w * 0.25f);
-	const float right_w = std::min(fs * 27.0f, full_w * 0.32f);
-	const float mid_w = std::max(fs * 10.0f, full_w - left_w - right_w - gap * 2);
-	if (ImGui::BeginChild("left", ImVec2(left_w, 0))) {
-		if (ImGui::BeginChild("inrec", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY)) {
-			input_pane(br);
-			ImGui::Separator();
-			record_pane(br);
-		}
-		ImGui::EndChild();
-		if (ImGui::BeginChild("samples", ImVec2(0, 0), ImGuiChildFlags_Borders))
-			samples_pane(br);
-		ImGui::EndChild();
-	}
+	// 2 列。左 = サンプルの一覧（どの方法で用意したものもここに並ぶ）。右 = タブ 2 つで、それぞれに子のタブ:
+	// 音の用意（手段ごと: 録音・取り込み / カード / 波形を作る）、音の加工（サンプル = 波形・トリム・ループ / 音色 = 要素ごとの割り当て）
+	const float full_w = ImGui::GetContentRegionAvail().x;
+	const float left_w = std::min(fs * 19.0f, full_w * 0.3f);
+	if (ImGui::BeginChild("samples", ImVec2(left_w, 0), ImGuiChildFlags_Borders))
+		samples_pane(br);
 	ImGui::EndChild();
 	ImGui::SameLine();
-	if (ImGui::BeginChild("middle", ImVec2(mid_w, 0))) {
+	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
 		if (ImGui::BeginTabBar("right_tabs")) {
-			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_edit, "Sample"))) {
-				if (ImGui::BeginChild("wave", ImVec2(0, 0), ImGuiChildFlags_Borders))
-					wave_pane(br);
-				ImGui::EndChild();
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_prepare, "Get a sound"))) {
+				if (ImGui::BeginTabBar("prepare_tabs")) {
+					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_record, "Record / import"))) {
+						if (ImGui::BeginChild("inrec", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+							// 入力と録音を横に並べる（狭ければ縦に）
+							const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+							const bool side = half > fs * 20.0f;
+							ImGui::BeginChild("in", ImVec2(side ? half : 0, 0), ImGuiChildFlags_AutoResizeY);
+							input_pane(br);
+							ImGui::EndChild();
+							if (side)
+								ImGui::SameLine();
+							else
+								ImGui::Separator();
+							ImGui::BeginChild("rec", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+							record_pane(br);
+							ImGui::EndChild();
+						}
+						ImGui::EndChild();
+						ImGui::EndTabItem();
+					}
+					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_card, "Card"))) {
+						if (ImGui::BeginChild("card", ImVec2(0, 0), ImGuiChildFlags_Borders))
+							card_pane(br);
+						ImGui::EndChild();
+						ImGui::EndTabItem();
+					}
+					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_make, "Make a wave"))) {
+						if (ImGui::BeginChild("make", ImVec2(0, 0), ImGuiChildFlags_Borders))
+							make_pane(br);
+						ImGui::EndChild();
+						ImGui::EndTabItem();
+					}
+					ImGui::EndTabBar();
+				}
 				ImGui::EndTabItem();
 			}
-			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_card, "Card"))) {
-				if (ImGui::BeginChild("card", ImVec2(0, 0), ImGuiChildFlags_Borders))
-					card_pane(br);
-				ImGui::EndChild();
-				ImGui::EndTabItem();
-			}
-			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_make, "Make a wave"))) {
-				if (ImGui::BeginChild("make", ImVec2(0, 0), ImGuiChildFlags_Borders))
-					make_pane(br);
-				ImGui::EndChild();
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_process, "Shape the sound"))) {
+				if (ImGui::BeginTabBar("process_tabs")) {
+					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_edit, "Sample"))) {
+						if (ImGui::BeginChild("wave", ImVec2(0, 0), ImGuiChildFlags_Borders))
+							wave_pane(br);
+						ImGui::EndChild();
+						ImGui::EndTabItem();
+					}
+					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_voice, "Voice"))) {
+						if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
+							assign_pane(br);
+						ImGui::EndChild();
+						ImGui::EndTabItem();
+					}
+					ImGui::EndTabBar();
+				}
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
 		}
 	}
-	ImGui::EndChild();
-	ImGui::SameLine();
-	if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
-		assign_pane(br);
 	ImGui::EndChild();
 	ImGui::End();
 }
@@ -1440,6 +1462,102 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::DragIntRange2("##vels", &m_vel_lo, &m_vel_hi, 0.25f, 1, 127, "%d", "%d", ImGuiSliderFlags_AlwaysClamp))
 		m_dirty = true;
 
+	ImGui::Spacing();
+	// ---- フィルター・LFO・ピッチ EG・フィルター EG（今の要素の欄を直に書き換える。畳んでおける）
+	{
+		sp::element &x = m_els[size_t(m_cur_el)];
+		const float lab = fs * 12.5f;      // この区画の名前の幅（外の lab より広い）
+		auto row = [&](const char *name, const char *id, int &v, int lo, int hi, const char *fmt = "%d") {
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(name);
+			ImGui::SameLine(lab);
+			ImGui::SetNextItemWidth(-1);
+			if (ImGui::SliderInt(id, &v, lo, hi, fmt))
+				m_dirty = true;
+		};
+		// EG の形の目安。レベル 5 つ（始め・アタック・ディケイ 1・ディケイ 2 = 押している間・離した後）を、速さに応じた幅でつなぐ
+		auto eg_graph = [&](const int *rate, const int *level, ImU32 col) {
+			const float gw = ImGui::GetContentRegionAvail().x, gh = fs * 3.2f;
+			const ImVec2 p = ImGui::GetCursorScreenPos();
+			ImGui::Dummy(ImVec2(gw, gh));
+			ImDrawList *d = ImGui::GetWindowDrawList();
+			d->AddRectFilled(p, ImVec2(p.x + gw, p.y + gh), IM_COL32(16, 20, 26, 255), 3.0f);
+			d->AddLine(ImVec2(p.x, p.y + gh * 0.5f), ImVec2(p.x + gw, p.y + gh * 0.5f), IM_COL32(70, 80, 95, 255));
+			auto y = [&](int lv) { return p.y + gh * (0.5f - 0.46f * float(std::clamp(lv, -64, 63)) / 64.0f); };
+			auto seg = [&](int r) { return r <= 0 ? 4.0f : 0.25f + 3.75f * float(63 - std::min(r, 63)) / 63.0f; };
+			const float hold = 1.5f;
+			const float total = seg(rate[0]) + seg(rate[1]) + seg(rate[2]) + hold + seg(rate[3]);
+			const float sx = gw / total;
+			float xx = p.x;
+			ImVec2 pts[6];
+			pts[0] = ImVec2(xx, y(level[0]));
+			for (int i = 0; i < 3; i++) {
+				xx += seg(rate[i]) * sx;
+				pts[i + 1] = ImVec2(xx, y(level[i + 1]));
+			}
+			xx += hold * sx;
+			pts[4] = ImVec2(xx, y(level[3]));
+			d->AddLine(ImVec2(xx, p.y), ImVec2(xx, p.y + gh), IM_COL32(90, 100, 120, 255));   // ここで鍵を離す
+			pts[5] = ImVec2(p.x + gw, y(level[4]));
+			d->AddPolyline(pts, 6, col, 0, 1.5f);
+		};
+		auto eg_rows = [&](const char *tag, int *rate, int *level) {
+			const char *rn[4] = { UI_TEXT(smp_eg_attack, "Attack rate"), UI_TEXT(smp_eg_decay1, "Decay 1 rate"),
+			                      UI_TEXT(smp_eg_decay2, "Decay 2 rate"), UI_TEXT(smp_eg_release, "Release rate") };
+			const char *ln[5] = { UI_TEXT(smp_eg_l0, "Start level"), UI_TEXT(smp_eg_l1, "Attack level"),
+			                      UI_TEXT(smp_eg_l2, "Decay 1 level"), UI_TEXT(smp_eg_l3, "Decay 2 level (held)"),
+			                      UI_TEXT(smp_eg_l4, "Release level") };
+			ImGui::PushID(tag);
+			row(ln[0], "##l0", level[0], -64, 63, "%+d");
+			for (int i = 0; i < 4; i++) {
+				ImGui::PushID(i);
+				row(rn[i], "##r", rate[i], 0, 63);
+				row(ln[i + 1], "##l", level[i + 1], -64, 63, "%+d");
+				ImGui::PopID();
+			}
+			ImGui::PopID();
+		};
+
+		if (ImGui::CollapsingHeader(UI_TEXT(smp_filter, "Filter"))) {
+			row(UI_TEXT(smp_cutoff, "Cutoff"), "##cut", x.cutoff, 0, 127);
+			row(UI_TEXT(smp_resonance, "Resonance"), "##reso", x.resonance, 0, 127);
+		}
+		if (ImGui::CollapsingHeader("LFO", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(UI_TEXT(smp_lfo_wave, "Wave"));
+			ImGui::SameLine(lab);
+			ImGui::SetNextItemWidth(fs * 8);
+			const std::string waves = std::string(UI_TEXT(smp_lfo_saw, "Saw")) + '\0' + UI_TEXT(smp_lfo_tri, "Triangle") + '\0' +
+			                          UI_TEXT(smp_lfo_sh, "S&H") + '\0';
+			if (ImGui::Combo("##lfowave", &x.lfo_wave, waves.c_str()))
+				m_dirty = true;
+			ImGui::Dummy(ImVec2(0, 0));
+			ImGui::SameLine(lab);
+			if (ImGui::Checkbox(UI_TEXT(smp_lfo_init, "Phase init"), &x.lfo_phase_init))
+				m_dirty = true;
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(smp_lfo_init_tip, "On: the LFO starts from the same point at every note-on. Off: it starts from a random point."));
+			row(UI_TEXT(smp_lfo_speed, "Speed"), "##lfospeed", x.lfo_speed, 0, 63);
+			row(UI_TEXT(smp_lfo_delay, "Delay"), "##lfodelay", x.lfo_delay, 0, 127);
+			row(UI_TEXT(smp_lfo_pitch, "Pitch depth"), "##lfop", x.lfo_pitch, 0, 127);
+			row(UI_TEXT(smp_lfo_filter, "Filter depth"), "##lfof", x.lfo_filter, 0, 127);
+			row(UI_TEXT(smp_lfo_amp, "Amplitude depth"), "##lfoa", x.lfo_amp, 0, 127);
+		}
+		if (ImGui::CollapsingHeader(UI_TEXT(smp_peg, "Pitch EG"))) {
+			row(UI_TEXT(smp_peg_depth, "Depth"), "##pegd", x.peg_depth, 0, 127);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(smp_peg_tip, "Levels are offsets from the note's pitch (0 = no change); depth sets how far the largest level goes (64 or more: an octave). The pitch starts at Start level, moves to each level at its rate while the key is held, and goes to Release level after it is let go."));
+			eg_rows("peg", x.peg_rate, x.peg_level);
+			eg_graph(x.peg_rate, x.peg_level, IM_COL32(120, 230, 150, 255));
+		}
+		if (ImGui::CollapsingHeader(UI_TEXT(smp_feg, "Filter EG"))) {
+			eg_rows("feg", x.feg_rate, x.feg_level);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(smp_feg_tip, "Levels move the cutoff up and down from its setting (0 = no change; negative closes the filter). Lower the cutoff first if the filter is fully open."));
+			eg_graph(x.feg_rate, x.feg_level, IM_COL32(255, 190, 110, 255));
+		}
+	}
+
 	ImGui::EndChild();
 	if (!stacked)
 		ImGui::SameLine();
@@ -1613,101 +1731,6 @@ void sampling_editor::assign_pane(bridge &br)
 	}
 	if (xgui::out_ready())
 		xgui::out_port_combo();
-	ImGui::Spacing();
-	// ---- フィルター・LFO・ピッチ EG・フィルター EG（今の要素の欄を直に書き換える。畳んでおける）
-	{
-		sp::element &x = m_els[size_t(m_cur_el)];
-		auto row = [&](const char *name, const char *id, int &v, int lo, int hi, const char *fmt = "%d") {
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(name);
-			ImGui::SameLine(lab);
-			ImGui::SetNextItemWidth(-1);
-			if (ImGui::SliderInt(id, &v, lo, hi, fmt))
-				m_dirty = true;
-		};
-		// EG の形の目安。レベル 5 つ（始め・アタック・ディケイ 1・ディケイ 2 = 押している間・離した後）を、速さに応じた幅でつなぐ
-		auto eg_graph = [&](const int *rate, const int *level, ImU32 col) {
-			const float gw = ImGui::GetContentRegionAvail().x, gh = fs * 3.2f;
-			const ImVec2 p = ImGui::GetCursorScreenPos();
-			ImGui::Dummy(ImVec2(gw, gh));
-			ImDrawList *d = ImGui::GetWindowDrawList();
-			d->AddRectFilled(p, ImVec2(p.x + gw, p.y + gh), IM_COL32(16, 20, 26, 255), 3.0f);
-			d->AddLine(ImVec2(p.x, p.y + gh * 0.5f), ImVec2(p.x + gw, p.y + gh * 0.5f), IM_COL32(70, 80, 95, 255));
-			auto y = [&](int lv) { return p.y + gh * (0.5f - 0.46f * float(std::clamp(lv, -64, 63)) / 64.0f); };
-			auto seg = [&](int r) { return r <= 0 ? 4.0f : 0.25f + 3.75f * float(63 - std::min(r, 63)) / 63.0f; };
-			const float hold = 1.5f;
-			const float total = seg(rate[0]) + seg(rate[1]) + seg(rate[2]) + hold + seg(rate[3]);
-			const float sx = gw / total;
-			float xx = p.x;
-			ImVec2 pts[6];
-			pts[0] = ImVec2(xx, y(level[0]));
-			for (int i = 0; i < 3; i++) {
-				xx += seg(rate[i]) * sx;
-				pts[i + 1] = ImVec2(xx, y(level[i + 1]));
-			}
-			xx += hold * sx;
-			pts[4] = ImVec2(xx, y(level[3]));
-			d->AddLine(ImVec2(xx, p.y), ImVec2(xx, p.y + gh), IM_COL32(90, 100, 120, 255));   // ここで鍵を離す
-			pts[5] = ImVec2(p.x + gw, y(level[4]));
-			d->AddPolyline(pts, 6, col, 0, 1.5f);
-		};
-		auto eg_rows = [&](const char *tag, int *rate, int *level) {
-			const char *rn[4] = { UI_TEXT(smp_eg_attack, "Attack rate"), UI_TEXT(smp_eg_decay1, "Decay 1 rate"),
-			                      UI_TEXT(smp_eg_decay2, "Decay 2 rate"), UI_TEXT(smp_eg_release, "Release rate") };
-			const char *ln[5] = { UI_TEXT(smp_eg_l0, "Start level"), UI_TEXT(smp_eg_l1, "Attack level"),
-			                      UI_TEXT(smp_eg_l2, "Decay 1 level"), UI_TEXT(smp_eg_l3, "Decay 2 level (held)"),
-			                      UI_TEXT(smp_eg_l4, "Release level") };
-			ImGui::PushID(tag);
-			row(ln[0], "##l0", level[0], -64, 63, "%+d");
-			for (int i = 0; i < 4; i++) {
-				ImGui::PushID(i);
-				row(rn[i], "##r", rate[i], 0, 63);
-				row(ln[i + 1], "##l", level[i + 1], -64, 63, "%+d");
-				ImGui::PopID();
-			}
-			ImGui::PopID();
-		};
-
-		if (ImGui::CollapsingHeader(UI_TEXT(smp_filter, "Filter"))) {
-			row(UI_TEXT(smp_cutoff, "Cutoff"), "##cut", x.cutoff, 0, 127);
-			row(UI_TEXT(smp_resonance, "Resonance"), "##reso", x.resonance, 0, 127);
-		}
-		if (ImGui::CollapsingHeader("LFO", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(UI_TEXT(smp_lfo_wave, "Wave"));
-			ImGui::SameLine(lab);
-			ImGui::SetNextItemWidth(fs * 8);
-			const std::string waves = std::string(UI_TEXT(smp_lfo_saw, "Saw")) + '\0' + UI_TEXT(smp_lfo_tri, "Triangle") + '\0' +
-			                          UI_TEXT(smp_lfo_sh, "S&H") + '\0';
-			if (ImGui::Combo("##lfowave", &x.lfo_wave, waves.c_str()))
-				m_dirty = true;
-			ImGui::Dummy(ImVec2(0, 0));
-			ImGui::SameLine(lab);
-			if (ImGui::Checkbox(UI_TEXT(smp_lfo_init, "Phase init"), &x.lfo_phase_init))
-				m_dirty = true;
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", UI_TEXT(smp_lfo_init_tip, "On: the LFO starts from the same point at every note-on. Off: it starts from a random point."));
-			row(UI_TEXT(smp_lfo_speed, "Speed"), "##lfospeed", x.lfo_speed, 0, 63);
-			row(UI_TEXT(smp_lfo_delay, "Delay"), "##lfodelay", x.lfo_delay, 0, 127);
-			row(UI_TEXT(smp_lfo_pitch, "Pitch depth"), "##lfop", x.lfo_pitch, 0, 127);
-			row(UI_TEXT(smp_lfo_filter, "Filter depth"), "##lfof", x.lfo_filter, 0, 127);
-			row(UI_TEXT(smp_lfo_amp, "Amplitude depth"), "##lfoa", x.lfo_amp, 0, 127);
-		}
-		if (ImGui::CollapsingHeader(UI_TEXT(smp_peg, "Pitch EG"))) {
-			row(UI_TEXT(smp_peg_depth, "Depth"), "##pegd", x.peg_depth, 0, 127);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", UI_TEXT(smp_peg_tip, "Levels are offsets from the note's pitch (0 = no change); depth sets how far the largest level goes (64 or more: an octave). The pitch starts at Start level, moves to each level at its rate while the key is held, and goes to Release level after it is let go."));
-			eg_rows("peg", x.peg_rate, x.peg_level);
-			eg_graph(x.peg_rate, x.peg_level, IM_COL32(120, 230, 150, 255));
-		}
-		if (ImGui::CollapsingHeader(UI_TEXT(smp_feg, "Filter EG"))) {
-			eg_rows("feg", x.feg_rate, x.feg_level);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", UI_TEXT(smp_feg_tip, "Levels move the cutoff up and down from its setting (0 = no change; negative closes the filter). Lower the cutoff first if the filter is fully open."));
-			eg_graph(x.feg_rate, x.feg_level, IM_COL32(255, 190, 110, 255));
-		}
-	}
-
 	ImGui::EndChild();
 }
 
@@ -2660,7 +2683,7 @@ void sampling_editor::make_pane(bridge &br)
 	std::snprintf(abuf, sizeof(abuf), UI_TEXT(smp_make_assign_fmt, "Also put it in element 1 of Bank# %d, program %d"), m_bank, m_pgm);
 	ImGui::Checkbox(abuf, &m_wm_assign);
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(smp_make_assign_tip, "The voice chosen under Voice assignment on the Sample tab. Play it with bank MSB 16; level, pan, envelope and the other elements are set there."));
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_assign_tip, "The voice chosen on the Voice tab. Play it with bank MSB 16; level, pan, envelope and the other elements are set there."));
 }
 
 } // namespace ui
