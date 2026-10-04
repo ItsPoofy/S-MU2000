@@ -1120,7 +1120,7 @@ void mu2000::reset()
 		//   PA18 (0x04) 忙しい（0 で準備ができている。firmware は 0 になるのを待つ）/ PA19 (0x08) 差し込まれている /
 		//   PA20 (0x10) 書き込みを禁じていない
 		// 読み書きはその場で済むので、忙しい印は立てない
-		if (m_card.inserted()) {
+		if (m_card.inserted() && m_sample_count >= m_card_back_at) {
 			v |= 1u << 19;
 			if (!m_card.write_protected)
 				v |= 1u << 20;
@@ -3516,8 +3516,9 @@ void mu2000::run_sample(s32 &left, s32 &right)
 	// サンプリングの窓の試聴。サンプリング RAM の 16bit をそのまま DAC の目盛りで足す（src/sampling.cpp）
 	if (m_prev_on) {
 		const size_t at = size_t(m_prev_base + m_prev_pos) * 2;
-		if (m_prev_pos < m_prev_end && at + 1 < m_sampram.size()) {
-			const s16 v = s16(m_sampram[at] | m_sampram[at + 1] << 8);
+		const bool ext = !m_prev_ext.empty();
+		if (m_prev_pos < m_prev_end && (ext ? m_prev_pos < m_prev_ext.size() : at + 1 < m_sampram.size())) {
+			const s16 v = ext ? m_prev_ext[m_prev_pos] : s16(m_sampram[at] | m_sampram[at + 1] << 8);
 			const s32 o = s32(s64(v) * DAC_FULL_SCALE / 32768);
 			left += o;
 			right += o;

@@ -270,6 +270,12 @@ public:
 	// 中身は状態の保存に入れないので、使う側がファイルに書き出す（take_dirty_blocks / write_blocks）
 	smu2000::smartmedia &card() { return m_card; }
 	bool card_inserted() const { return m_card.inserted(); }
+	// 差しているカードを別のものに替えたら呼ぶ。しばらく（音の時間で ms）差し込みの線を落として「抜けた」と見せる。
+	// firmware はカードの FAT を覚えていて、抜けたのを見ないと前のカードの FAT のまま新しいカードを読む
+	// （抜いてすぐ差すと、見回りのあいだに済んでしまう）
+	void card_swapped(u32 ms = 500) { m_card_back_at = m_sample_count + u64(ms) * 44100 / 1000; }
+	// 電源を入れてから回したサンプル数（ボタンのマクロなど、音源の時間で待つ用）
+	u64 samples_run() const { return m_sample_count; }
 	// サンプリング RAM（4MB）。確かめる用
 	const std::vector<u8> &sample_ram() const { return m_sampram; }
 	// サンプリングの管理情報（サンプルの一覧・音色）を見るため
@@ -345,6 +351,9 @@ public:
 	// 編集の確かめ用で、実機には無い道（音色の Level・Pan・音程は効かない）
 	// loop_at が to より前なら、to まで来たら loop_at へ戻って止めるまで続ける
 	bool preview_start(int number, u32 from, u32 to, u32 loop_at = ~0u);
+	// 外の PCM（カードの M2A の波形など、サンプリング RAM に無いもの）を同じように鳴らす。
+	// 44.1kHz・16bit・モノラルで渡す。鳴らしている間 preview_number() は -1
+	void preview_pcm(std::vector<s16> pcm, u32 loop_at = ~0u);
 	void preview_stop() { m_prev_on = false; }
 	int preview_number() const { return m_prev_on ? m_prev_number : 0; }
 	u32 preview_pos() const { return m_prev_pos; }
@@ -952,6 +961,7 @@ private:
 	std::vector<u8>  m_dram;        // DRAM        0x1000000-0x107ffff
 	std::vector<u8>  m_iram;        // CPU 内蔵    0xfffff000-0xffffffff
 	smu2000::smartmedia m_card;     // 前面のカードの差し込み口（SmartMedia）
+	u64 m_card_back_at = 0;         // card_swapped: この数のサンプルまでは差し込みの線を落とす
 	std::vector<u8>  m_sampram;     // SWP30 のサンプリング RAM（4MB、SWP30 から見て 0x1000000 語目から）
 	// 録音（rec_start）。状態は rec_state と同じ、引き金は 16bit の絶対値
 	int m_rec_state = 0;
@@ -963,6 +973,7 @@ private:
 	bool m_prev_on = false;
 	int m_prev_number = 0;
 	u32 m_prev_base = 0, m_prev_pos = 0, m_prev_end = 0, m_prev_loop = ~0u;
+	std::vector<s16> m_prev_ext;   // preview_pcm の波形（空ならサンプリング RAM から）
 	s32 m_ad_in[2] = {};            // A/D INPUT（set_audio_input）
 	s32 m_ad_peak[2] = {};          // A/D INPUT のピーク（レベルメーター、AN0 / AN2）。状態の保存には入れない
 	u16 ad_level_adc(int i) const

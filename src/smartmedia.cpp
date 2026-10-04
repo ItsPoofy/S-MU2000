@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -118,7 +119,53 @@ void put32(u8 *p, u32 v) { put16(p, v); put16(p + 2, v >> 16); }
 
 } // namespace
 
-bool smartmedia::format()
+namespace {
+
+constexpr u32 CLUSTER = 32 * smartmedia::PAGE;   // 1 クラスタ 32 セクター（16KB）
+
+// 区画の中で、ブート・FAT・ルートの後ろに置けるクラスタの数
+u32 data_clusters(const logical_format &f)
+{
+	return (f.total - (1 + 2 * u32(f.fat_sectors) + 16)) / 32;
+}
+
+// 8.3 の名前（「NAME.EXT」、大文字）を、ディレクトリの項目の 11 バイトにする。使えない名前なら false
+bool dir_name(const std::string &name, u8 out[11])
+{
+	std::fill(out, out + 11, u8(' '));
+	const size_t dot = name.find('.');
+	const std::string stem = name.substr(0, dot);
+	const std::string ext = dot == std::string::npos ? std::string() : name.substr(dot + 1);
+	if (stem.empty() || stem.size() > 8 || ext.size() > 3)
+		return false;
+	auto ok = [](char c) {
+		return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || std::string("_-$~!#%&'()@^`{}").find(c) != std::string::npos;
+	};
+	for (size_t i = 0; i < stem.size(); i++) {
+		if (!ok(stem[i]))
+			return false;
+		out[i] = u8(stem[i]);
+	}
+	for (size_t i = 0; i < ext.size(); i++) {
+		if (!ok(ext[i]))
+			return false;
+		out[8 + i] = u8(ext[i]);
+	}
+	return true;
+}
+
+} // namespace
+
+u32 smartmedia::megabytes_for(size_t bytes)
+{
+	const u64 need = (u64(bytes) + CLUSTER - 1) / CLUSTER;
+	for (const logical_format &f : FORMATS)
+		if (need <= data_clusters(f))
+			return f.megabytes;
+	return 0;
+}
+
+bool smartmedia::format(const std::vector<root_file> &files)
 {
 	const logical_format *f = nullptr;
 	for (const logical_format &x : FORMATS)
@@ -127,8 +174,19 @@ bool smartmedia::format()
 	if (!f)
 		return false;
 	// 区画の頭からブート 1 + FAT 2 組 + ルートディレクトリ 256 項目（16 セクター）までを書く。
-	// 論理ブロック n は物理ブロック n + 1（0 は CIS）。書くブロックは全部のページを 0 で埋める
-	const u32 used = f->hidden + 1 + 2 * u32(f->fat_sectors) + 16;
+	// ファイルがあれば、その後ろにクラスタ 2 から順に並べる。
+	// 論理ブロック n は物理ブロック（ゾーン z = n / 1000 の頭 + n % 1000、ゾーン 0 は CIS の次から）。
+	// 書くブロックは全部のページを 0 で埋める
+	const u32 root_at = f->hidden + 1 + 2 * u32(f->fat_sectors);
+	const u32 data_at = root_at + 16;
+	u32 clusters = 0;
+	if (files.size() > 256)
+		return false;
+	for (const root_file &rf : files)
+		clusters += u32((rf.bytes.size() + CLUSTER - 1) / CLUSTER);
+	if (clusters > data_clusters(*f))
+		return false;
+	const u32 used = data_at + clusters * 32;
 	const u32 blocks = (used + PAGES_PER_BLOCK - 1) / PAGES_PER_BLOCK;
 	std::vector<u8> sec(size_t(blocks) * PAGES_PER_BLOCK * PAGE, 0);
 	// MBR の区画表（1 つ目の項目）
@@ -170,16 +228,61 @@ bool smartmedia::format()
 		if (f->fat16)
 			fat[3] = 0xff;
 	}
+	// ファイル。ディレクトリの項目と、クラスタの鎖（FAT は 2 組とも）と中身
+	{
+		const std::time_t now = std::time(nullptr);
+		const std::tm *tm = std::localtime(&now);
+		const u16 dos_time = tm ? u16((tm->tm_hour << 11) | (tm->tm_min << 5) | (tm->tm_sec / 2)) : 0;
+		const u16 dos_date = tm ? u16(((std::max(tm->tm_year, 80) - 80) << 9) | ((tm->tm_mon + 1) << 5) | tm->tm_mday)
+		                        : u16(1 << 5 | 1);
+		auto set_fat = [&](u32 cl, u32 v) {
+			for (u32 k = 0; k < 2; k++) {
+				u8 *fat = sec.data() + size_t(f->hidden + 1 + k * f->fat_sectors) * PAGE;
+				if (f->fat16) {
+					put16(fat + cl * 2, v);
+				} else {
+					u8 *p = fat + cl * 3 / 2;
+					if (cl & 1) {
+						p[0] = u8((p[0] & 0x0f) | ((v << 4) & 0xf0));
+						p[1] = u8(v >> 4);
+					} else {
+						p[0] = u8(v);
+						p[1] = u8((p[1] & 0xf0) | ((v >> 8) & 0x0f));
+					}
+				}
+			}
+		};
+		const u32 end_mark = f->fat16 ? 0xffff : 0xfff;
+		u32 next = 2;
+		for (size_t i = 0; i < files.size(); i++) {
+			const root_file &rf = files[i];
+			u8 *de = sec.data() + size_t(root_at) * PAGE + i * 32;
+			if (!dir_name(rf.name, de))
+				return false;
+			de[11] = 0x20;                // 書庫の印
+			put16(de + 22, dos_time);
+			put16(de + 24, dos_date);
+			const u32 n = u32((rf.bytes.size() + CLUSTER - 1) / CLUSTER);
+			put16(de + 26, n ? next : 0);
+			put32(de + 28, u32(rf.bytes.size()));
+			for (u32 k = 0; k < n; k++)
+				set_fat(next + k, k + 1 < n ? next + k + 1 : end_mark);
+			std::copy(rf.bytes.begin(), rf.bytes.end(), sec.begin() + std::ptrdiff_t(size_t(data_at + (next - 2) * 32) * PAGE));
+			next += n;
+		}
+	}
 	// 物理のページへ。予備の領域はブロックの番地（0001 0bbb bbbb bbbp、p で 1 の数を偶数に）と ECC
 	for (u32 lb = 0; lb < blocks; lb++) {
-		u16 addr = u16(0x1000 | (lb << 1));
+		const u32 zone = lb / 1000, in_zone = lb % 1000;
+		const u32 phys = zone * 1024 + in_zone + (zone == 0 ? 1 : 0);
+		u16 addr = u16(0x1000 | (in_zone << 1));
 		int ones = 0;
 		for (u16 v = addr; v; v &= u16(v - 1))
 			ones++;
 		if (ones & 1)
 			addr |= 1;
 		for (u32 pg = 0; pg < PAGES_PER_BLOCK; pg++) {
-			u8 *p = m_data.data() + (size_t(lb + 1) * PAGES_PER_BLOCK + pg) * page_bytes();
+			u8 *p = m_data.data() + (size_t(phys) * PAGES_PER_BLOCK + pg) * page_bytes();
 			const u8 *src = sec.data() + (size_t(lb) * PAGES_PER_BLOCK + pg) * PAGE;
 			std::copy(src, src + PAGE, p);
 			u8 *sp = p + PAGE;

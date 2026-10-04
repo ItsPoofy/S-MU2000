@@ -766,14 +766,29 @@ std::vector<u8> g_file_out, g_file_in;
 bool g_file_in_ready = false;
 // 頼みと読んだ中身が .syx か WAV か。窓ごとに取り違えないように（マスターの窓とサンプリングの窓）
 bool g_file_ask_wav = false, g_file_in_wav = false;
+// カードの画像（サンプリングの窓の「カード」）。中身は読まず、選ばれた場所だけを返す
+bool g_file_ask_card = false, g_card_path_ready = false;
+std::string g_card_path;
 std::string g_file_note;
+}
+
+void ask_open_card() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = true; }
+bool file_ask_is_card() { return g_file_ask_card; }
+void give_opened_card(const std::string &path) { g_card_path = path; g_card_path_ready = true; }
+bool take_opened_card(std::string &path)
+{
+	if (!g_card_path_ready)
+		return false;
+	path = std::move(g_card_path);
+	g_card_path_ready = false;
+	return true;
 }
 
 void set_file_dialogs(bool on) { g_file_dialogs = on; }
 bool file_dialogs() { return g_file_dialogs; }
 void ask_save_file(std::vector<u8> bytes) { g_file_out = std::move(bytes); g_file_ask = file_ask::save; }
-void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; }
-void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; }
+void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; }
+void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; g_file_ask_card = false; }
 bool file_ask_is_wav() { return g_file_ask_wav; }
 file_ask take_file_ask(std::vector<u8> &bytes)
 {

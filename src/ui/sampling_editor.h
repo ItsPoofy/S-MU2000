@@ -16,8 +16,12 @@
 #pragma once
 
 #include "xg_ui.h"
+#include "card_fs.h"
+#include "m2a.h"
 
+#include <array>
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <string>
 #include <thread>
@@ -47,9 +51,45 @@ private:
 	void samples_pane();
 	void wave_pane(bridge &br);
 	void assign_pane(bridge &br);
+	void card_pane(bridge &br);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
+	// カード: 一覧を作り直す・選んだファイルを読む（差しているカードは音を作る糸で、画像はここで）
+	void card_refresh(bridge &br);
+	void card_open_file(bridge &br, int index);
+	void card_select_wave(int index);
 
 	bridge::sampling_view m_view;
+
+	// ---- カード（SmartMedia の中身を、本体に読み込まずに見る。card_fs.h・m2a.h）
+	// 中身は差しているカード（m_card_src 0）か、開いた画像ファイル（1）。差しているカードを読むのは
+	// 音を作る糸の仕事なので、答えは card_job で届く
+	struct card_job {
+		std::atomic<bool> done{ false };
+		bool ok = false;
+		std::string err;
+		std::vector<smu2000::cardfs::entry> files;   // 一覧
+		std::vector<u8> bytes;                       // 読んだファイル
+		int index = -1;                              // 読んだファイルの番号（-1 は一覧）
+	};
+	int m_card_src = 0;
+	std::string m_card_file;                    // 開いた画像の場所（M2A から作ったカードは、差すまで空）
+	std::string m_card_m2a;                     // 開いた M2A の場所（そこから m_card_img を作った）
+	bool card_materialize(std::string &err);    // M2A から作ったカードをファイルにする（差す前に）
+	std::vector<u8> m_card_img;                 // 開いた画像の中身
+	char m_card_input[512] = {};                // 画像の場所（ファイルの窓が無い所で）
+	std::vector<smu2000::cardfs::entry> m_card_files;
+	std::string m_card_note;                    // 一覧や読み込みの結果
+	bool m_card_stale = true;                   // 一覧を作り直す
+	std::string m_card_seen;                    // 一覧を作ったときに差していたカード
+	int m_card_sel = -1;                        // 選んだファイル
+	std::shared_ptr<card_job> m_card_job;
+	std::vector<u8> m_m2a;                      // 選んだ M2A の中身
+	std::vector<smu2000::m2a::wave> m_m2a_waves;
+	int m_m2a_sel = -1;                         // 選んだ波形
+	std::vector<s16> m_m2a_pcm;                 // その波形（44.1kHz・モノラル）
+	std::vector<s16> m_m2a_lo, m_m2a_hi;        // 見取り図
+	std::string m_load_after_insert;            // 差してから読み込むファイルの名前
+	bool m_load_confirm = false;                // 読み込む前の確かめ
 	int m_source = 0;                  // smu2000::sampling::source
 	int m_trigger_db = 0;              // 0 = 引き金なし、ほかは -60〜-6 dBFS
 	char m_name[9] = {};               // 録るサンプルの名前（空なら firmware と同じ takeNNN）
@@ -108,6 +148,18 @@ private:
 	int m_loaded_slot = -1;            // 編集欄に読み込んだ音色
 	bool m_dirty = false;              // 編集欄を触った
 	int m_sample = 0;                  // 0 = 無し
+	int m_rom_wave = -1;               // サンプルでなく内蔵の波形の組を鳴らすとき（0-502）
+	std::vector<std::string> m_wave_labels;   // 組ごとの名前代わり（使っている XG の音色）
+	char m_wave_find[32] = {};         // 組の絞り込み
+	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列
+	struct sx_job {
+		std::atomic<bool> done{ false };
+		bool to_file = false;
+		std::vector<std::vector<u8>> msgs;
+	};
+	std::shared_ptr<sx_job> m_sx_job;
+	std::deque<std::vector<u8>> m_sx_queue;
+	size_t m_sx_total = 0;
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;
@@ -115,6 +167,55 @@ private:
 	// 押して試聴する鍵と、鳴らしている鍵（-1 = なし）
 	int m_audition_key = 60, m_held_key = -1;
 	int m_attack = 63, m_decay1 = 0, m_decay2 = 0, m_release = 63, m_level1 = 127, m_level2 = 127;
+	int m_key_lo = 0, m_key_hi = 127, m_vel_lo = 1, m_vel_hi = 127;
+	bool m_el_on = true;
+	// 要素 1-4。上の編集欄は m_cur_el のもので、要素を切り替えるときに m_els と出し入れする
+	std::array<smu2000::sampling::element, smu2000::sampling::VOICE_ELEMENTS> m_els{};
+	int m_cur_el = 0;
+	void stash_el()
+	{
+		smu2000::sampling::element &x = m_els[size_t(m_cur_el)];
+		x.on = m_el_on;
+		x.assigned = m_sample != 0;
+		x.sample = m_sample;
+		x.rom_wave = m_sample ? -1 : m_rom_wave;
+		x.level = m_level;
+		x.pan = m_pan;
+		x.coarse = m_coarse;
+		x.fine = m_fine;
+		x.attack = m_attack;
+		x.decay1 = m_decay1;
+		x.decay2 = m_decay2;
+		x.release = m_release;
+		x.level1 = m_level1;
+		x.level2 = m_level2;
+		x.key_lo = m_key_lo;
+		x.key_hi = m_key_hi;
+		x.vel_lo = m_vel_lo;
+		x.vel_hi = m_vel_hi;
+	}
+	void load_el(int e)
+	{
+		m_cur_el = e;
+		const smu2000::sampling::element &x = m_els[size_t(e)];
+		m_el_on = x.on;
+		m_sample = x.assigned ? x.sample : 0;
+		m_rom_wave = x.assigned ? -1 : x.rom_wave;
+		m_level = x.level;
+		m_pan = x.pan;
+		m_coarse = x.coarse;
+		m_fine = x.fine;
+		m_attack = x.attack;
+		m_decay1 = x.decay1;
+		m_decay2 = x.decay2;
+		m_release = x.release;
+		m_level1 = x.level1;
+		m_level2 = x.level2;
+		m_key_lo = x.key_lo;
+		m_key_hi = x.key_hi;
+		m_vel_lo = x.vel_lo;
+		m_vel_hi = x.vel_hi;
+	}
 };
 
 } // namespace ui

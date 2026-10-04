@@ -13,6 +13,9 @@
 #include "ui/bridge.h"
 #include "ui/driver.h"
 #include "wav_in.h"
+#include "card_fs.h"
+#include "m2a.h"
+#include "ui/panel_macro.h"
 
 #include <cmath>
 #include <cstdio>
@@ -33,6 +36,7 @@ struct rig {
 	double sine2_amp = -1.0;        // AD2 だけ 660Hz にするときの振幅（負なら AD1 と同じもの）
 	u64 n = 0;
 	std::vector<double> out;        // 集めている間の出力（左右の平均）
+	double sum_l = 0, sum_r = 0;    // 集めている間の左・右の二乗の和（パンを見る）
 	bool collect = false;
 
 	void pump(u32 ms)
@@ -46,8 +50,11 @@ struct rig {
 			mu.run_sample(l, r);
 			u8 b;
 			while (mu.midi_out_take(b)) {}
-			if (collect)
+			if (collect) {
 				out.push_back((double(l) + double(r)) * 0.5 / mu2000::DAC_FULL_SCALE);
+				sum_l += (double(l) / mu2000::DAC_FULL_SCALE) * (double(l) / mu2000::DAC_FULL_SCALE);
+				sum_r += (double(r) / mu2000::DAC_FULL_SCALE) * (double(r) / mu2000::DAC_FULL_SCALE);
+			}
 		}
 	}
 
@@ -253,6 +260,52 @@ int main(int argc, char **argv)
 		g.pump(100);
 	expect("書き終えた", "<SAVE>");
 
+	// カードの中身を本体を通さずに読む（サンプリングの窓の「カード」。card_fs.h・m2a.h）。
+	// 書いた M2A の波形が、firmware の表のサンプル 1 と同じ長さ・同じ音で、そのまま試聴できる
+	std::vector<u8> saved_m2a;
+	{
+		std::vector<smu2000::cardfs::entry> files;
+		std::vector<u8> m2a;
+		std::vector<smu2000::m2a::wave> waves;
+		std::string err;
+		bool listed = smu2000::cardfs::list(g.mu.card().raw(), files, err);
+		bool found = false;
+		for (const auto &e : files)
+			found |= e.path == "ALL_SEQ.M2A";
+		const bool read = found && smu2000::cardfs::read(g.mu.card().raw(), "ALL_SEQ.M2A", m2a, err);
+		const bool parsed = read && smu2000::m2a::parse(m2a, waves, err);
+		const auto list = g.mu.sampling_list();
+		const bool same_len = parsed && waves.size() == 1 && !list.empty() &&
+		                      waves[0].frames + 2 >= list[0].frames() && waves[0].frames <= list[0].frames();
+		std::vector<s16> pcm = same_len ? smu2000::m2a::pcm(m2a, waves[0]) : std::vector<s16>();
+		std::vector<double> x;
+		for (size_t i = RATE / 10; i < pcm.size() && i < RATE / 2; i++)
+			x.push_back(pcm[i] / 32768.0);
+		const bool tone_ok = !x.empty() && tone(x, 440) > 10 * std::max(tone(x, 330), tone(x, 587));
+		std::printf("%s カードを外から読む             %zu ファイル、波形 %zu 個、%u / %u サンプル %s\n",
+		            listed && tone_ok ? "合" : "NG", files.size(), waves.size(), waves.empty() ? 0u : waves[0].frames,
+		            list.empty() ? 0u : list[0].frames(), err.c_str());
+		if (!(listed && tone_ok))
+			bad++;
+		saved_m2a = m2a;
+
+		// 外の PCM の試聴（preview_pcm）。音源を通さずに鳴り、終われば止まる
+		g.out.clear();
+		const size_t n = pcm.size();
+		g.mu.preview_pcm(std::move(pcm));
+		g.collect = true;
+		g.pump(200);
+		g.collect = false;
+		const bool playing = g.mu.preview_number() == -1;
+		const double p440 = tone(g.out, 440), p330 = tone(g.out, 330);
+		g.pump(u32(n * 1000 / RATE) + 100);
+		const bool stopped = g.mu.preview_number() == 0;
+		const bool prev_ok = n && playing && stopped && p440 > 0.01 && p440 > 10 * p330;
+		std::printf("%s 外の PCM の試聴                440Hz %.4f / 330Hz %.5f\n", prev_ok ? "合" : "NG", p440, p330);
+		if (!prev_ok)
+			bad++;
+	}
+
 	static rig h;
 	if (!h.mu.load_program(dir + "/mu2000_flash.bin") || !h.mu.load_wave(dir + "/dump")) {
 		std::fprintf(stderr, "%s\n", h.mu.error().c_str());
@@ -263,23 +316,90 @@ int main(int argc, char **argv)
 	h.mu.reset();
 	for (u32 i = 0; i < 30 * RATE && !h.mu.midi_ready(); i += RATE / 100)
 		h.pump(10);
+	// 読み戻すカードは、取り出した M2A を PC の側で新しいカードに書き直したもの（smartmedia::format に
+	// ファイルを渡す。サンプリングの窓で M2A のファイルを直に読み込むときと同じ）。firmware がそれを読めるか
+	smu2000::smartmedia made;
+	{
+		const u32 mb = smu2000::smartmedia::megabytes_for(saved_m2a.size());
+		std::vector<smu2000::smartmedia::root_file> put(1);
+		put[0].name = "FROMPC.M2A";
+		put[0].bytes = saved_m2a;
+		const bool ok_made = mb && made.create(mb) && made.format(put);
+		std::vector<smu2000::cardfs::entry> files;
+		std::vector<u8> back;
+		std::string err;
+		const bool same = ok_made && smu2000::cardfs::list(made.raw(), files, err) && files.size() == 1 &&
+		                  smu2000::cardfs::read(made.raw(), "FROMPC.M2A", back, err) && back == saved_m2a;
+		std::printf("%s M2A を新しいカードに書く         %u MB、%zu バイト %s\n", same ? "合" : "NG", mb, saved_m2a.size(), err.c_str());
+		if (!same)
+			bad++;
+
+		// 16MB を超えるファイル（論理ブロックがゾーン 1 へ入る）と、2 つ目のファイルも書いて読み戻せる
+		std::vector<smu2000::smartmedia::root_file> big(2);
+		big[0].name = "BIG.M2A";
+		big[0].bytes.resize(20u << 20);
+		for (size_t i = 0; i < big[0].bytes.size(); i++)
+			big[0].bytes[i] = u8((i * 2654435761u) >> 13);
+		big[1].name = "SMALL.TXT";
+		big[1].bytes.assign(100, u8('x'));
+		smu2000::smartmedia large;
+		const u32 mb2 = smu2000::smartmedia::megabytes_for(big[0].bytes.size() + big[1].bytes.size());
+		std::vector<u8> b0, b1;
+		const bool big_ok = mb2 == 32 && large.create(mb2) && large.format(big) &&
+		                    smu2000::cardfs::read(large.raw(), "BIG.M2A", b0, err) && b0 == big[0].bytes &&
+		                    smu2000::cardfs::read(large.raw(), "SMALL.TXT", b1, err) && b1 == big[1].bytes;
+		std::printf("%s 20MB のファイルを 32MB のカードに  %s\n", big_ok ? "合" : "NG", err.c_str());
+		if (!big_ok)
+			bad++;
+	}
+	// 読み戻しは、サンプリングの窓の「この M2A を読み込む」と同じボタンの押し方（ui::panel_macro）で。
+	// まず firmware が書いたカードから読み、次にカードを PC で書いたものへ差し替えて（card_swapped）読む。
+	// firmware は前のカードの FAT を覚えているので、差し替えに気づかないと新しいカードのファイルが見つからない
+	auto load_by_macro = [&](const char *name, const char *what) {
+		ui::panel_macro macro;
+		macro.start(ui::panel_macro::load_m2a(name), "done");
+		std::string msg;
+		bool finished = false;
+		size_t last = ~size_t(0);
+		for (int i = 0; i < 200 * 100 && !finished; i++) {
+			h.pump(10);
+			finished = macro.tick(h.mu, msg);
+			if (g.verbose && macro.at() != last) {
+				last = macro.at();
+				std::printf("    段 %zu [%s]\n", last, h.lcd().c_str());
+			}
+		}
+		const bool ok = finished && msg == "done";
+		std::printf("%s %-28s [%s] %s\n", ok ? "合" : "NG", what, h.lcd().c_str(), msg.c_str());
+		if (!ok) bad++;
+	};
 	h.mu.card() = g.mu.card();
 	h.pump(1500);
-	h.press(B::sampling_mode);
-	h.press(B::select_right);
-	h.press(B::enter);
+	load_by_macro("ALL_SEQ.M2A", "ボタンのマクロで LOAD");
+	h.mu.card() = made;
+	h.mu.card_swapped();
 	h.pump(1000);
-	h.press(B::enter);                  // ディレクトリの中
-	h.pump(1000);
+	load_by_macro("FROMPC.M2A", "差し替えたカードから LOAD");
+	// 窓の道（bridge::request_macro → driver::sampling_tick）は早送りする。10ms のブロックを回して、
+	// 何ブロックで終わるか（= 実時間で鳴らしていたら何秒か）を見る。サンプルがあるので Overwrite ALL? も通る
 	{
-		const std::string s = h.lcd();
-		const bool ok = s.find("ALL_SEQ.M2A") != std::string::npos;
-		std::printf("%s %-28s [%s]\n", ok ? "合" : "NG", "カードにファイルがある", s.c_str());
+		ui::bridge br;
+		ui::driver drv;
+		br.request_macro(ui::panel_macro::load_m2a("FROMPC.M2A"), "done");
+		int blocks = 0;
+		ui::bridge::sampling_view view;
+		for (; blocks < 3000; blocks++) {
+			drv.pump_midi(h.mu, br);
+			h.pump(10);
+			br.get_sampling(view);
+			if (!view.message.empty())
+				break;
+		}
+		const bool ok = view.message == "done" && blocks < 300;
+		std::printf("%s 窓の道の LOAD（早送り）        %d ブロック（実時間で %.2f 秒） %s\n", ok ? "合" : "NG", blocks,
+		            blocks / 100.0, view.message.c_str());
 		if (!ok) bad++;
 	}
-	h.press(B::enter);
-	for (int i = 0; i < 100 && h.lcd().find("LOADING") != std::string::npos; i++)
-		h.pump(100);
 	// 録音の最後の 1 語の後ろ半分（サンプルの長さの外）は書き出されないので、そこだけは違ってよい
 	const auto &a = g.mu.sample_ram(), &b = h.mu.sample_ram();
 	size_t differ = 0, used = 0;
@@ -434,15 +554,15 @@ int main(int argc, char **argv)
 
 		// 音色に割り当てて、バンク 16 の PGM001 で鳴らす
 		sp::voice v;
-		v.assigned = true;
-		v.sample = 1;
+		v.el[0].assigned = true;
+		v.el[0].sample = 1;
 		v.name = "Direct";
-		v.level = 127;
-		v.pan = 7;
+		v.el[0].level = 127;
+		v.el[0].pan = 7;
 		const bool set = k.mu.sampling_set_voice(0, v, err);
 		sp::voice back;
 		k.mu.sampling_voice(0, back);
-		check(set && back.assigned && back.sample == 1 && back.name == "Direct", "直の割り当て: 読み戻せる", back.name);
+		check(set && back.el[0].assigned && back.el[0].sample == 1 && back.name == "Direct", "直の割り当て: 読み戻せる", back.name);
 		// 名前の余りは空白（0 だと LCD が CGRAM の字を出す）。名前の欄は 8 文字で、その後ろは触らない
 		{
 			const auto &d = k.mu.dram();
@@ -469,6 +589,123 @@ int main(int argc, char **argv)
 		for (u8 b : off)
 			k.mu.midi_in(b, 0);
 		k.pump(300);
+
+		// 内蔵ウェーブ。要素の波形の欄に内蔵の波形の組（0x4000 を立てない）を書くと、サンプルでなく
+		// ROM の波形が鳴る（s45e_mid さんの見つけたこと。doc/sampling-ram.md）。PGM010 に組 16（Syn Drum など）、
+		// 比べに組無しを書いて、鍵 60 の大きさを見る
+		{
+			auto rms_of = [&](int wave) {
+				sp::voice w;
+				w.name = "RomWave";
+				w.el[0].rom_wave = wave;
+				std::string e;
+				const bool ok = k.mu.sampling_set_voice(9, w, e);
+				sp::voice back;
+				k.mu.sampling_voice(9, back);
+				const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x09 };
+				for (u8 b : sel)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.out.clear();
+				k.collect = true;
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(500);
+				k.collect = false;
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(500);
+				double sum = 0;
+				for (double v : k.out)
+					sum += v * v;
+				return std::make_pair(ok && !back.el[0].assigned && back.el[0].rom_wave == wave, std::sqrt(sum / std::max<size_t>(1, k.out.size())));
+			};
+			const auto with = rms_of(16), without = rms_of(-1);
+			check(with.first && without.first && with.second > 0.003 && without.second < 0.0001,
+			      "内蔵ウェーブを割り当てると鳴る",
+			      "組 16 で rms " + std::to_string(with.second) + "、組無しで " + std::to_string(without.second));
+
+			// サンプル音色を書く SysEx（機種 0x68）。PGM010 に組 16 と音程・エンベロープを書き、その記録を
+			// SysEx にして PGM021 へ送ると、firmware が同じ記録を作る（要素の [0] は firmware が付ける印なので除く）
+			sp::voice w;
+			w.name = "SxCopy";
+			w.el[0].rom_wave = 16;
+			w.el[0].coarse = 7;
+			w.el[0].attack = 40;
+			w.el[0].release = 20;
+			w.el[0].pan = 3;
+			std::string e;
+			k.mu.sampling_set_voice(9, w, e);
+			const u32 v9 = sp::TAB_VOICE + sp::VOICE_SIZE * 9 - 0x1000000, v20 = sp::TAB_VOICE + sp::VOICE_SIZE * 20 - 0x1000000;
+			const std::vector<u8> rec9(k.mu.dram().begin() + v9, k.mu.dram().begin() + v9 + sp::VOICE_SIZE);
+			const auto msgs = sp::voice_sysex(20, rec9.data());
+			size_t bytes = 0;
+			for (const auto &m : msgs) {
+				for (u8 b : m)
+					k.mu.midi_in(b, 0);
+				bytes += m.size();
+				k.pump(5);
+			}
+			k.pump(300);
+			int differ = 0;
+			for (u32 i = 0; i < sp::VOICE_SIZE; i++) {
+				const bool elem0 = i >= 12 && i < 12 + 4 * 84 && (i - 12) % 84 == 0;
+				if (!elem0 && k.mu.dram()[v20 + i] != rec9[i]) {
+					if (!differ)
+						std::printf("    最初の違い +%x: %02x → %02x\n", i, rec9[i], k.mu.dram()[v20 + i]);
+					differ++;
+				}
+			}
+			sp::voice back;
+			k.mu.sampling_voice(20, back);
+			check(differ == 0 && back.name == "SxCopy" && back.el[0].rom_wave == 16 && back.el[0].coarse == 7,
+			      "サンプル音色の SysEx で写す",
+			      std::to_string(msgs.size()) + " 通 " + std::to_string(bytes) + " バイト、違う " + std::to_string(differ) + " バイト");
+
+			// 要素を重ねる。要素 1 = 組 16 を左いっぱい、要素 2 = 組 39 を右いっぱいにして、右の大きさを見る
+			// （右にもリバーブで左の音が少し回るので、差は 20dB ほど）
+			// （実機でも 2 要素が鳴ることを確かめた。doc/sampling-ram.md）
+			auto lr_of = [&](const sp::voice &mv, int key) {
+				std::string err;
+				k.mu.sampling_set_voice(11, mv, err);
+				const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x0b };
+				for (u8 b : sel)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.sum_l = k.sum_r = 0;
+				k.collect = true;
+				const u8 non[] = { 0x90, u8(key), 0x64 }, noff[] = { 0x80, u8(key), 0x40 };
+				for (u8 b : non)
+					k.mu.midi_in(b, 0);
+				k.pump(400);
+				k.collect = false;
+				for (u8 b : noff)
+					k.mu.midi_in(b, 0);
+				k.pump(600);
+				return std::make_pair(k.sum_l, k.sum_r);
+			};
+			sp::voice mv;
+			mv.name = "Layer";
+			mv.el[0].rom_wave = 16;
+			mv.el[0].pan = 0;
+			mv.el[1] = mv.el[0];
+			mv.el[1].rom_wave = 39;
+			mv.el[1].pan = 14;
+			const auto both = lr_of(mv, 60);
+			sp::voice mb;
+			k.mu.sampling_voice(11, mb);
+			mv.el[1].on = false;
+			const auto one = lr_of(mv, 60);
+			mv.el[1].on = true;
+			mv.el[1].key_lo = 72;
+			const auto split60 = lr_of(mv, 60), split72 = lr_of(mv, 72);
+			auto db = [](double a, double b) { return 10 * std::log10((a + 1e-30) / (b + 1e-30)); };
+			check(mb.el[0].on && mb.el[1].on && !mb.el[2].on && mb.el[1].rom_wave == 39 &&
+			      both.second > 0 && db(both.second, one.second) > 15 && db(split72.second, split60.second) > 15,
+			      "要素を重ねる・鍵で分ける",
+			      "右: 2 要素 " + std::to_string(db(both.second, one.second)) + " dB 上、鍵で分けて 72 は 60 より " +
+			      std::to_string(db(split72.second, split60.second)) + " dB 上");
+		}
 
 		// 窓の道（bridge::post → driver::sampling_tick）と WAV の取り込み。48kHz・2ch の WAV
 		// （左 660Hz、右 880Hz）を作り、AD2（右）を 44.1kHz に直して足し、PGM002 に割り当てて鳴らす
@@ -504,8 +741,8 @@ int main(int argc, char **argv)
 			return num ? "added " + std::to_string(num) : e;
 		});
 		sp::voice v2;
-		v2.assigned = true;
-		v2.sample = 3;
+		v2.el[0].assigned = true;
+		v2.el[0].sample = 3;
 		v2.name = "Wav880";
 		br.post([v2](mu2000 &mu) {
 			std::string e;
@@ -615,8 +852,8 @@ int main(int argc, char **argv)
 		{
 			sp::voice v3;
 			k.mu.sampling_voice(1, v3);
-			v3.coarse = -12;
-			v3.fine = 31;
+			v3.el[0].coarse = -12;
+			v3.el[0].fine = 31;
 			k.mu.sampling_set_voice(1, v3, err);
 			sp::voice back3;
 			k.mu.sampling_voice(1, back3);
@@ -638,7 +875,7 @@ int main(int argc, char **argv)
 					best = t;
 					best_f = f;
 				}
-			check(back3.coarse == -12 && back3.fine == 31 && best_f > 446.0 && best_f < 450.0,
+			check(back3.el[0].coarse == -12 && back3.el[0].fine == 31 && best_f > 446.0 && best_f < 450.0,
 			      "音程: 半音 -12・微調 +31", std::to_string(best_f) + " Hz");
 		}
 
@@ -663,8 +900,8 @@ int main(int argc, char **argv)
 				two[i] = s16(std::lround(12000 * std::sin(2 * PI * (i < RATE / 5 ? 440.0 : 660.0) * double(i) / RATE)));
 			const int n5 = k.mu.sampling_add(two.data(), two.size(), "looped", err);
 			sp::voice v5;
-			v5.assigned = true;
-			v5.sample = n5;
+			v5.el[0].assigned = true;
+			v5.el[0].sample = n5;
 			v5.name = "Looped";
 			k.mu.sampling_set_voice(2, v5, err);
 			const u8 pc3[] = { 0xc0, 0x02 };
@@ -850,16 +1087,16 @@ int main(int argc, char **argv)
 			env(h0, a0, f0);
 			sp::voice e;
 			k.mu.sampling_voice(2, e);
-			e.attack = 24;    // ゆっくり立ち上がる（0.4 秒ほど）
-			e.decay1 = 63;
-			e.level1 = 96;    // すぐ -24dB ほどへ
-			e.release = 16;   // 離しても長く残る
+			e.el[0].attack = 24;    // ゆっくり立ち上がる（0.4 秒ほど）
+			e.el[0].decay1 = 63;
+			e.el[0].level1 = 96;    // すぐ -24dB ほどへ
+			e.el[0].release = 16;   // 離しても長く残る
 			k.mu.sampling_set_voice(2, e, err);
 			sp::voice eb;
 			k.mu.sampling_voice(2, eb);
 			env(h1, a1, f1);
 			const double db = 20 * std::log10(h1 / h0);
-			check(eb.attack == 24 && eb.decay1 == 63 && eb.level1 == 96 && eb.release == 16 && f1 < 0.2 * f0 &&
+			check(eb.el[0].attack == 24 && eb.el[0].decay1 == 63 && eb.el[0].level1 == 96 && eb.el[0].release == 16 && f1 < 0.2 * f0 &&
 			      db < -18 && db > -30 && a1 > 0.5 * h1 && a0 < 0.1 * h0,
 			      "エンベロープ: アタック・レベル・リリース",
 			      "頭 " + std::to_string(f1 / f0) + "、押している間 " + std::to_string(db) + " dB、離した後 " +

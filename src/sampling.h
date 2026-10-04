@@ -12,6 +12,7 @@
 
 #include "compat/mamecompat.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,7 @@ constexpr int MAX_SAMPLES = 512;
 constexpr u32 TAB_VOICE = 0x1054e00;
 constexpr u32 VOICE_SIZE = 350;
 constexpr int MAX_VOICES = 256;
+constexpr int ROM_WAVE_SETS = 503;   // 内蔵の波形の組の数（xg/native_voice.h の SET_TABLE）
 constexpr u32 SAMPLE_RATE = 44100;
 // サンプリング RAM は 4MB = 0x100000 語（1 語に 16bit のサンプル 2 つ、下の 16bit が先）
 constexpr u32 RAM_WORDS = 0x100000;
@@ -63,11 +65,14 @@ struct sample
 	u32 frames() const { return (end - start) * 2; }
 };
 
-struct voice
+// サンプル音色の要素 1 つ（84 バイトのうち、窓で触る欄。doc/sampling-ram.md の要素の表）
+struct element
 {
-	bool assigned = false;   // 1 つ目の要素がサンプルを鳴らすか
-	std::string name;
+	bool on = false;         // 鳴らすか（音色の頭の、使う要素の印のビット）
+	bool assigned = false;   // サンプルを鳴らすか
 	int sample = 0;          // 1 から（assigned のとき）
+	// assigned でないとき鳴らす内蔵の波形の組（0-502。XG の音色が使うのと同じ番号）。-1 は鳴らさない
+	int rom_wave = -1;
 	int level = 127;         // 0-127
 	int pan = 7;             // 0 = L7、7 = C、14 = R7、15 = Scaling
 	int coarse = 0;          // 半音（-24〜+24）
@@ -76,6 +81,17 @@ struct voice
 	// 押すと attack で最大へ、decay1 で level1 へ、decay2 で level2 へ（押しているあいだはそこに留まる）、離すと release で 0 へ
 	int attack = 63, decay1 = 0, decay2 = 0, release = 63;
 	int level1 = 127, level2 = 127;
+	// 鳴らす鍵と強さの範囲（両端を含む）
+	int key_lo = 0, key_hi = 127, vel_lo = 1, vel_hi = 127;
+};
+
+constexpr int VOICE_ELEMENTS = 4;
+
+struct voice
+{
+	std::string name;
+	std::array<element, VOICE_ELEMENTS> el;   // el[0] が要素 1
+	voice() { el[0].on = true; }
 };
 
 // 録音で入力のどれを録るか（firmware の InputSrc と同じ並び）
@@ -84,6 +100,14 @@ enum class source { ad1, ad2, both };
 // ループ区間を探す。pcm の [from, to) の中で、長さ min_len 以上の組 (loop_from, loop_to) のうち、
 // つなぎ目のまわりの形がいちばん似ているもの。loop_from は偶数。見つからなければ false（src/sampling.cpp）
 bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &loop_from, u32 &loop_to);
+
+// サンプル音色を書く SysEx（機種 0x68 のパラメータチェンジ。doc/sampling-ram.md）。
+//   F0 43 1n 68 <AH> <AM> <AL> <値> F7
+//   AH = 0x40 + 0x10 × Bank# + 区画（0 = 頭、1-4 = 要素 1-4）、AM = PGM − 1
+//   頭:   AL 01 = 使う要素の印（+0）、02 = +1、03-0A = 名前 8 文字
+//   要素: AL 00 = 波形（2 バイト。要素の [2] [3]）、02-51 = 要素の [4]-[83]
+// rec は音色の記録 350 バイト。slot はそれを書く先（0-255）。1 通ずつ返す
+std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device = 0);
 
 } // namespace smu2000::sampling
 

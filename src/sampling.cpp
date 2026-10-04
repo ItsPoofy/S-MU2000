@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 
 namespace sp = smu2000::sampling;
 
@@ -391,6 +392,37 @@ bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &
 	return true;
 }
 
+std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device)
+{
+	std::vector<std::vector<u8>> out;
+	if (slot < 0 || slot >= MAX_VOICES || !rec)
+		return out;
+	const u8 base = u8(0x40 + 0x10 * (slot / 128));
+	const u8 pgm = u8(slot % 128);
+	auto msg = [&](u8 ah, u8 al, std::initializer_list<u8> data) {
+		std::vector<u8> m = { 0xf0, 0x43, u8(0x10 | (device & 0x0f)), 0x68, ah, pgm, al };
+		for (u8 d : data)
+			m.push_back(d & 0x7f);
+		m.push_back(0xf7);
+		out.push_back(std::move(m));
+	};
+	// 要素 1-4: 波形（2 バイト）と [4]-[83]。波形の通を受けると firmware は要素 1 の [0] を 01 にする
+	for (int e = 0; e < 4; e++) {
+		const u8 *el = rec + 12 + 84 * e;
+		const u8 ah = u8(base + 1 + e);
+		msg(ah, 0x00, { el[2], el[3] });
+		for (int i = 4; i < 84; i++)
+			msg(ah, u8(i - 2), { el[i] });
+	}
+	// 頭: 使う要素の印、+1、名前。**要素の後に送る**: 要素 2 の波形の通を受けると、firmware は
+	// 頭の +0（使う要素の印）を 5b に書き換える（ほかの要素では起きない）
+	msg(base, 0x01, { rec[0] });
+	msg(base, 0x02, { rec[1] });
+	for (int i = 0; i < 8; i++)
+		msg(base, u8(0x03 + i), { rec[2 + i] });
+	return out;
+}
+
 } // namespace smu2000::sampling
 
 bool mu2000::sampling_crossfade(int number, u32 loop_from, u32 to, u32 len, bool power)
@@ -552,19 +584,33 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 		return false;
 	const u32 o = voice_rec(slot);
 	out.name = text(m_dram, o + 2, 8);
-	out.assigned = m_dram[o + 12] == 0x01;
-	const u16 sv = u16(m_dram[o + 14] << 8 | m_dram[o + 15]);
-	out.sample = out.assigned ? int(sv & 0x1ff) + 1 : 0;
-	out.level = m_dram[o + 0x47];
-	out.pan = m_dram[o + 0x51];
-	out.coarse = int(m_dram[o + 0x1d]) - 0x40;
-	out.fine = int(m_dram[o + 0x1e]) - 0x40;
-	out.attack = m_dram[o + 0x55] & 0x3f;
-	out.decay1 = m_dram[o + 0x56] & 0x3f;
-	out.decay2 = m_dram[o + 0x57] & 0x3f;
-	out.release = m_dram[o + 0x58] & 0x3f;
-	out.level1 = m_dram[o + 0x59] & 0x7f;
-	out.level2 = m_dram[o + 0x5a] & 0x7f;
+	const u8 mask = m_dram[o];
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		sp::element &x = out.el[size_t(e)];
+		const u32 b = o + 12 + 84 * u32(e);
+		x.on = (mask >> e) & 1;
+		// 要素の波形の欄（[2]・[3]）は内蔵の音色の要素と同じ。0x4000 が立っていればサンプル、
+		// 立っていなければ内蔵の波形の組（7bit が 2 つ）、3f 7f は無し
+		const u16 sv = u16(m_dram[b + 2] << 8 | m_dram[b + 3]);
+		x.assigned = (sv & 0x4000) != 0;
+		x.sample = x.assigned ? int(sv & 0x1ff) + 1 : 0;
+		const int set = (m_dram[b + 2] << 7) | (m_dram[b + 3] & 0x7f);
+		x.rom_wave = !x.assigned && set < sp::ROM_WAVE_SETS ? set : -1;
+		x.key_lo = m_dram[b + 4] & 0x7f;
+		x.key_hi = m_dram[b + 5] & 0x7f;
+		x.vel_lo = m_dram[b + 6] & 0x7f;
+		x.vel_hi = m_dram[b + 7] & 0x7f;
+		x.coarse = int(m_dram[b + 17]) - 0x40;
+		x.fine = int(m_dram[b + 18]) - 0x40;
+		x.level = m_dram[b + 59];
+		x.pan = m_dram[b + 69];
+		x.attack = m_dram[b + 73] & 0x3f;
+		x.decay1 = m_dram[b + 74] & 0x3f;
+		x.decay2 = m_dram[b + 75] & 0x3f;
+		x.release = m_dram[b + 76] & 0x3f;
+		x.level1 = m_dram[b + 77] & 0x7f;
+		x.level2 = m_dram[b + 78] & 0x7f;
+	}
 	return true;
 }
 
@@ -574,36 +620,61 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		err = "no such voice";
 		return false;
 	}
-	if (v.assigned && (v.sample < 1 || v.sample > sp::MAX_SAMPLES || !(m_dram[sample_rec(v.sample) + 2] & 0x40))) {
-		err = "no such sample";
-		return false;
-	}
+	for (const sp::element &x : v.el)
+		if (x.on && x.assigned && (x.sample < 1 || x.sample > sp::MAX_SAMPLES || !(m_dram[sample_rec(x.sample) + 2] & 0x40))) {
+			err = "no such sample";
+			return false;
+		}
 	const u32 o = voice_rec(slot);
 	// 名前は 8 文字で、余りは空白（0 で埋めると LCD が CGRAM の 0 番の字を出す）。+10・+11 は別の欄
 	if (!v.name.empty())
 		put_text(m_dram, o + 2, 8, v.name, ' ');
-	if (v.assigned) {
-		m_dram[o + 12] = 0x01;
-		m_dram[o + 13] = 0x7f;
-		const u16 sv = u16(0x4000 | (v.sample - 1));
-		m_dram[o + 14] = u8(sv >> 8);
-		m_dram[o + 15] = u8(sv);
-	} else {
-		m_dram[o + 12] = 0x00;
-		m_dram[o + 13] = 0x7f;
-		m_dram[o + 14] = 0x3f;
-		m_dram[o + 15] = 0x7f;
+	// 使う要素の印（ビットごと）。使わない要素の中身は触らない
+	u8 mask = 0;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++)
+		if (v.el[size_t(e)].on)
+			mask |= u8(1 << e);
+	m_dram[o] = mask;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const sp::element &x = v.el[size_t(e)];
+		if (!x.on)
+			continue;
+		const u32 b = o + 12 + 84 * u32(e);
+		if (x.assigned) {
+			m_dram[b] = 0x01;
+			m_dram[b + 1] = 0x7f;
+			const u16 sv = u16(0x4000 | (x.sample - 1));
+			m_dram[b + 2] = u8(sv >> 8);
+			m_dram[b + 3] = u8(sv);
+		} else if (x.rom_wave >= 0 && x.rom_wave < sp::ROM_WAVE_SETS) {
+			// 内蔵の波形の組。[0] は firmware がサンプルのときだけ 01 にする欄で、鳴るかどうかは変えない
+			m_dram[b] = 0x00;
+			m_dram[b + 1] = 0x7f;
+			m_dram[b + 2] = u8(x.rom_wave >> 7);
+			m_dram[b + 3] = u8(x.rom_wave & 0x7f);
+		} else {
+			m_dram[b] = 0x00;
+			m_dram[b + 1] = 0x7f;
+			m_dram[b + 2] = 0x3f;
+			m_dram[b + 3] = 0x7f;
+		}
+		const int klo = std::clamp(x.key_lo, 0, 127), khi = std::clamp(x.key_hi, 0, 127);
+		const int vlo = std::clamp(x.vel_lo, 1, 127), vhi = std::clamp(x.vel_hi, 1, 127);
+		m_dram[b + 4] = u8(std::min(klo, khi));
+		m_dram[b + 5] = u8(std::max(klo, khi));
+		m_dram[b + 6] = u8(std::min(vlo, vhi));
+		m_dram[b + 7] = u8(std::max(vlo, vhi));
+		m_dram[b + 17] = u8(0x40 + std::clamp(x.coarse, -24, 24));
+		m_dram[b + 18] = u8(0x40 + std::clamp(x.fine, -64, 63));
+		m_dram[b + 59] = u8(std::clamp(x.level, 0, 127));
+		m_dram[b + 69] = u8(std::clamp(x.pan, 0, 15));
+		m_dram[b + 73] = u8(std::clamp(x.attack, 0, 63));
+		m_dram[b + 74] = u8(std::clamp(x.decay1, 0, 63));
+		m_dram[b + 75] = u8(std::clamp(x.decay2, 0, 63));
+		m_dram[b + 76] = u8(std::clamp(x.release, 0, 63));
+		m_dram[b + 77] = u8(std::clamp(x.level1, 0, 127));
+		m_dram[b + 78] = u8(std::clamp(x.level2, 0, 127));
 	}
-	m_dram[o + 0x47] = u8(std::clamp(v.level, 0, 127));
-	m_dram[o + 0x51] = u8(std::clamp(v.pan, 0, 15));
-	m_dram[o + 0x1d] = u8(0x40 + std::clamp(v.coarse, -24, 24));
-	m_dram[o + 0x1e] = u8(0x40 + std::clamp(v.fine, -64, 63));
-	m_dram[o + 0x55] = u8(std::clamp(v.attack, 0, 63));
-	m_dram[o + 0x56] = u8(std::clamp(v.decay1, 0, 63));
-	m_dram[o + 0x57] = u8(std::clamp(v.decay2, 0, 63));
-	m_dram[o + 0x58] = u8(std::clamp(v.release, 0, 63));
-	m_dram[o + 0x59] = u8(std::clamp(v.level1, 0, 127));
-	m_dram[o + 0x5a] = u8(std::clamp(v.level2, 0, 127));
 	return true;
 }
 
@@ -615,6 +686,7 @@ bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 		to = std::min(to ? to : s.frames(), s.frames());
 		if (from >= to)
 			return false;
+		m_prev_ext.clear();
 		m_prev_number = number;
 		m_prev_base = s.start * 2;
 		m_prev_pos = from;
@@ -624,6 +696,20 @@ bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 		return true;
 	}
 	return false;
+}
+
+void mu2000::preview_pcm(std::vector<s16> pcm, u32 loop_at)
+{
+	m_prev_on = false;
+	if (pcm.empty())
+		return;
+	m_prev_ext = std::move(pcm);
+	m_prev_number = -1;
+	m_prev_base = 0;
+	m_prev_pos = 0;
+	m_prev_end = u32(m_prev_ext.size());
+	m_prev_loop = loop_at < m_prev_end ? loop_at : ~0u;
+	m_prev_on = true;
 }
 
 void mu2000::rec_start(sp::source src, int trigger, u32 max_frames)

@@ -83,5 +83,19 @@ int main()
 	std::printf("a64 emitter selftest: %llu mismatch(es)\n", (unsigned long long)a64::selftest());
 
 	check_bend_thinner();
+
+	// Roland の液晶のデータ（F0 41 10 45 12）だけを抜き、GS リセット（F0 41 10 42 12）と XG（F0 43）は通す
+	{
+		ui::bend_thinner th;
+		int passed = 0;
+		auto send = [&passed](int, const u8 *, size_t) { passed++; };
+		const u8 disp[] = { 0xf0, 0x41, 0x10, 0x45, 0x12, 0x10, 0x00, 0x00, 0x48, 0x49, 0x0f, 0xf7 };
+		const u8 gs[]   = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
+		const u8 xg[]   = { 0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7 };
+		th.event(0, disp, sizeof(disp), 0.0, send);
+		th.event(0, gs, sizeof(gs), 0.0, send);
+		th.event(0, xg, sizeof(xg), 0.0, send);
+		std::printf("Roland の液晶のデータを抜く: 抜いた %zu・通した %d（GS リセットと XG）\n", th.dropped(), passed);
+	}
 	return 0;
 }

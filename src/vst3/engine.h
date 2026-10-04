@@ -109,6 +109,14 @@ public:
 	// 起動が終わるまで待つ。**DAW の本スレッドからだけ**呼ぶこと。
 	// 待ちきれずに時間切れなら false。始まっていなければ始めてから待つ
 	bool wait_ready(int ms);
+	// 止めておく・戻す。IPluginBase::terminate / initialize から（**音声スレッドが回っていないとき**）。
+	// park は起動を待ちきってから、スレーブの別スレッドを止める。この DLL のコードを走るスレッドを
+	// 残さないため（ホストが本体を手放さないまま DLL を外すと、残ったスレッドが消えたコードを走って落ちる）。
+	// unpark は止めたものを戻す
+	void park();
+	void unpark();
+	// まだ生きている engine を全部 park する。ExitDll（DLL を外す直前）から
+	static void park_all();
 
 	status state() const { return m_state.load(std::memory_order_acquire); }
 	// state() が failed のときの理由。ready でも「代用品を使った」等が入る
@@ -266,6 +274,9 @@ private:
 	// 起動は 1 度だけ。start() が exchange で守る（2 度やると
 	// 動き中の機械 m_mu を丸ごと差し替えてしまう）
 	std::atomic<bool>   m_boot_once{false};
+	bool                m_threaded = true;   // plugin.ini の threaded（unpark で戻す）
+	bool                m_parked = false;
+	std::mutex          m_park_mutex;
 
 	std::unique_ptr<mu2000> m_mu = nullptr;
 	// 読み込んだ ROM を掴んでおく。他の枚数ぶんと分け合っている

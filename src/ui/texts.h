@@ -141,6 +141,11 @@ struct ui_texts {
 	const char *dlg_d3d_fail_fmt;    // 0x%08lx: the HRESULT
 	const char *dlg_card_create_fail;
 	const char *dlg_fresh_card;      // may contain \n
+	const char *dlg_roms_needed;
+	const char *dlg_roms_bad_fmt;
+	const char *dlg_roms_pick;
+	const char *dlg_roms_quit;
+	const char *dlg_roms_ok_cancel;
 	const char *dlg_cancel;
 	// .syx file notes, shown in the master editor (produced by the
 	// pc_window backends and master_editor.cpp).
@@ -577,6 +582,49 @@ struct ui_texts {
 	const char *smp_env_decay2;
 	const char *smp_env_level2;
 	const char *smp_env_release;
+	const char *smp_rom_waves;
+	const char *smp_rom_wave_find;
+	const char *smp_rom_wave_tip;
+	const char *smp_sx_save;
+	const char *smp_sx_send;
+	const char *smp_sx_tip;
+	const char *smp_sx_sending_fmt;
+	const char *smp_element;
+	const char *smp_element_on;
+	const char *smp_element_tip;
+	const char *smp_key_range;
+	const char *smp_vel_range;
+	const char *smp_tab_edit;
+	const char *smp_tab_card;
+	const char *smp_card;
+	const char *smp_card_read_fail;
+	const char *smp_card_loaded;
+	const char *smp_card_slot;
+	const char *smp_card_none;
+	const char *smp_card_image;
+	const char *smp_card_open;
+	const char *smp_card_path;
+	const char *smp_card_open_path;
+	const char *smp_card_reload;
+	const char *smp_card_reading;
+	const char *smp_card_empty;
+	const char *smp_card_col_file;
+	const char *smp_card_col_size;
+	const char *smp_card_no_waves;
+	const char *smp_card_yes;
+	const char *smp_card_play_tip;
+	const char *smp_card_key;
+	const char *smp_card_insert;
+	const char *smp_card_insert_tip;
+	const char *smp_card_loading;
+	const char *smp_card_load;
+	const char *smp_card_load_tip;
+	const char *smp_card_load_warn;
+	const char *smp_card_write_fail;
+	const char *smp_card_too_big;
+	const char *smp_card_m2a_tip;
+	const char *smp_card_m2a_warn;
+	const char *dlg_card_or_m2a_desc;
 };
 
 // Each language file defines one of these (never included directly).
