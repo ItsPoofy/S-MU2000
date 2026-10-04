@@ -667,6 +667,7 @@ struct ui_texts {
 	const char *smp_make_fm_index;
 	const char *smp_make_fm_fb;
 	const char *smp_make_fm_tip;
+	const char *smp_make_presets;
 	const char *smp_make_organ;
 	const char *smp_make_unison;
 	const char *smp_make_vowel;

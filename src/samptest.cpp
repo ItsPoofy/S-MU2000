@@ -305,6 +305,32 @@ int main(int argc, char **argv)
 		std::printf("%s 外の PCM の試聴                440Hz %.4f / 330Hz %.5f\n", prev_ok ? "合" : "NG", p440, p330);
 		if (!prev_ok)
 			bad++;
+
+		// 鳴らしたまま波形を差し替える（「波形を作る」で値を変えたとき）。keep_pos なら位置を続け、音は新しい波形になる。
+		// keep_pos でなければ頭から
+		std::vector<s16> wa(4000), wb(4000);
+		for (size_t i = 0; i < wa.size(); i++) {
+			wa[i] = s16(std::lround(12000 * std::sin(2 * PI * 441.0 * double(i) / RATE)));   // 441Hz と 882Hz はどちらもループで閉じる
+			wb[i] = s16(std::lround(12000 * std::sin(2 * PI * 882.0 * double(i) / RATE)));
+		}
+		g.mu.preview_pcm(wa, 0);
+		g.pump(50);
+		const u32 pos_before = g.mu.preview_pos();
+		g.mu.preview_pcm(wb, 0, true);
+		const u32 pos_kept = g.mu.preview_pos();
+		g.out.clear();
+		g.collect = true;
+		g.pump(200);
+		g.collect = false;
+		const double s882 = tone(g.out, 882), s441 = tone(g.out, 441);
+		g.mu.preview_pcm(wa, 0);
+		const u32 pos_reset = g.mu.preview_pos();
+		g.mu.preview_stop();
+		const bool swap_ok = pos_before > 1000 && pos_kept == pos_before && pos_reset == 0 && s882 > 0.01 && s882 > 10 * s441;
+		std::printf("%s 試聴を鳴らしたまま差し替える        位置 %u → %u、差し替えた後 882Hz %.4f / 441Hz %.5f\n", swap_ok ? "合" : "NG",
+		            pos_before, pos_kept, s882, s441);
+		if (!swap_ok)
+			bad++;
 	}
 
 	static rig h;

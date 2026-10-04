@@ -2215,6 +2215,7 @@ void sampling_editor::make_pane(bridge &br)
 	};
 	const int was_mode = m_wm_mode;
 	{
+		ImGui::PushID("modes");
 		const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
 		for (int i = 0; i < M_COUNT; i++) {
 			const float need = ImGui::CalcTextSize(mode_names[i]).x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
@@ -2225,6 +2226,7 @@ void sampling_editor::make_pane(bridge &br)
 			}
 			ImGui::RadioButton(mode_names[i], &m_wm_mode, i);
 		}
+		ImGui::PopID();
 	}
 	if (was_mode != m_wm_mode)
 		m_wm_stale = true;
@@ -2262,6 +2264,8 @@ void sampling_editor::make_pane(bridge &br)
 			slider_f(UI_TEXT(smp_make_pulse, "Pulse width"), m_wm_pulse, 0.05f, 0.95f);
 	};
 
+	ImGui::PushID("body");
+	ImGui::PushID(m_wm_mode);
 	if (m_wm_mode == M_BASIC) {
 		shape_row();
 	} else if (m_wm_mode == M_BARS) {
@@ -2375,7 +2379,7 @@ void sampling_editor::make_pane(bridge &br)
 		// ファミコン（2A03）。矩形 4 つと三角は高さのある波形、ノイズ 2 つは高さの無いサンプル
 		const char *names[7] = { UI_TEXT(smp_make_fc_p12, "Pulse 12.5%"), UI_TEXT(smp_make_fc_p25, "Pulse 25%"),
 		                         UI_TEXT(smp_make_fc_p50, "Pulse 50%"), UI_TEXT(smp_make_fc_p75, "Pulse 75%"),
-		                         UI_TEXT(smp_make_fc_tri, "Triangle"), UI_TEXT(smp_make_fc_noise, "Noise"),
+		                         UI_TEXT(smp_make_fc_tri, "Triangle"), UI_TEXT(smp_make_fc_noise, "Noise (long)"),
 		                         UI_TEXT(smp_make_fc_noise_short, "Noise (short)") };
 		for (int i = 0; i < 7; i++) {
 			if (i && i != 4)
@@ -2397,9 +2401,10 @@ void sampling_editor::make_pane(bridge &br)
 			{ UI_TEXT(smp_make_fm_bass, "Bass"), 1, 1, 4.0f, 0.6f },
 			{ UI_TEXT(smp_make_fm_clav, "Clavi"), 1, 3, 2.2f, 0.2f },
 		};
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("%s", UI_TEXT(smp_make_presets, "Presets"));
 		for (size_t i = 0; i < std::size(presets); i++) {
-			if (i)
-				ImGui::SameLine();
+			ImGui::SameLine();
 			if (ImGui::SmallButton(presets[i].name)) {
 				m_wm_fm_c = presets[i].c;
 				m_wm_fm_m = presets[i].m;
@@ -2424,9 +2429,10 @@ void sampling_editor::make_pane(bridge &br)
 			{ UI_TEXT(smp_make_organ_flute, "Flute"), { 0, 0, 8, 4, 0, 2, 0, 0, 0 } },
 			{ UI_TEXT(smp_make_organ_reed, "Reed"), { 0, 0, 6, 8, 7, 6, 5, 4, 3 } },
 		};
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("%s", UI_TEXT(smp_make_presets, "Presets"));
 		for (size_t i = 0; i < std::size(presets); i++) {
-			if (i)
-				ImGui::SameLine();
+			ImGui::SameLine();
 			if (ImGui::SmallButton(presets[i].name)) {
 				std::copy(std::begin(presets[i].b), std::end(presets[i].b), m_wm_organ);
 				m_wm_stale = true;
@@ -2524,9 +2530,10 @@ void sampling_editor::make_pane(bridge &br)
 			{ UI_TEXT(smp_make_bell_gong, "Gong"), 1.41f, 8.0f, 1.8f },
 			{ UI_TEXT(smp_make_bell_marimba, "Marimba"), 4.0f, 1.5f, 0.25f },
 		};
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("%s", UI_TEXT(smp_make_presets, "Presets"));
 		for (size_t i = 0; i < std::size(presets); i++) {
-			if (i)
-				ImGui::SameLine();
+			ImGui::SameLine();
 			if (ImGui::SmallButton(presets[i].name)) {
 				m_wm_bell_ratio = presets[i].ratio;
 				m_wm_bell_index = presets[i].index;
@@ -2543,6 +2550,9 @@ void sampling_editor::make_pane(bridge &br)
 		slider_f(UI_TEXT(smp_make_fold_bias, "Asymmetry"), m_wm_fold_bias, 0.0f, 1.57f);
 		ImGui::TextWrapped("%s", UI_TEXT(smp_make_fold_note, "Wavefolding: a sine pushed past its limit folds back on itself. More amount adds harmonics; asymmetry brings in the even ones."));
 	}
+
+	ImGui::PopID();
+	ImGui::PopID();
 
 	// ---- 共通: 足す倍音の上限と大きさ（高さの無いノイズは、倍音にせずそのままサンプルにする）
 	const bool unpitched = m_wm_mode == M_NOISE || (m_wm_mode == M_FC && m_wm_fc >= 5);
@@ -2567,6 +2577,7 @@ void sampling_editor::make_pane(bridge &br)
 		ImGui::SetTooltip("%s", UI_TEXT(smp_make_lofi_tip, "Rounds the finished wave to fewer bits and holds each value for several samples (a lower sample rate), like an old sampler. 16 bit and 1/1 leave it alone."));
 
 	// ---- 作り直す
+	const bool rebuilt = m_wm_stale;
 	if (m_wm_stale) {
 		m_wm_stale = false;
 		const double level = m_wm_level / 100.0;
@@ -2669,8 +2680,16 @@ void sampling_editor::make_pane(bridge &br)
 		}
 	}
 
-	// ---- 試聴と登録
+	// ---- 試聴と登録。鳴らしている間に値を変えたら、その場で新しい波形に差し替える（ループの位置はそのまま）
 	const bool playing = m_view.preview_number == -1;
+	if (rebuilt && playing && !m_wm_pcm.empty()) {
+		std::vector<s16> pcm = m_wm_pcm;
+		const bool keep = !oneshot;          // 1 度だけ鳴る音は頭から鳴らし直す
+		br.post([pcm, keep](mu2000 &mu) mutable {
+			mu.preview_pcm(std::move(pcm), 0, keep);
+			return std::string();
+		});
+	}
 	ImGui::BeginDisabled(m_wm_pcm.empty());
 	if (!playing) {
 		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
@@ -2687,7 +2706,7 @@ void sampling_editor::make_pane(bridge &br)
 		});
 	}
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip("%s", UI_TEXT(smp_make_play_tip, "Plays the wave on the PC at the pitch of key 60 (C3), looping, without adding it to the MU2000"));
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_play_tip, "Plays the wave on the PC at the pitch of key 60 (C3), looping, without adding it to the MU2000. While it plays, every change you make is heard at once."));
 	ImGui::SameLine();
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(UI_TEXT(smp_name, "Name"));
