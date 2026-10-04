@@ -825,6 +825,8 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 		x.level2 = m_dram[b + 78] & 0x7f;
 		x.cutoff = m_dram[b + 37] & 0x7f;
 		x.resonance = m_dram[b + 35] & 0x7f;
+		x.hpf = m_dram[b + 82] & 0x7f;
+		x.vel_curve = m_dram[b + 68] & 0x7f;
 		x.lfo_wave = std::min(int(m_dram[b + 9]), 2);
 		x.lfo_phase_init = m_dram[b + 10] != 0;
 		x.lfo_speed = m_dram[b + 11] & 0x3f;
@@ -907,6 +909,8 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		m_dram[b + 78] = u8(std::clamp(x.level2, 0, 127));
 		m_dram[b + 37] = u8(std::clamp(x.cutoff, 0, 127));
 		m_dram[b + 35] = u8(std::clamp(x.resonance, 0, 127));
+		m_dram[b + 82] = u8(std::clamp(x.hpf, 0, 127));
+		m_dram[b + 68] = u8(std::clamp(x.vel_curve, 0, 10));
 		m_dram[b + 9] = u8(std::clamp(x.lfo_wave, 0, 2));
 		m_dram[b + 10] = x.lfo_phase_init ? 1 : 0;
 		m_dram[b + 11] = u8(std::clamp(x.lfo_speed, 0, 63));

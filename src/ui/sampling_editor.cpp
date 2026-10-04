@@ -1518,9 +1518,13 @@ void sampling_editor::assign_pane(bridge &br)
 			ImGui::PopID();
 		};
 
-		if (ImGui::CollapsingHeader(UI_TEXT(smp_filter, "Filter"))) {
+		if (ImGui::CollapsingHeader(UI_TEXT(smp_filter, "Filter and velocity"))) {
 			row(UI_TEXT(smp_cutoff, "Cutoff"), "##cut", x.cutoff, 0, 127);
 			row(UI_TEXT(smp_resonance, "Resonance"), "##reso", x.resonance, 0, 127);
+			row(UI_TEXT(smp_hpf, "High-pass"), "##hpf", x.hpf, 0, 127);
+			row(UI_TEXT(smp_vel_curve, "Velocity curve"), "##velc", x.vel_curve, 0, 10);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(smp_vel_curve_tip, "How key velocity turns into level. 0 is the normal curve; 1 and 2 keep soft notes louder; 3 to 8 widen the difference; 9 and 10 reach full level by medium velocity."));
 		}
 		if (ImGui::CollapsingHeader("LFO", ImGuiTreeNodeFlags_DefaultOpen)) {
 			ImGui::AlignTextToFramePadding();
