@@ -3,6 +3,7 @@
 
 #include "wav_in.h"
 #include "smartmedia.h"
+#include "xg/voices.h"
 #include "compat/paths.h"
 #include "imgui.h"
 
@@ -1074,6 +1075,7 @@ void sampling_editor::assign_pane(bridge &br)
 		// 選んだ音色の今の値を編集欄へ（触っている間は上書きしない）
 		m_loaded_slot = slot;
 		m_sample = cur.assigned ? cur.sample : 0;
+		m_rom_wave = cur.assigned ? -1 : cur.rom_wave;
 		std::snprintf(m_voice_name, sizeof(m_voice_name), "%s", cur.name.c_str());
 		m_level = cur.level;
 		m_pan = cur.pan;
@@ -1105,20 +1107,67 @@ void sampling_editor::assign_pane(bridge &br)
 		std::snprintf(label, sizeof(label), "%03d ?", m_sample);
 		shown = label;
 	}
-	if (ImGui::BeginCombo("##sample", shown.c_str())) {
-		if (ImGui::Selectable(none, m_sample == 0)) {
+	// 内蔵の波形の組の名前代わり（その組を使っている XG の音色）。ROM を読めたら 1 度だけ作る
+	if (m_wave_labels.empty())
+		if (const xg::voice_rom *vr = xgui::voices()) {
+			const auto users = vr->wave_users();
+			m_wave_labels.resize(users.size());
+			for (size_t i = 0; i < users.size(); i++) {
+				std::string s = "W" + std::to_string(i);
+				for (size_t k = 0; k < users[i].size() && k < 4; k++)
+					s += (k ? ", " : "  ") + users[i][k];
+				if (users[i].size() > 4)
+					s += ", ...";
+				m_wave_labels[i] = s;
+			}
+		}
+	auto wave_label = [&](int w) {
+		return w >= 0 && w < int(m_wave_labels.size()) ? m_wave_labels[size_t(w)] : "W" + std::to_string(w);
+	};
+	if (!m_sample && m_rom_wave >= 0)
+		shown = wave_label(m_rom_wave);
+	if (ImGui::BeginCombo("##sample", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
+		if (ImGui::Selectable(none, m_sample == 0 && m_rom_wave < 0)) {
 			m_sample = 0;
+			m_rom_wave = -1;
 			m_dirty = true;
 		}
 		for (const sp::sample &s : m_view.samples) {
 			std::snprintf(label, sizeof(label), "%03d %s", s.number, s.name.c_str());
 			if (ImGui::Selectable(label, s.number == m_sample)) {
 				m_sample = s.number;
+				m_rom_wave = -1;
+				m_dirty = true;
+			}
+		}
+		// 内蔵ウェーブ（MU2000 の XG の音色が使う波形の組）。名前の一部で絞り込める
+		ImGui::SeparatorText(UI_TEXT(smp_rom_waves, "Built-in waves"));
+		ImGui::SetNextItemWidth(-1);
+		ImGui::InputTextWithHint("##wfind", UI_TEXT(smp_rom_wave_find, "Filter by voice name"), m_wave_find, sizeof(m_wave_find));
+		std::string want = m_wave_find;
+		for (char &c : want)
+			c = char(std::tolower(u8(c)));
+		const int count = m_wave_labels.empty() ? sp::ROM_WAVE_SETS : int(m_wave_labels.size());
+		for (int w = 0; w < count; w++) {
+			std::string l = wave_label(w);
+			if (!want.empty()) {
+				std::string low = l;
+				for (char &c : low)
+					c = char(std::tolower(u8(c)));
+				if (low.find(want) == std::string::npos)
+					continue;
+			}
+			l += "##w" + std::to_string(w);
+			if (ImGui::Selectable(l.c_str(), m_sample == 0 && w == m_rom_wave)) {
+				m_sample = 0;
+				m_rom_wave = w;
 				m_dirty = true;
 			}
 		}
 		ImGui::EndCombo();
 	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_rom_wave_tip, "A sample from the sampling RAM, or one of the built-in waves the MU2000's own voices play (named after the voices that use it). A built-in wave is played the same way as a sample: pitch, level and envelope below apply."));
 
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(UI_TEXT(smp_voice_name, "Voice name"));
@@ -1223,6 +1272,7 @@ void sampling_editor::assign_pane(bridge &br)
 		sp::voice v;
 		v.assigned = m_sample != 0;
 		v.sample = m_sample;
+		v.rom_wave = m_sample ? -1 : m_rom_wave;
 		v.name = m_voice_name;
 		v.level = m_level;
 		v.pan = m_pan;
@@ -1239,7 +1289,7 @@ void sampling_editor::assign_pane(bridge &br)
 
 	// 試聴（音源を通す）。押しているあいだ、今の値を音色に書いてパート 1 をその音色にし、鍵を鳴らす。
 	// 離すとノートオフ（リリースも聞ける）
-	ImGui::BeginDisabled(m_sample == 0);
+	ImGui::BeginDisabled(m_sample == 0 && m_rom_wave < 0);
 	ImGui::Button(UI_TEXT(smp_audition, "Hold to play"), ImVec2(fs * 9, 0));
 	const bool hold_on = ImGui::IsItemActivated(), hold_off = ImGui::IsItemDeactivated();
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))

@@ -582,6 +582,9 @@ struct ui_texts {
 	const char *smp_env_decay2;
 	const char *smp_env_level2;
 	const char *smp_env_release;
+	const char *smp_rom_waves;
+	const char *smp_rom_wave_find;
+	const char *smp_rom_wave_tip;
 	const char *smp_tab_edit;
 	const char *smp_tab_card;
 	const char *smp_card;

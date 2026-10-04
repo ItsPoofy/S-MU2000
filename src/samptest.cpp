@@ -586,6 +586,42 @@ int main(int argc, char **argv)
 			k.mu.midi_in(b, 0);
 		k.pump(300);
 
+		// 内蔵ウェーブ。要素の波形の欄に内蔵の波形の組（0x4000 を立てない）を書くと、サンプルでなく
+		// ROM の波形が鳴る（s45e_mid さんの見つけたこと。doc/sampling-ram.md）。PGM010 に組 16（Syn Drum など）、
+		// 比べに組無しを書いて、鍵 60 の大きさを見る
+		{
+			auto rms_of = [&](int wave) {
+				sp::voice w;
+				w.name = "RomWave";
+				w.rom_wave = wave;
+				std::string e;
+				const bool ok = k.mu.sampling_set_voice(9, w, e);
+				sp::voice back;
+				k.mu.sampling_voice(9, back);
+				const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x09 };
+				for (u8 b : sel)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.out.clear();
+				k.collect = true;
+				for (u8 b : on)
+					k.mu.midi_in(b, 0);
+				k.pump(500);
+				k.collect = false;
+				for (u8 b : off)
+					k.mu.midi_in(b, 0);
+				k.pump(500);
+				double sum = 0;
+				for (double v : k.out)
+					sum += v * v;
+				return std::make_pair(ok && !back.assigned && back.rom_wave == wave, std::sqrt(sum / std::max<size_t>(1, k.out.size())));
+			};
+			const auto with = rms_of(16), without = rms_of(-1);
+			check(with.first && without.first && with.second > 0.003 && without.second < 0.0001,
+			      "内蔵ウェーブを割り当てると鳴る",
+			      "組 16 で rms " + std::to_string(with.second) + "、組無しで " + std::to_string(without.second));
+		}
+
 		// 窓の道（bridge::post → driver::sampling_tick）と WAV の取り込み。48kHz・2ch の WAV
 		// （左 660Hz、右 880Hz）を作り、AD2（右）を 44.1kHz に直して足し、PGM002 に割り当てて鳴らす
 		std::vector<u8> wav;

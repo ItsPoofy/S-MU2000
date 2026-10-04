@@ -146,6 +146,9 @@ private:
 	int m_loaded_slot = -1;            // 編集欄に読み込んだ音色
 	bool m_dirty = false;              // 編集欄を触った
 	int m_sample = 0;                  // 0 = 無し
+	int m_rom_wave = -1;               // サンプルでなく内蔵の波形の組を鳴らすとき（0-502）
+	std::vector<std::string> m_wave_labels;   // 組ごとの名前代わり（使っている XG の音色）
+	char m_wave_find[32] = {};         // 組の絞り込み
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;
