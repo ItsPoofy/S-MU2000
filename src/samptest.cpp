@@ -1343,6 +1343,13 @@ int main(int argc, char **argv)
 				const double r0 = rms(sound(v_res), RATE / 2, RATE / 2);
 				v_res.el[0].resonance = 60;
 				const double r1 = rms(sound(v_res), RATE / 2, RATE / 2);
+				// HPF を上げると低い方が削れて小さくなる。強さの曲線 2 は、同じ強さ 100 でも普通（0）より大きい
+				sp::voice v_hpf = base;
+				v_hpf.el[0].hpf = 127;
+				const double h1 = rms(sound(v_hpf), RATE / 2, RATE / 2);
+				sp::voice v_vc = base;
+				v_vc.el[0].vel_curve = 2;
+				const double c2 = rms(sound(v_vc), RATE / 2, RATE / 2);
 				// 読み戻し
 				sp::voice wr = base, rd;
 				wr.el[0].lfo_wave = 2;
@@ -1354,6 +1361,8 @@ int main(int argc, char **argv)
 				wr.el[0].lfo_amp = 33;
 				wr.el[0].cutoff = 77;
 				wr.el[0].resonance = 44;
+				wr.el[0].hpf = 66;
+				wr.el[0].vel_curve = 3;
 				wr.el[0].peg_depth = 50;
 				for (int i = 0; i < 4; i++) {
 					wr.el[0].peg_rate[i] = 10 + i;
@@ -1369,7 +1378,8 @@ int main(int argc, char **argv)
 				const sp::element &a = wr.el[0], &b = rd.el[0];
 				bool same = a.lfo_wave == b.lfo_wave && a.lfo_phase_init == b.lfo_phase_init && a.lfo_speed == b.lfo_speed &&
 				            a.lfo_delay == b.lfo_delay && a.lfo_pitch == b.lfo_pitch && a.lfo_filter == b.lfo_filter &&
-				            a.lfo_amp == b.lfo_amp && a.cutoff == b.cutoff && a.resonance == b.resonance && a.peg_depth == b.peg_depth;
+				            a.lfo_amp == b.lfo_amp && a.cutoff == b.cutoff && a.resonance == b.resonance && a.peg_depth == b.peg_depth && a.hpf == b.hpf &&
+				            a.vel_curve == b.vel_curve;
 				for (int i = 0; i < 4; i++)
 					same = same && a.peg_rate[i] == b.peg_rate[i] && a.feg_rate[i] == b.feg_rate[i];
 				for (int i = 0; i < 5; i++)
@@ -1384,13 +1394,15 @@ int main(int argc, char **argv)
 				      tone(peg_head, 130.81) > 1.5 * tone(peg_head, 261.63) && tone(pl_head, 261.63) > 3 * tone(pl_head, 130.81) &&
 				      tone(peg_tail, 261.63) > 10 * tone(peg_tail, 130.81) &&
 				      rms(o_cut, RATE / 2, RATE / 2) < 0.2 * rms(plain, RATE / 2, RATE / 2) &&
-				      rms(o_feg, RATE / 10, RATE / 5) < 0.1 * rms(o_feg, RATE * 12 / 10, RATE / 4) && r1 > 1.5 * r0 && same && defaults,
+				      rms(o_feg, RATE / 10, RATE / 5) < 0.1 * rms(o_feg, RATE * 12 / 10, RATE / 4) && r1 > 1.5 * r0 && same && defaults &&
+				      h1 < 0.5 * rms(plain, RATE / 2, RATE / 2) && c2 > 1.1 * rms(plain, RATE / 2, RATE / 2) && d.hpf == 0 && d.vel_curve == 0,
 				      "音色のエディット: LFO・フィルター・EG",
 				      "LFO なし 最大/最小 " + std::to_string(hi_p / lo_p) + "、音量の LFO " + std::to_string(hi_l / lo_l) +
 				      "、ピッチ EG の頭 130Hz/261Hz " + std::to_string(tone(peg_head, 130.81) / tone(peg_head, 261.63)) +
 				      "、カットオフ 30 で " + std::to_string(rms(o_cut, RATE / 2, RATE / 2) / rms(plain, RATE / 2, RATE / 2)) +
 				      " 倍、フィルター EG の頭/終わり " + std::to_string(rms(o_feg, RATE / 10, RATE / 5) / rms(o_feg, RATE * 12 / 10, RATE / 4)) +
-				      "、レゾナンス " + std::to_string(r1 / r0) + " 倍");
+				      "、レゾナンス " + std::to_string(r1 / r0) + " 倍、HPF " + std::to_string(h1 / rms(plain, RATE / 2, RATE / 2)) +
+				      " 倍、強さの曲線 2 で " + std::to_string(c2 / rms(plain, RATE / 2, RATE / 2)) + " 倍");
 			}
 		}
 

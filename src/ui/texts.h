@@ -606,6 +606,9 @@ struct ui_texts {
 	const char *smp_filter;
 	const char *smp_cutoff;
 	const char *smp_resonance;
+	const char *smp_hpf;
+	const char *smp_vel_curve;
+	const char *smp_vel_curve_tip;
 	const char *smp_lfo_wave;
 	const char *smp_lfo_saw;
 	const char *smp_lfo_tri;
