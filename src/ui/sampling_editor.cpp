@@ -2204,13 +2204,14 @@ void sampling_editor::make_pane(bridge &br)
 	heading(UI_TEXT(smp_make, "Make a wave"));
 
 	// ---- 作り方（幅に入るだけ横に並べ、入らなければ折り返す）
-	enum { M_BASIC, M_BARS, M_DRAW, M_NOISE, M_FC, M_FM, M_ORGAN, M_UNISON, M_VOWEL, M_SYNC, M_FOLD, M_PWM, M_PLUCK, M_DRUM, M_COUNT };
+	enum { M_BASIC, M_BARS, M_DRAW, M_NOISE, M_FC, M_FM, M_ORGAN, M_UNISON, M_VOWEL, M_SYNC, M_FOLD, M_PWM, M_PLUCK, M_DRUM, M_PD, M_BELL, M_COUNT };
 	const char *mode_names[M_COUNT] = {
 		UI_TEXT(smp_make_basic, "Basic shape"), UI_TEXT(smp_make_bars, "Harmonics"), UI_TEXT(smp_make_draw, "Draw"),
 		UI_TEXT(smp_make_noise, "Noise"), UI_TEXT(smp_make_fc, "Famicom"), UI_TEXT(smp_make_fm, "FM"),
 		UI_TEXT(smp_make_organ, "Organ"), UI_TEXT(smp_make_unison, "Unison"), UI_TEXT(smp_make_vowel, "Voice"),
 		UI_TEXT(smp_make_sync, "Sync"), UI_TEXT(smp_make_fold, "Fold"), UI_TEXT(smp_make_pwm, "PWM"),
-		UI_TEXT(smp_make_pluck, "Pluck"), UI_TEXT(smp_make_drum, "Drum"),
+		UI_TEXT(smp_make_pluck, "Pluck"), UI_TEXT(smp_make_drum, "Drum"), UI_TEXT(smp_make_pd, "PD"),
+		UI_TEXT(smp_make_bell, "Bell"),
 	};
 	const int was_mode = m_wm_mode;
 	{
@@ -2462,6 +2463,10 @@ void sampling_editor::make_pane(bridge &br)
 			}
 		}
 		slider_f(UI_TEXT(smp_make_vowel_pos, "Vowel (A I U E O)"), m_wm_vowel, 0.0f, 4.0f);
+		if (ImGui::Checkbox(UI_TEXT(smp_make_vowel_morph, "Morph to a second vowel and back"), &m_wm_vowel_morph))
+			m_wm_stale = true;
+		if (m_wm_vowel_morph)
+			slider_f(UI_TEXT(smp_make_vowel_to, "Second vowel"), m_wm_vowel_to, 0.0f, 4.0f);
 		ImGui::TextWrapped("%s", UI_TEXT(smp_make_vowel_note, "A sawtooth shaped by the three formants of a vowel. The formants are right at key 60 and move with the key, so it sounds most like a voice within an octave or so of C3."));
 	} else if (m_wm_mode == M_SYNC) {
 		slider_f(UI_TEXT(smp_make_sync_ratio, "Slave ratio"), m_wm_sync, 1.0f, 12.0f);
@@ -2496,6 +2501,43 @@ void sampling_editor::make_pane(bridge &br)
 		slider_f(UI_TEXT(smp_make_drum_decay, "Decay"), m_wm_drum_decay, 0.0f, 1.0f);
 		slider_f(UI_TEXT(smp_make_drum_tone, "Tone"), m_wm_drum_tone, 0.0f, 1.0f);
 		ImGui::TextWrapped("%s", UI_TEXT(smp_make_drum_note, "Drum sounds in the manner of analogue rhythm machines, played once (no loop). Tone is the click of the kick and tom, the snares of the snare, the noise of the hi-hat, the gap between the claps, the brightness of the cowbell. Give each its own key range in a voice to build a kit."));
+	} else if (m_wm_mode == M_PD) {
+		const char *kinds[3] = { UI_TEXT(smp_make_saw, "Sawtooth"), UI_TEXT(smp_make_square, "Square"),
+		                         UI_TEXT(smp_make_pd_reso, "Resonance") };
+		for (int i = 0; i < 3; i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::RadioButton(kinds[i], m_wm_pd == i)) {
+				m_wm_pd = i;
+				m_wm_stale = true;
+			}
+		}
+		slider_f(UI_TEXT(smp_make_pd_amount, "Distortion"), m_wm_pd_amount, 0.0f, 1.0f);
+		if (m_wm_pd == 2)
+			slider_f(UI_TEXT(smp_make_pd_ratio, "Resonance pitch"), m_wm_pd_ratio, 1.0f, 16.0f, "%.1f");
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_pd_note, "Phase distortion, the Casio CZ way: a cosine is read at an uneven speed, so more distortion bends it from a sine towards a sawtooth or a square. Resonance is a faster cosine under a window, like a filter ringing at that pitch."));
+	} else if (m_wm_mode == M_BELL) {
+		struct preset { const char *name; float ratio, index, decay; };
+		const preset presets[] = {
+			{ UI_TEXT(smp_make_bell_tubular, "Tubular"), 3.5f, 5.0f, 1.2f },
+			{ UI_TEXT(smp_make_bell_glass, "Glass"), 7.07f, 2.0f, 0.6f },
+			{ UI_TEXT(smp_make_bell_gong, "Gong"), 1.41f, 8.0f, 1.8f },
+			{ UI_TEXT(smp_make_bell_marimba, "Marimba"), 4.0f, 1.5f, 0.25f },
+		};
+		for (size_t i = 0; i < std::size(presets); i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::SmallButton(presets[i].name)) {
+				m_wm_bell_ratio = presets[i].ratio;
+				m_wm_bell_index = presets[i].index;
+				m_wm_bell_decay = presets[i].decay;
+				m_wm_stale = true;
+			}
+		}
+		slider_f(UI_TEXT(smp_make_bell_ratio, "Modulator ratio"), m_wm_bell_ratio, 0.5f, 12.0f);
+		slider_f(UI_TEXT(smp_make_fm_index, "Modulation depth"), m_wm_bell_index, 0.0f, 12.0f);
+		slider_f(UI_TEXT(smp_make_bell_decay, "Decay (s)"), m_wm_bell_decay, 0.05f, 2.5f);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_bell_note, "An FM bell that plays once: a ratio that is not a whole number gives the clang of metal, and the brightness fades faster than the level, as a struck bell does."));
 	} else {
 		slider_f(UI_TEXT(smp_make_fold_gain, "Fold amount"), m_wm_fold_gain, 0.1f, 12.0f);
 		slider_f(UI_TEXT(smp_make_fold_bias, "Asymmetry"), m_wm_fold_bias, 0.0f, 1.57f);
@@ -2504,8 +2546,8 @@ void sampling_editor::make_pane(bridge &br)
 
 	// ---- 共通: 足す倍音の上限と大きさ（高さの無いノイズは、倍音にせずそのままサンプルにする）
 	const bool unpitched = m_wm_mode == M_NOISE || (m_wm_mode == M_FC && m_wm_fc >= 5);
-	const bool multi = m_wm_mode == M_ORGAN || m_wm_mode == M_UNISON || m_wm_mode == M_PWM;   // 倍音にならない成分を含む（長いループ）
-	const bool oneshot = m_wm_mode == M_PLUCK || m_wm_mode == M_DRUM;       // 1 度だけ鳴って消える（ループを入れない）
+	const bool multi = m_wm_mode == M_ORGAN || m_wm_mode == M_UNISON || m_wm_mode == M_PWM || (m_wm_mode == M_VOWEL && m_wm_vowel_morph);   // 倍音にならない成分を含む（長いループ）
+	const bool oneshot = m_wm_mode == M_PLUCK || m_wm_mode == M_DRUM || m_wm_mode == M_BELL;       // 1 度だけ鳴って消える（ループを入れない）
 	ImGui::Separator();
 	if (!unpitched && !oneshot && m_wm_mode != M_ORGAN) {
 		slider_i(UI_TEXT(smp_make_max_h, "Highest harmonic"), m_wm_max_h, 1, wg::HARMONICS);
@@ -2531,6 +2573,7 @@ void sampling_editor::make_pane(bridge &br)
 		m_wm_spec = wg::spectrum{};
 		if (oneshot) {
 			m_wm_pcm = m_wm_mode == M_PLUCK ? wg::pluck(m_wm_pluck_len, m_wm_pluck_sustain, m_wm_pluck_bright, m_wm_seed + 1, level)
+			         : m_wm_mode == M_BELL  ? wg::fm_bell(std::min(3.0, double(m_wm_bell_decay) * 4), m_wm_bell_ratio, m_wm_bell_index, m_wm_bell_decay, level)
 			                                : wg::drum_hit(wg::drum(m_wm_drum), m_wm_drum_tune, m_wm_drum_decay, m_wm_drum_tone, level);
 			// 見せるのは全体。600 の桝ごとに、いちばん大きく振れた値
 			m_wm_cycle.assign(600, 0.0f);
@@ -2559,10 +2602,13 @@ void sampling_editor::make_pane(bridge &br)
 			case M_VOWEL: m_wm_spec = wg::vowel(m_wm_vowel); break;
 			case M_SYNC:  m_wm_spec = wg::sync(m_wm_sync); break;
 			case M_FOLD:  m_wm_spec = wg::fold(m_wm_fold_gain, m_wm_fold_bias); break;
+			case M_PD:    m_wm_spec = wg::phase_distortion(wg::pd_wave(m_wm_pd), m_wm_pd_amount, m_wm_pd_ratio); break;
 			default: break;
 			}
 			if (m_wm_mode == M_ORGAN)
 				m_wm_pcm = wg::render_partials(wg::organ(m_wm_organ), wg::ORGAN_MULT, level);
+			else if (m_wm_mode == M_VOWEL && m_wm_vowel_morph)
+				m_wm_pcm = wg::vowel_morph(m_wm_vowel, m_wm_vowel_to, m_wm_max_h, level);
 			else if (m_wm_mode == M_PWM)
 				m_wm_pcm = wg::pwm(m_wm_pwm_center, m_wm_pwm_depth, m_wm_pwm_sweeps, m_wm_max_h, level);
 			else if (m_wm_mode == M_UNISON)
