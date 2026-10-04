@@ -584,23 +584,33 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 		return false;
 	const u32 o = voice_rec(slot);
 	out.name = text(m_dram, o + 2, 8);
-	// 要素の波形の欄（+14・+15）は内蔵の音色の要素と同じ。0x4000 が立っていればサンプル、
-	// 立っていなければ内蔵の波形の組（7bit が 2 つ）、3f 7f は無し
-	const u16 sv = u16(m_dram[o + 14] << 8 | m_dram[o + 15]);
-	out.assigned = (sv & 0x4000) != 0;
-	out.sample = out.assigned ? int(sv & 0x1ff) + 1 : 0;
-	const int set = (m_dram[o + 14] << 7) | (m_dram[o + 15] & 0x7f);
-	out.rom_wave = !out.assigned && set < sp::ROM_WAVE_SETS ? set : -1;
-	out.level = m_dram[o + 0x47];
-	out.pan = m_dram[o + 0x51];
-	out.coarse = int(m_dram[o + 0x1d]) - 0x40;
-	out.fine = int(m_dram[o + 0x1e]) - 0x40;
-	out.attack = m_dram[o + 0x55] & 0x3f;
-	out.decay1 = m_dram[o + 0x56] & 0x3f;
-	out.decay2 = m_dram[o + 0x57] & 0x3f;
-	out.release = m_dram[o + 0x58] & 0x3f;
-	out.level1 = m_dram[o + 0x59] & 0x7f;
-	out.level2 = m_dram[o + 0x5a] & 0x7f;
+	const u8 mask = m_dram[o];
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		sp::element &x = out.el[size_t(e)];
+		const u32 b = o + 12 + 84 * u32(e);
+		x.on = (mask >> e) & 1;
+		// 要素の波形の欄（[2]・[3]）は内蔵の音色の要素と同じ。0x4000 が立っていればサンプル、
+		// 立っていなければ内蔵の波形の組（7bit が 2 つ）、3f 7f は無し
+		const u16 sv = u16(m_dram[b + 2] << 8 | m_dram[b + 3]);
+		x.assigned = (sv & 0x4000) != 0;
+		x.sample = x.assigned ? int(sv & 0x1ff) + 1 : 0;
+		const int set = (m_dram[b + 2] << 7) | (m_dram[b + 3] & 0x7f);
+		x.rom_wave = !x.assigned && set < sp::ROM_WAVE_SETS ? set : -1;
+		x.key_lo = m_dram[b + 4] & 0x7f;
+		x.key_hi = m_dram[b + 5] & 0x7f;
+		x.vel_lo = m_dram[b + 6] & 0x7f;
+		x.vel_hi = m_dram[b + 7] & 0x7f;
+		x.coarse = int(m_dram[b + 17]) - 0x40;
+		x.fine = int(m_dram[b + 18]) - 0x40;
+		x.level = m_dram[b + 59];
+		x.pan = m_dram[b + 69];
+		x.attack = m_dram[b + 73] & 0x3f;
+		x.decay1 = m_dram[b + 74] & 0x3f;
+		x.decay2 = m_dram[b + 75] & 0x3f;
+		x.release = m_dram[b + 76] & 0x3f;
+		x.level1 = m_dram[b + 77] & 0x7f;
+		x.level2 = m_dram[b + 78] & 0x7f;
+	}
 	return true;
 }
 
@@ -610,42 +620,61 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		err = "no such voice";
 		return false;
 	}
-	if (v.assigned && (v.sample < 1 || v.sample > sp::MAX_SAMPLES || !(m_dram[sample_rec(v.sample) + 2] & 0x40))) {
-		err = "no such sample";
-		return false;
-	}
+	for (const sp::element &x : v.el)
+		if (x.on && x.assigned && (x.sample < 1 || x.sample > sp::MAX_SAMPLES || !(m_dram[sample_rec(x.sample) + 2] & 0x40))) {
+			err = "no such sample";
+			return false;
+		}
 	const u32 o = voice_rec(slot);
 	// 名前は 8 文字で、余りは空白（0 で埋めると LCD が CGRAM の 0 番の字を出す）。+10・+11 は別の欄
 	if (!v.name.empty())
 		put_text(m_dram, o + 2, 8, v.name, ' ');
-	if (v.assigned) {
-		m_dram[o + 12] = 0x01;
-		m_dram[o + 13] = 0x7f;
-		const u16 sv = u16(0x4000 | (v.sample - 1));
-		m_dram[o + 14] = u8(sv >> 8);
-		m_dram[o + 15] = u8(sv);
-	} else if (v.rom_wave >= 0 && v.rom_wave < sp::ROM_WAVE_SETS) {
-		// 内蔵の波形の組。+12 は firmware がサンプルのときだけ 01 にする欄で、鳴るかどうかは変えない
-		m_dram[o + 12] = 0x00;
-		m_dram[o + 13] = 0x7f;
-		m_dram[o + 14] = u8(v.rom_wave >> 7);
-		m_dram[o + 15] = u8(v.rom_wave & 0x7f);
-	} else {
-		m_dram[o + 12] = 0x00;
-		m_dram[o + 13] = 0x7f;
-		m_dram[o + 14] = 0x3f;
-		m_dram[o + 15] = 0x7f;
+	// 使う要素の印（ビットごと）。使わない要素の中身は触らない
+	u8 mask = 0;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++)
+		if (v.el[size_t(e)].on)
+			mask |= u8(1 << e);
+	m_dram[o] = mask;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const sp::element &x = v.el[size_t(e)];
+		if (!x.on)
+			continue;
+		const u32 b = o + 12 + 84 * u32(e);
+		if (x.assigned) {
+			m_dram[b] = 0x01;
+			m_dram[b + 1] = 0x7f;
+			const u16 sv = u16(0x4000 | (x.sample - 1));
+			m_dram[b + 2] = u8(sv >> 8);
+			m_dram[b + 3] = u8(sv);
+		} else if (x.rom_wave >= 0 && x.rom_wave < sp::ROM_WAVE_SETS) {
+			// 内蔵の波形の組。[0] は firmware がサンプルのときだけ 01 にする欄で、鳴るかどうかは変えない
+			m_dram[b] = 0x00;
+			m_dram[b + 1] = 0x7f;
+			m_dram[b + 2] = u8(x.rom_wave >> 7);
+			m_dram[b + 3] = u8(x.rom_wave & 0x7f);
+		} else {
+			m_dram[b] = 0x00;
+			m_dram[b + 1] = 0x7f;
+			m_dram[b + 2] = 0x3f;
+			m_dram[b + 3] = 0x7f;
+		}
+		const int klo = std::clamp(x.key_lo, 0, 127), khi = std::clamp(x.key_hi, 0, 127);
+		const int vlo = std::clamp(x.vel_lo, 1, 127), vhi = std::clamp(x.vel_hi, 1, 127);
+		m_dram[b + 4] = u8(std::min(klo, khi));
+		m_dram[b + 5] = u8(std::max(klo, khi));
+		m_dram[b + 6] = u8(std::min(vlo, vhi));
+		m_dram[b + 7] = u8(std::max(vlo, vhi));
+		m_dram[b + 17] = u8(0x40 + std::clamp(x.coarse, -24, 24));
+		m_dram[b + 18] = u8(0x40 + std::clamp(x.fine, -64, 63));
+		m_dram[b + 59] = u8(std::clamp(x.level, 0, 127));
+		m_dram[b + 69] = u8(std::clamp(x.pan, 0, 15));
+		m_dram[b + 73] = u8(std::clamp(x.attack, 0, 63));
+		m_dram[b + 74] = u8(std::clamp(x.decay1, 0, 63));
+		m_dram[b + 75] = u8(std::clamp(x.decay2, 0, 63));
+		m_dram[b + 76] = u8(std::clamp(x.release, 0, 63));
+		m_dram[b + 77] = u8(std::clamp(x.level1, 0, 127));
+		m_dram[b + 78] = u8(std::clamp(x.level2, 0, 127));
 	}
-	m_dram[o + 0x47] = u8(std::clamp(v.level, 0, 127));
-	m_dram[o + 0x51] = u8(std::clamp(v.pan, 0, 15));
-	m_dram[o + 0x1d] = u8(0x40 + std::clamp(v.coarse, -24, 24));
-	m_dram[o + 0x1e] = u8(0x40 + std::clamp(v.fine, -64, 63));
-	m_dram[o + 0x55] = u8(std::clamp(v.attack, 0, 63));
-	m_dram[o + 0x56] = u8(std::clamp(v.decay1, 0, 63));
-	m_dram[o + 0x57] = u8(std::clamp(v.decay2, 0, 63));
-	m_dram[o + 0x58] = u8(std::clamp(v.release, 0, 63));
-	m_dram[o + 0x59] = u8(std::clamp(v.level1, 0, 127));
-	m_dram[o + 0x5a] = u8(std::clamp(v.level2, 0, 127));
 	return true;
 }
 

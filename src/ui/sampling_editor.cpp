@@ -1074,21 +1074,41 @@ void sampling_editor::assign_pane(bridge &br)
 	if (slot != m_loaded_slot || !m_dirty) {
 		// 選んだ音色の今の値を編集欄へ（触っている間は上書きしない）
 		m_loaded_slot = slot;
-		m_sample = cur.assigned ? cur.sample : 0;
-		m_rom_wave = cur.assigned ? -1 : cur.rom_wave;
 		std::snprintf(m_voice_name, sizeof(m_voice_name), "%s", cur.name.c_str());
-		m_level = cur.level;
-		m_pan = cur.pan;
-		m_coarse = cur.coarse;
-		m_fine = cur.fine;
-		m_attack = cur.attack;
-		m_decay1 = cur.decay1;
-		m_decay2 = cur.decay2;
-		m_release = cur.release;
-		m_level1 = cur.level1;
-		m_level2 = cur.level2;
+		m_els = cur.el;
+		load_el(m_cur_el);
 		m_dirty = false;
 	}
+
+	// 音色の名前（音色全体のもの。要素の欄の上に置く）
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_voice_name, "Voice name"));
+	ImGui::SameLine(lab);
+	ImGui::SetNextItemWidth(fs * 10);
+	if (ImGui::InputText("##vname", m_voice_name, sizeof(m_voice_name)))
+		m_dirty = true;
+
+	// 要素 1-4。音色は 4 つまで要素を重ねて鳴らせる（鍵と強さの範囲で分けることもできる）。
+	// 下の欄は選んでいる要素のもの。使う要素は名前の後ろに ● を付ける
+	if (ImGui::BeginTabBar("##elems")) {
+		for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+			const bool on = e == m_cur_el ? m_el_on : m_els[size_t(e)].on;
+			char tab[48];
+			std::snprintf(tab, sizeof(tab), "%s %d%s###el%d", UI_TEXT(smp_element, "Element"), e + 1, on ? " \xe2\x97\x8f" : "", e);
+			if (ImGui::BeginTabItem(tab)) {
+				if (e != m_cur_el) {
+					stash_el();
+					load_el(e);
+				}
+				ImGui::EndTabItem();
+			}
+		}
+		ImGui::EndTabBar();
+	}
+	if (ImGui::Checkbox(UI_TEXT(smp_element_on, "Play this element"), &m_el_on))
+		m_dirty = true;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_element_tip, "A voice can layer up to four elements. Each has its own wave, level, pan, pitch, envelope and key / velocity range. Elements that are not played keep their settings."));
 
 	// サンプル
 	ImGui::AlignTextToFramePadding();
@@ -1170,13 +1190,6 @@ void sampling_editor::assign_pane(bridge &br)
 		ImGui::SetTooltip("%s", UI_TEXT(smp_rom_wave_tip, "A sample from the sampling RAM, or one of the built-in waves the MU2000's own voices play (named after the voices that use it). A built-in wave is played the same way as a sample: pitch, level and envelope below apply."));
 
 	ImGui::AlignTextToFramePadding();
-	ImGui::TextUnformatted(UI_TEXT(smp_voice_name, "Voice name"));
-	ImGui::SameLine(lab);
-	ImGui::SetNextItemWidth(fs * 10);
-	if (ImGui::InputText("##vname", m_voice_name, sizeof(m_voice_name)))
-		m_dirty = true;
-
-	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(UI_TEXT(smp_level, "Level"));
 	ImGui::SameLine(lab);
 	ImGui::SetNextItemWidth(-1);
@@ -1209,6 +1222,28 @@ void sampling_editor::assign_pane(bridge &br)
 	ImGui::SameLine(lab);
 	ImGui::SetNextItemWidth(-1);
 	if (ImGui::SliderInt("##fine", &m_fine, -64, 63, "%+d"))
+		m_dirty = true;
+
+	// この要素を鳴らす鍵と強さの範囲（要素ごとに鍵盤を分けたり、強く弾いたときだけ重ねたりする）
+	static const char *const NOTE_NAME[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+	auto key_text = [](int k, char *buf, size_t n) {
+		std::snprintf(buf, n, "%s%d", NOTE_NAME[k % 12], k / 12 - 2);   // XG の数え方（60 = C3）
+		return buf;
+	};
+	char klo[8], khi[8];
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_key_range, "Keys"));
+	ImGui::SameLine(lab);
+	ImGui::SetNextItemWidth(-1);
+	// 書式に数の指定が無ければ ImGui はその文字をそのまま出すので、鍵の名前を書式に入れる
+	if (ImGui::DragIntRange2("##keys", &m_key_lo, &m_key_hi, 0.25f, 0, 127, key_text(m_key_lo, klo, sizeof(klo)),
+	                         key_text(m_key_hi, khi, sizeof(khi)), ImGuiSliderFlags_AlwaysClamp))
+		m_dirty = true;
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_vel_range, "Velocity"));
+	ImGui::SameLine(lab);
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::DragIntRange2("##vels", &m_vel_lo, &m_vel_hi, 0.25f, 1, 127, "%d", "%d", ImGuiSliderFlags_AlwaysClamp))
 		m_dirty = true;
 
 	ImGui::EndChild();
@@ -1268,28 +1303,25 @@ void sampling_editor::assign_pane(bridge &br)
 	}
 
 	ImGui::Spacing();
+	// 編集欄（今の要素）を入れ物へ戻してから、4 つの要素で音色を作る
 	auto make_voice = [&]() {
+		stash_el();
 		sp::voice v;
-		v.assigned = m_sample != 0;
-		v.sample = m_sample;
-		v.rom_wave = m_sample ? -1 : m_rom_wave;
 		v.name = m_voice_name;
-		v.level = m_level;
-		v.pan = m_pan;
-		v.coarse = m_coarse;
-		v.fine = m_fine;
-		v.attack = m_attack;
-		v.decay1 = m_decay1;
-		v.decay2 = m_decay2;
-		v.release = m_release;
-		v.level1 = m_level1;
-		v.level2 = m_level2;
+		v.el = m_els;
 		return v;
 	};
+	bool any_wave = false;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const bool on = e == m_cur_el ? m_el_on : m_els[size_t(e)].on;
+		const bool wave = e == m_cur_el ? (m_sample != 0 || m_rom_wave >= 0)
+		                                : (m_els[size_t(e)].assigned || m_els[size_t(e)].rom_wave >= 0);
+		any_wave |= on && wave;
+	}
 
 	// 試聴（音源を通す）。押しているあいだ、今の値を音色に書いてパート 1 をその音色にし、鍵を鳴らす。
 	// 離すとノートオフ（リリースも聞ける）
-	ImGui::BeginDisabled(m_sample == 0 && m_rom_wave < 0);
+	ImGui::BeginDisabled(!any_wave);
 	ImGui::Button(UI_TEXT(smp_audition, "Hold to play"), ImVec2(fs * 9, 0));
 	const bool hold_on = ImGui::IsItemActivated(), hold_off = ImGui::IsItemDeactivated();
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
