@@ -951,16 +951,19 @@ bool mu2000::preview_start(int number, u32 from, u32 to, u32 loop_at)
 	return false;
 }
 
-void mu2000::preview_pcm(std::vector<s16> pcm, u32 loop_at)
+// keep_pos なら、いま外の波形を鳴らしている位置から続ける（鳴らしたまま波形を差し替える用。長さが変わって
+// はみ出すなら頭から）
+void mu2000::preview_pcm(std::vector<s16> pcm, u32 loop_at, bool keep_pos)
 {
+	const u32 pos = keep_pos && m_prev_on && m_prev_number == -1 ? m_prev_pos : 0;
 	m_prev_on = false;
 	if (pcm.empty())
 		return;
 	m_prev_ext = std::move(pcm);
 	m_prev_number = -1;
 	m_prev_base = 0;
-	m_prev_pos = 0;
 	m_prev_end = u32(m_prev_ext.size());
+	m_prev_pos = pos < m_prev_end ? pos : 0;
 	m_prev_loop = loop_at < m_prev_end ? loop_at : ~0u;
 	m_prev_on = true;
 }

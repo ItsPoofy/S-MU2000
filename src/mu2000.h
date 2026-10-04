@@ -356,7 +356,7 @@ public:
 	bool preview_start(int number, u32 from, u32 to, u32 loop_at = ~0u);
 	// 外の PCM（カードの M2A の波形など、サンプリング RAM に無いもの）を同じように鳴らす。
 	// 44.1kHz・16bit・モノラルで渡す。鳴らしている間 preview_number() は -1
-	void preview_pcm(std::vector<s16> pcm, u32 loop_at = ~0u);
+	void preview_pcm(std::vector<s16> pcm, u32 loop_at = ~0u, bool keep_pos = false);
 	void preview_stop() { m_prev_on = false; }
 	int preview_number() const { return m_prev_on ? m_prev_number : 0; }
 	u32 preview_pos() const { return m_prev_pos; }
