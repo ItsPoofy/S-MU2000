@@ -376,6 +376,26 @@ int main(int argc, char **argv)
 	h.mu.card_swapped();
 	h.pump(1000);
 	load_by_macro("FROMPC.M2A", "差し替えたカードから LOAD");
+	// 窓の道（bridge::request_macro → driver::sampling_tick）は早送りする。10ms のブロックを回して、
+	// 何ブロックで終わるか（= 実時間で鳴らしていたら何秒か）を見る。サンプルがあるので Overwrite ALL? も通る
+	{
+		ui::bridge br;
+		ui::driver drv;
+		br.request_macro(ui::panel_macro::load_m2a("FROMPC.M2A"), "done");
+		int blocks = 0;
+		ui::bridge::sampling_view view;
+		for (; blocks < 3000; blocks++) {
+			drv.pump_midi(h.mu, br);
+			h.pump(10);
+			br.get_sampling(view);
+			if (!view.message.empty())
+				break;
+		}
+		const bool ok = view.message == "done" && blocks < 300;
+		std::printf("%s 窓の道の LOAD（早送り）        %d ブロック（実時間で %.2f 秒） %s\n", ok ? "合" : "NG", blocks,
+		            blocks / 100.0, view.message.c_str());
+		if (!ok) bad++;
+	}
 	// 録音の最後の 1 語の後ろ半分（サンプルの長さの外）は書き出されないので、そこだけは違ってよい
 	const auto &a = g.mu.sample_ram(), &b = h.mu.sample_ram();
 	size_t differ = 0, used = 0;
