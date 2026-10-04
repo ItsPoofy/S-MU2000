@@ -56,11 +56,14 @@ void put_text(std::vector<u8> &m, u32 off, int len, const std::string &s, u8 fil
 }
 
 // 鳴り始め・ループの頭・鳴り終わりを、長さ frames のサンプルで書ける形にそろえる。
-// 鳴り終わりは鳴り始めより 8 以上後、ループの頭は偶数で鳴り始めと鳴り終わりの 8 手前のあいだ
+// 鳴り終わりは鳴り始めより 8 以上後、ループの頭は偶数で鳴り始めと鳴り終わりの 8 手前のあいだ。
+// 鳴り終わりは、サンプルの終わりの TAIL_PAD 手前まで（終わりの 4 サンプルは余白。firmware が録ったサンプルも
+// そうなっていて、記録の +24 の 04 がその数。音源は折り返す所の次のサンプルも読むので、余白が要る）
 void fit_points(u32 frames, u32 &from, u32 &to, u32 &loop_from)
 {
-	if (!to || to > frames)
-		to = frames;
+	const u32 last = frames > 3 * sp::TAIL_PAD ? frames - sp::TAIL_PAD : frames;
+	if (!to || to > last)
+		to = last;
 	to = std::max(to, std::min(frames, 8u));
 	from = std::min(from, to >= 8 ? to - 8 : 0);
 	loop_from = std::clamp(loop_from & ~1u, (from + 1) & ~1u, to >= 8 ? (to - 8) & ~1u : 0);
@@ -68,14 +71,16 @@ void fit_points(u32 frames, u32 &from, u32 &to, u32 &loop_from)
 }
 
 // 鳴らす表の 1 項目を書く。start・end は語、ほかはサンプル（頭から）。
-// ループの頭の語を +12 に、鳴り始めはそこから +4 の下だけ手前、+8 はループの頭から鳴り終わりまで − 4
+// ループの頭の語を +12 に、鳴り始めはそこから +4 の下だけ手前、+8 はループの頭から鳴り終わりまで。
+// 音源は「ループの頭 + (+8)」ちょうどで折り返す（サインを 4214 サンプルで回すと、+8 が 4210 なら位相が 4210 おきに跳び、
+// 4214 なら跳ばない。2026-10-05）。前は鳴り終わりを +8 より 4 後ろと読んでいて、ループが 4 サンプル短かった
 void put_play(std::vector<u8> &m, u32 p, u32 start, u32 end, bool loop, u32 from, u32 to, u32 loop_from)
 {
 	fit_points((end - start) * 2, from, to, loop_from);
 	static const u8 HEAD[4] = { 0x00, 0x3c, 0x00, 0xff };
 	std::memcpy(&m[p], HEAD, 4);
 	wr32(m, p + 4, (loop ? 0u : 0x40000000u) | (loop_from - from));
-	wr32(m, p + 8, to - loop_from - 4);
+	wr32(m, p + 8, to - loop_from);
 	wr32(m, p + 12, (start + loop_from / 2) | WORD_FLAG);
 }
 
@@ -100,7 +105,7 @@ std::vector<sp::sample> mu2000::sampling_list() const
 		const u32 len = rd32(m_dram, p + 8);
 		s.loop_from = head > s.start && head < s.end ? (head - s.start) * 2 : 0;
 		s.play_from = back <= s.loop_from ? s.loop_from - back : 0;
-		s.play_to = len <= s.frames() ? s.loop_from + len + 4 : s.frames();
+		s.play_to = len <= s.frames() ? s.loop_from + len : s.frames();
 		if (s.play_to > s.frames())
 			s.play_to = s.frames();
 		out.push_back(s);
@@ -153,7 +158,9 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 		return false;
 	}
 	const u32 start = s->start, old_end = s->end;
-	const u32 frames = to - from;
+	// 鳴り終わりの後ろに余白（TAIL_PAD）を残す。鳴り終わり・ループの終わりは余白の手前までなので、
+	// 残さないと、合わせたループの終わりが 4 サンプル前へずれる
+	const u32 frames = std::min(to + sp::TAIL_PAD, s->frames()) - from;
 	const u32 new_end = start + (frames + 1) / 2;
 	// 残す所を頭へ（前へ写すので重なっても前から順に写せばよい）。奇数なら最後の半語は 0
 	u8 *ram = m_sampram.data();
@@ -170,7 +177,7 @@ bool mu2000::sampling_trim(int number, u32 from, u32 to, std::string &err)
 		wr32(m_dram, o + 16, st | WORD_FLAG);
 		wr32(m_dram, o + 20, en | WORD_FLAG);
 	};
-	set_range(*s, start, new_end, from, frames);
+	set_range(*s, start, new_end, from, to - from);       // 鳴り終わりは切った所まで（その後ろは余白）
 	// 後ろにあるものを前へ詰める（番地の若い順に）
 	const u32 gap = old_end - new_end;
 	if (gap) {
