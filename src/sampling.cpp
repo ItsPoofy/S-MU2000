@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 
 namespace sp = smu2000::sampling;
 
@@ -389,6 +390,37 @@ bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &
 	loop_from = u32(bl);
 	loop_to = u32(fe);
 	return true;
+}
+
+std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device)
+{
+	std::vector<std::vector<u8>> out;
+	if (slot < 0 || slot >= MAX_VOICES || !rec)
+		return out;
+	const u8 base = u8(0x40 + 0x10 * (slot / 128));
+	const u8 pgm = u8(slot % 128);
+	auto msg = [&](u8 ah, u8 al, std::initializer_list<u8> data) {
+		std::vector<u8> m = { 0xf0, 0x43, u8(0x10 | (device & 0x0f)), 0x68, ah, pgm, al };
+		for (u8 d : data)
+			m.push_back(d & 0x7f);
+		m.push_back(0xf7);
+		out.push_back(std::move(m));
+	};
+	// 要素 1-4: 波形（2 バイト）と [4]-[83]。波形の通を受けると firmware は要素 1 の [0] を 01 にする
+	for (int e = 0; e < 4; e++) {
+		const u8 *el = rec + 12 + 84 * e;
+		const u8 ah = u8(base + 1 + e);
+		msg(ah, 0x00, { el[2], el[3] });
+		for (int i = 4; i < 84; i++)
+			msg(ah, u8(i - 2), { el[i] });
+	}
+	// 頭: 使う要素の印、+1、名前。**要素の後に送る**: 要素 2 の波形の通を受けると、firmware は
+	// 頭の +0（使う要素の印）を 5b に書き換える（ほかの要素では起きない）
+	msg(base, 0x01, { rec[0] });
+	msg(base, 0x02, { rec[1] });
+	for (int i = 0; i < 8; i++)
+		msg(base, u8(0x03 + i), { rec[2 + i] });
+	return out;
 }
 
 } // namespace smu2000::sampling

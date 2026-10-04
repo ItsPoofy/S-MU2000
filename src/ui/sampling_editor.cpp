@@ -1347,6 +1347,61 @@ void sampling_editor::assign_pane(bridge &br)
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip(UI_TEXT(smp_play_hint_fmt, "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again."),
 		                  m_bank, m_pgm);
+
+	// 実機へ: この音色を SysEx（機種 0x68 のパラメータチェンジ。sp::voice_sysex）にする。今の値を書き込んでから
+	// 表の記録をそのまま写すので、ここに出ていない欄も含めて 334 通になる
+	auto make_sysex = [&](bool to_file) {
+		const sp::voice v = make_voice();
+		auto job = std::make_shared<sx_job>();
+		job->to_file = to_file;
+		m_sx_job = job;
+		br.post([job, slot, v](mu2000 &mu) {
+			std::string err;
+			if (mu.sampling_set_voice(slot, v, err)) {
+				const u32 o = sp::TAB_VOICE + sp::VOICE_SIZE * u32(slot) - 0x1000000;
+				job->msgs = sp::voice_sysex(slot, mu.dram().data() + o);
+			}
+			job->done.store(true, std::memory_order_release);
+			return err;
+		});
+		m_dirty = false;
+	};
+	if (m_sx_job && m_sx_job->done.load(std::memory_order_acquire)) {
+		std::shared_ptr<sx_job> job = std::move(m_sx_job);
+		if (job->to_file) {
+			std::vector<u8> bytes;
+			for (const auto &m : job->msgs)
+				bytes.insert(bytes.end(), m.begin(), m.end());
+			if (!bytes.empty())
+				xgui::ask_save_file(std::move(bytes));
+		} else {
+			m_sx_queue.assign(job->msgs.begin(), job->msgs.end());
+			m_sx_total = m_sx_queue.size();
+		}
+	}
+	// 送る列は、外への口の溜め（256 通）に入るぶんずつ毎コマ渡す
+	while (!m_sx_queue.empty() && xgui::out_send(br, m_sx_queue.front()))
+		m_sx_queue.pop_front();
+	const char *sx_tip = UI_TEXT(smp_sx_tip, "Writes the values above to the voice, then turns the whole voice into SysEx (Yamaha model 0x68 parameter changes, 334 messages) that a real MU2000 accepts for its sample voices. A voice that plays a sample points at that sample number on the receiving unit.");
+	ImGui::BeginDisabled(m_sx_job != nullptr || !m_sx_queue.empty());
+	if (ImGui::Button(UI_TEXT(smp_sx_save, "Save as SysEx...")))
+		make_sysex(true);
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", sx_tip);
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!xgui::out_ready());
+	if (ImGui::Button(UI_TEXT(smp_sx_send, "Send to MIDI out")))
+		make_sysex(false);
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", sx_tip);
+	ImGui::EndDisabled();
+	if (!m_sx_queue.empty()) {
+		ImGui::SameLine();
+		ImGui::TextDisabled(UI_TEXT(smp_sx_sending_fmt, "Sending %d / %d"), int(m_sx_total - m_sx_queue.size()), int(m_sx_total));
+	}
+	if (xgui::out_ready())
+		xgui::out_port_combo();
 	ImGui::EndChild();
 }
 

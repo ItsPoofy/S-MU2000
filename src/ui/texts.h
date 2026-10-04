@@ -585,6 +585,10 @@ struct ui_texts {
 	const char *smp_rom_waves;
 	const char *smp_rom_wave_find;
 	const char *smp_rom_wave_tip;
+	const char *smp_sx_save;
+	const char *smp_sx_send;
+	const char *smp_sx_tip;
+	const char *smp_sx_sending_fmt;
 	const char *smp_tab_edit;
 	const char *smp_tab_card;
 	const char *smp_card;

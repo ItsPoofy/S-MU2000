@@ -20,6 +20,7 @@
 #include "m2a.h"
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <string>
 #include <thread>
@@ -149,6 +150,15 @@ private:
 	int m_rom_wave = -1;               // サンプルでなく内蔵の波形の組を鳴らすとき（0-502）
 	std::vector<std::string> m_wave_labels;   // 組ごとの名前代わり（使っている XG の音色）
 	char m_wave_find[32] = {};         // 組の絞り込み
+	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列
+	struct sx_job {
+		std::atomic<bool> done{ false };
+		bool to_file = false;
+		std::vector<std::vector<u8>> msgs;
+	};
+	std::shared_ptr<sx_job> m_sx_job;
+	std::deque<std::vector<u8>> m_sx_queue;
+	size_t m_sx_total = 0;
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;
