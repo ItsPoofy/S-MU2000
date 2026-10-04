@@ -71,6 +71,217 @@ inline spectrum basic(shape sh, double pulse = 0.5)
 	return from_cycle(c.data(), N);
 }
 
+// ファミコン（2A03）の音。矩形はデューティ 12.5・25・50・75%、三角は 4bit・32 段の階段（15→0→15）
+enum class famicom_wave { pulse12, pulse25, pulse50, pulse75, triangle };
+
+inline spectrum famicom(famicom_wave k)
+{
+	if (k != famicom_wave::triangle) {
+		static constexpr double DUTY[4] = { 0.125, 0.25, 0.5, 0.75 };
+		return basic(shape::square, DUTY[int(k)]);
+	}
+	// 1 段を 64 点で持つ（階段の角が倍音に出るように）
+	constexpr int N = 32 * 64;
+	std::vector<float> c(N);
+	for (int i = 0; i < N; i++) {
+		const int step = i / 64;
+		const int v = step < 16 ? 15 - step : step - 16;
+		c[size_t(i)] = float(v) / 7.5f - 1.0f;
+	}
+	return from_cycle(c.data(), N);
+}
+
+// ファミコンのノイズ。15bit のシフトレジスタで、長い周期（32767 段。bit 0 と bit 1 の XOR を戻す）と
+// 短い周期（93 段。bit 0 と bit 6。金属的な音）。1 段を hold サンプル持たせる。全体をループにする（長さは偶数）
+inline std::vector<s16> famicom_noise(bool short_mode, double level = 0.9, int hold = 2)
+{
+	const u32 steps = short_mode ? 93 : 32767;
+	std::vector<s16> out;
+	out.reserve(size_t(steps) * size_t(hold));
+	u32 r = 1;
+	const s16 hi = s16(std::lround(level * 32767.0)), lo = s16(-hi);
+	for (u32 i = 0; i < steps; i++) {
+		for (int k = 0; k < hold; k++)
+			out.push_back((r & 1) ? lo : hi);
+		const u32 fb = (r ^ (r >> (short_mode ? 6 : 1))) & 1;
+		r = (r >> 1) | (fb << 14);
+	}
+	return out;
+}
+
+// FM（2 オペレーター）。1 周期のあいだにキャリアが carrier 回、モジュレーターが modulator 回まわる（整数の比なので
+// 1 周期で閉じる）。index は変調の深さ（ラジアン）、feedback はモジュレーターが自分にかける変調（0〜1。前の 2 点の平均を戻す）
+inline spectrum fm(int carrier, int modulator, double index, double feedback = 0.0)
+{
+	constexpr int N = 2048;
+	std::vector<float> c(N);
+	double m1 = 0, m2 = 0;
+	// フィードバックが落ち着くよう、1 周期ぶん空回ししてから取る
+	for (int pass = 0; pass < 2; pass++)
+		for (int i = 0; i < N; i++) {
+			const double p = 2 * PI * (double(i) + 0.5) / N;
+			const double mod = std::sin(modulator * p + feedback * PI * (m1 + m2) * 0.5);
+			m2 = m1;
+			m1 = mod;
+			c[size_t(i)] = float(std::sin(carrier * p + index * mod));
+		}
+	return from_cycle(c.data(), N);
+}
+
+// ハードシンク。1 周期のあいだに ratio 回まわるノコギリを、周期の頭で必ず振り出しに戻す（ratio は 1〜16、半端でよい）
+inline spectrum sync(double ratio)
+{
+	constexpr int N = 2048;
+	std::vector<float> c(N);
+	for (int i = 0; i < N; i++) {
+		const double p = (double(i) + 0.5) / N * std::max(ratio, 1.0);
+		c[size_t(i)] = float(1.0 - 2.0 * (p - std::floor(p)));
+	}
+	return from_cycle(c.data(), N);
+}
+
+// ウェーブフォールド。サインを gain 倍して折り返す（sin(gain × sin x + bias)）。gain が大きいほど倍音が増え、
+// bias を入れると偶数の倍音も出る
+inline spectrum fold(double gain, double bias = 0.0)
+{
+	constexpr int N = 2048;
+	std::vector<float> c(N);
+	for (int i = 0; i < N; i++)
+		c[size_t(i)] = float(std::sin(gain * std::sin(2 * PI * (double(i) + 0.5) / N) + bias));
+	return from_cycle(c.data(), N);
+}
+
+// 声（母音）。ノコギリ（1/n）の倍音に、フォルマント 3 つの山をかける。vowel は 0〜4（あ・い・う・え・お）で、
+// 半端な値は隣とのあいだ。山の位置は鍵 60（261.6Hz）で鳴らしたときの Hz なので、鍵を変えると山も一緒に動く
+inline spectrum vowel(double v)
+{
+	static constexpr double F[5][3] = { { 800, 1200, 2500 }, { 300, 2300, 3000 }, { 350, 1300, 2400 },
+	                                    { 500, 1900, 2500 }, { 500, 900, 2500 } };
+	static constexpr double BW[3] = { 90, 110, 140 }, GAIN[3] = { 1.0, 0.6, 0.3 };
+	v = std::clamp(v, 0.0, 4.0);
+	const int i0 = std::min(int(v), 3);
+	const double t = v - i0;
+	const double f0 = 44100.0 * CYCLES / LOOP_FRAMES;
+	spectrum s;
+	for (int h = 1; h <= HARMONICS; h++) {
+		double g = 0.03;                               // 山の外にも少し残す
+		for (int k = 0; k < 3; k++) {
+			const double fc = F[i0][k] + (F[i0 + 1][k] - F[i0][k]) * t;
+			const double d = (h * f0 - fc) / BW[k];
+			g += GAIN[k] / (1.0 + d * d);
+		}
+		s.b[h] = float(g / h);
+	}
+	return s;
+}
+
+// 倍音をでたらめに（seed で決まる）。1/n の傾きに 0〜1 の乱数をかける。count 倍音まで
+inline spectrum random_harmonics(u32 seed, int count = 32)
+{
+	spectrum s;
+	u32 r = seed * 2654435761u + 1;
+	for (int h = 1; h <= HARMONICS && h <= count; h++) {
+		r ^= r << 13;
+		r ^= r >> 17;
+		r ^= r << 5;
+		s.b[h] = float(double(r & 0xffff) / 65535.0 / (h == 1 ? 1.0 : std::sqrt(double(h))));
+	}
+	s.b[1] = std::max(s.b[1], 0.5f);
+	return s;
+}
+
+// 1 周期の形を、段数（steps。0 = そのまま）と bit 数（bits。0 = そのまま）に落とす。波形メモリ音源
+// （ゲームボーイの 32 段・4bit、SCC の 32 段・8bit など）の形にする
+inline spectrum from_cycle_stepped(const float *cyc, int n, int steps, int bits)
+{
+	constexpr int N = 2048;
+	std::vector<float> c(N);
+	for (int i = 0; i < N; i++) {
+		double p = (double(i) + 0.5) / N;
+		if (steps > 0)
+			p = (std::floor(p * steps) + 0.5) / steps;
+		double v = cyc[std::clamp(int(p * n), 0, n - 1)];
+		if (bits > 0) {
+			const double q = double((1 << bits) - 1);
+			v = std::round((v * 0.5 + 0.5) * q) / q * 2.0 - 1.0;
+		}
+		c[size_t(i)] = float(v);
+	}
+	return from_cycle(c.data(), N);
+}
+
+// ---- 倍音にならない成分を含む音（オルガンの低い管、デチューンした重ね）
+// 成分ごとに、鍵 60 の C3 に対する高さの比・大きさ・位相。ループを LOOP_FRAMES × mult サンプルに伸ばし、
+// 比を 1/(CYCLES × mult) の倍数に丸めるので、どの成分もループの中でちょうど整数回まわる（つなぎ目が出ない）。
+// mult = 8 なら 0.76 秒・比の刻みは 1/200（8.6 セント）
+struct partial { double ratio, amp, phase; };
+
+inline std::vector<s16> render_partials(const std::vector<partial> &parts, int mult, double level = 0.9)
+{
+	const u32 frames = LOOP_FRAMES * u32(std::max(mult, 1));
+	const int cycles = CYCLES * std::max(mult, 1);
+	std::vector<double> x(frames, 0.0);
+	for (const partial &p : parts) {
+		const long k = std::lround(p.ratio * cycles);
+		if (k <= 0 || p.amp == 0.0 || double(k) * 44100.0 / frames >= 20000.0)
+			continue;
+		// sin を回転で進める（成分 × サンプルの数だけ sin を呼ばない）
+		const double w = 2 * PI * double(k) / frames;
+		const double cw = std::cos(w), sw = std::sin(w);
+		double c = std::cos(p.phase), s = std::sin(p.phase);
+		for (u32 i = 0; i < frames; i++) {
+			x[i] += p.amp * s;
+			const double nc = c * cw - s * sw;
+			s = s * cw + c * sw;
+			c = nc;
+		}
+	}
+	double peak = 0;
+	for (double v : x)
+		peak = std::max(peak, std::fabs(v));
+	std::vector<s16> out(frames, 0);
+	if (peak <= 0)
+		return out;
+	const double g = std::clamp(level, 0.0, 1.0) * 32767.0 / peak;
+	for (u32 i = 0; i < frames; i++)
+		out[i] = s16(std::lround(x[i] * g));
+	return out;
+}
+
+// オルガンのドローバー 9 本（16' 5⅓' 8' 4' 2⅔' 2' 1⅗' 1⅓' 1'）。値は 0〜8 で、1 段 3dB。8' が鍵 60 の C3
+inline std::vector<partial> organ(const int *bars)
+{
+	static constexpr double RATIO[9] = { 0.5, 1.5, 1, 2, 3, 4, 5, 6, 8 };
+	std::vector<partial> out;
+	for (int i = 0; i < 9; i++)
+		if (bars[i] > 0)
+			out.push_back({ RATIO[i], std::pow(10.0, -3.0 * (8 - std::min(bars[i], 8)) / 20.0), 0.0 });
+	return out;
+}
+constexpr int ORGAN_MULT = 2;      // 16' と 5⅓' が半端な比（0.5・1.5）なので、ループを 2 倍に
+
+// デチューンした重ね（ユニゾン）。形 s を voices 個、隣どうし step 刻み（1 刻み = 1/(CYCLES × mult)、mult = 8 で 8.6 セント）
+// ずつ高さをずらして足す。位相は声ごとにずらす（頭で全部そろって山にならないように）
+constexpr int UNISON_MULT = 8;
+inline std::vector<partial> unison(const spectrum &s, int voices, int step, int max_h = HARMONICS)
+{
+	std::vector<partial> out;
+	const int base = CYCLES * UNISON_MULT;
+	voices = std::clamp(voices, 1, 9);
+	for (int v = 0; v < voices; v++) {
+		const double r = double(base + (v - voices / 2) * step) / base;
+		const double shift = 2 * PI * 0.381966 * v;        // 黄金比ぶんずつ
+		for (int h = 1; h <= std::min(max_h, HARMONICS); h++) {
+			const double m = s.mag(h);
+			if (m <= 0)
+				continue;
+			out.push_back({ r * h, m, std::atan2(double(s.a[h]), double(s.b[h])) + shift * h });
+		}
+	}
+	return out;
+}
+inline double unison_cents(int step) { return 1200.0 * std::log2(1.0 + double(step) / (CYCLES * UNISON_MULT)); }
+
 // 倍音の棒（強さだけ、位相は sin）から
 inline spectrum from_bars(const float *amp, int count)
 {
@@ -121,18 +332,56 @@ inline std::vector<s16> render(const spectrum &s, int max_h = HARMONICS, double 
 	return out;
 }
 
-// ノイズ（白色）。frames サンプル。高さが無いので全体をループにするだけ
-inline std::vector<s16> noise(u32 frames, double level = 0.9, u32 seed = 1)
+// ノイズ。frames サンプル。高さが無いので全体をループにするだけ。
+// color: 0 = 白、1 = ピンク（高い方へ 1 オクターブ 3dB ずつ下がる）、2 = ブラウン（6dB ずつ）。
+// 色つきは、同じ白色を 2 周ぶんフィルタに通して 2 周目を取る（頭と終わりがつながる）
+inline std::vector<s16> noise(u32 frames, double level = 0.9, u32 seed = 1, int color = 0)
 {
-	std::vector<s16> out(frames);
+	std::vector<double> w(frames);
 	u32 r = seed ? seed : 1;
 	for (u32 i = 0; i < frames; i++) {
 		r ^= r << 13;
 		r ^= r >> 17;
 		r ^= r << 5;
-		out[i] = s16(std::lround((double(r & 0xffff) / 32767.5 - 1.0) * level * 32767.0));
+		w[i] = double(r & 0xffff) / 32767.5 - 1.0;
 	}
+	if (color) {
+		std::vector<double> y(frames);
+		double b0 = 0, b1 = 0, b2 = 0, br = 0;
+		for (int pass = 0; pass < 2; pass++)
+			for (u32 i = 0; i < frames; i++) {
+				if (color == 1) {                      // Paul Kellet のピンクノイズ（3 段の近似）
+					b0 = 0.99765 * b0 + w[i] * 0.0990460;
+					b1 = 0.96300 * b1 + w[i] * 0.2965164;
+					b2 = 0.57000 * b2 + w[i] * 1.0526913;
+					y[i] = b0 + b1 + b2 + w[i] * 0.1848;
+				} else {
+					br = 0.995 * br + w[i] * 0.05;
+					y[i] = br;
+				}
+			}
+		w = y;
+	}
+	double peak = 1e-12;
+	for (double v : w)
+		peak = std::max(peak, std::fabs(v));
+	std::vector<s16> out(frames);
+	for (u32 i = 0; i < frames; i++)
+		out[i] = s16(std::lround(w[i] / peak * level * 32767.0));
 	return out;
+}
+
+// ローファイ。bits（2〜16。16 はそのまま）に丸め、hold サンプルずつ同じ値にする（1 はそのまま）
+inline void lofi(std::vector<s16> &pcm, int bits, int hold)
+{
+	if (hold > 1)
+		for (size_t i = 0; i < pcm.size(); i++)
+			pcm[i] = pcm[i - i % size_t(hold)];
+	if (bits < 16 && bits >= 1) {
+		const int sh = 16 - bits;
+		for (s16 &v : pcm)
+			v = s16(std::clamp(((int(v) >> sh) << sh) + (1 << sh) / 2, -32768, 32767));
+	}
 }
 
 } // namespace smu2000::wavegen

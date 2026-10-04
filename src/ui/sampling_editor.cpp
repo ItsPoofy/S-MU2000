@@ -2081,17 +2081,30 @@ void sampling_editor::make_pane(bridge &br)
 	const float fs = ImGui::GetFontSize();
 	heading(UI_TEXT(smp_make, "Make a wave"));
 
-	// ---- 作り方
+	// ---- 作り方（幅に入るだけ横に並べ、入らなければ折り返す）
+	enum { M_BASIC, M_BARS, M_DRAW, M_NOISE, M_FC, M_FM, M_ORGAN, M_UNISON, M_VOWEL, M_SYNC, M_FOLD, M_COUNT };
+	const char *mode_names[M_COUNT] = {
+		UI_TEXT(smp_make_basic, "Basic shape"), UI_TEXT(smp_make_bars, "Harmonics"), UI_TEXT(smp_make_draw, "Draw"),
+		UI_TEXT(smp_make_noise, "Noise"), UI_TEXT(smp_make_fc, "Famicom"), UI_TEXT(smp_make_fm, "FM"),
+		UI_TEXT(smp_make_organ, "Organ"), UI_TEXT(smp_make_unison, "Unison"), UI_TEXT(smp_make_vowel, "Voice"),
+		UI_TEXT(smp_make_sync, "Sync"), UI_TEXT(smp_make_fold, "Fold"),
+	};
 	const int was_mode = m_wm_mode;
-	ImGui::RadioButton(UI_TEXT(smp_make_basic, "Basic shape"), &m_wm_mode, 0);
-	ImGui::SameLine();
-	ImGui::RadioButton(UI_TEXT(smp_make_bars, "Harmonics"), &m_wm_mode, 1);
-	ImGui::SameLine();
-	ImGui::RadioButton(UI_TEXT(smp_make_draw, "Draw"), &m_wm_mode, 2);
-	ImGui::SameLine();
-	ImGui::RadioButton(UI_TEXT(smp_make_noise, "Noise"), &m_wm_mode, 3);
+	{
+		const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+		for (int i = 0; i < M_COUNT; i++) {
+			const float need = ImGui::CalcTextSize(mode_names[i]).x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+			if (i) {
+				ImGui::SameLine();
+				if (ImGui::GetCursorScreenPos().x + need > right)
+					ImGui::NewLine();
+			}
+			ImGui::RadioButton(mode_names[i], &m_wm_mode, i);
+		}
+	}
 	if (was_mode != m_wm_mode)
 		m_wm_stale = true;
+	ImGui::Separator();
 
 	const float w = ImGui::GetContentRegionAvail().x;
 	ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -2099,9 +2112,18 @@ void sampling_editor::make_pane(bridge &br)
 		dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255), 4.0f);
 		dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + sz.x + 1, p.y + sz.y + 1), IM_COL32(110, 125, 150, 255), 4.0f, 0, 1.5f);
 	};
-
-	if (m_wm_mode == 0) {
-		// 基本の波形
+	auto slider_f = [&](const char *label, float &v, float lo, float hi, const char *fmt = "%.2f") {
+		ImGui::SetNextItemWidth(fs * 16);
+		if (ImGui::SliderFloat(label, &v, lo, hi, fmt))
+			m_wm_stale = true;
+	};
+	auto slider_i = [&](const char *label, int &v, int lo, int hi, const char *fmt = "%d") {
+		ImGui::SetNextItemWidth(fs * 16);
+		if (ImGui::SliderInt(label, &v, lo, hi, fmt))
+			m_wm_stale = true;
+	};
+	// 基本の波形の選び（基本の波形とユニゾンで使う）
+	auto shape_row = [&]() {
 		const char *names[4] = { UI_TEXT(smp_make_sine, "Sine"), UI_TEXT(smp_make_saw, "Sawtooth"),
 		                         UI_TEXT(smp_make_square, "Square"), UI_TEXT(smp_make_tri, "Triangle") };
 		for (int i = 0; i < 4; i++) {
@@ -2112,12 +2134,13 @@ void sampling_editor::make_pane(bridge &br)
 				m_wm_stale = true;
 			}
 		}
-		if (m_wm_shape == int(wg::shape::square)) {
-			ImGui::SetNextItemWidth(fs * 16);
-			if (ImGui::SliderFloat(UI_TEXT(smp_make_pulse, "Pulse width"), &m_wm_pulse, 0.05f, 0.95f, "%.2f"))
-				m_wm_stale = true;
-		}
-	} else if (m_wm_mode == 1) {
+		if (m_wm_shape == int(wg::shape::square))
+			slider_f(UI_TEXT(smp_make_pulse, "Pulse width"), m_wm_pulse, 0.05f, 0.95f);
+	};
+
+	if (m_wm_mode == M_BASIC) {
+		shape_row();
+	} else if (m_wm_mode == M_BARS) {
 		// 倍音を足す: 1-32 倍音の棒。縦に引いて高さを決める（棒の上をなぞれば続けて描ける）
 		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_one, "Fundamental only"))) {
 			std::fill(std::begin(m_wm_bars), std::end(m_wm_bars), 0.0f);
@@ -2134,6 +2157,13 @@ void sampling_editor::make_pane(bridge &br)
 		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_odd, "Odd only (square-like)"))) {
 			for (int h = 0; h < 32; h++)
 				m_wm_bars[h] = (h & 1) ? 0.0f : 1.0f / float(h + 1);
+			m_wm_stale = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_random, "Random"))) {
+			const wg::spectrum r = wg::random_harmonics(++m_wm_seed, 32);
+			for (int h = 0; h < 32; h++)
+				m_wm_bars[h] = std::min(1.0f, r.b[h + 1]);
 			m_wm_stale = true;
 		}
 		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(w, fs * 7);
@@ -2153,7 +2183,7 @@ void sampling_editor::make_pane(bridge &br)
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", UI_TEXT(smp_make_bars_tip, "Drag up and down to set the level of harmonics 1 to 32 (left is the fundamental)"));
-	} else if (m_wm_mode == 2) {
+	} else if (m_wm_mode == M_DRAW) {
 		// 手描き: 1 周期ぶんをマウスでなぞる。前の点とのあいだも埋める
 		if (!m_wm_draw_init) {
 			for (int i = 0; i < 256; i++)
@@ -2170,6 +2200,17 @@ void sampling_editor::make_pane(bridge &br)
 			std::fill(std::begin(m_wm_draw), std::end(m_wm_draw), 0.0f);
 			m_wm_stale = true;
 		}
+		// 波形メモリ音源の形にする: 段数と bit 数
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(fs * 7);
+		if (ImGui::Combo(UI_TEXT(smp_make_draw_steps, "Steps"), &m_wm_steps, "256\0" "64\0" "32\0" "16\0" "8\0"))
+			m_wm_stale = true;
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(fs * 7);
+		if (ImGui::Combo(UI_TEXT(smp_make_draw_bits, "Bits"), &m_wm_bits, "-\0" "8\0" "5\0" "4\0" "3\0" "2\0"))
+			m_wm_stale = true;
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_make_draw_chip_tip, "Fewer steps and bits give the stair-stepped waves of wavetable sound chips: 32 steps and 4 bits is the Game Boy's wave channel, 32 steps and 8 bits the SCC."));
 		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(w, fs * 9);
 		ImGui::InvisibleButton("##draw", sz);
 		frame(p, sz);
@@ -2194,41 +2235,189 @@ void sampling_editor::make_pane(bridge &br)
 			            IM_COL32(255, 210, 90, 255), 1.5f);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", UI_TEXT(smp_make_draw_tip, "Drag to draw one cycle. What plays is this shape rebuilt from its first harmonics (below), so sharp corners are rounded"));
-	} else {
+	} else if (m_wm_mode == M_NOISE) {
+		const char *colors[3] = { UI_TEXT(smp_make_noise_white, "White"), UI_TEXT(smp_make_noise_pink, "Pink"),
+		                          UI_TEXT(smp_make_noise_brown, "Brown") };
+		for (int i = 0; i < 3; i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::RadioButton(colors[i], m_wm_noise_color == i)) {
+				m_wm_noise_color = i;
+				m_wm_stale = true;
+			}
+		}
 		ImGui::TextWrapped("%s", UI_TEXT(smp_make_noise_note, "White noise, one second, looped. It has no pitch, so every key plays it faster or slower."));
+	} else if (m_wm_mode == M_FC) {
+		// ファミコン（2A03）。矩形 4 つと三角は高さのある波形、ノイズ 2 つは高さの無いサンプル
+		const char *names[7] = { UI_TEXT(smp_make_fc_p12, "Pulse 12.5%"), UI_TEXT(smp_make_fc_p25, "Pulse 25%"),
+		                         UI_TEXT(smp_make_fc_p50, "Pulse 50%"), UI_TEXT(smp_make_fc_p75, "Pulse 75%"),
+		                         UI_TEXT(smp_make_fc_tri, "Triangle"), UI_TEXT(smp_make_fc_noise, "Noise"),
+		                         UI_TEXT(smp_make_fc_noise_short, "Noise (short)") };
+		for (int i = 0; i < 7; i++) {
+			if (i && i != 4)
+				ImGui::SameLine();
+			if (ImGui::RadioButton(names[i], m_wm_fc == i)) {
+				m_wm_fc = i;
+				m_wm_stale = true;
+			}
+		}
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_fc_note, "The Famicom / NES sound chip: four pulse duties, the 4-bit stepped triangle, and its shift-register noise (long, and the short metallic one). For the raw chip sound keep Highest harmonic at 64."));
+	} else if (m_wm_mode == M_FM) {
+		// FM（2 オペレーター）。比は整数（1 周期で閉じるので、そのままループになる）
+		struct preset { const char *name; int c, m; float index, fb; };
+		const preset presets[] = {
+			{ UI_TEXT(smp_make_fm_epiano, "E. piano"), 1, 14, 0.7f, 0.0f },
+			{ UI_TEXT(smp_make_fm_bell, "Bell"), 2, 7, 3.0f, 0.0f },
+			{ UI_TEXT(smp_make_fm_brass, "Brass"), 1, 1, 2.5f, 0.3f },
+			{ UI_TEXT(smp_make_fm_organ, "Organ"), 1, 2, 1.2f, 0.0f },
+			{ UI_TEXT(smp_make_fm_bass, "Bass"), 1, 1, 4.0f, 0.6f },
+			{ UI_TEXT(smp_make_fm_clav, "Clavi"), 1, 3, 2.2f, 0.2f },
+		};
+		for (size_t i = 0; i < std::size(presets); i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::SmallButton(presets[i].name)) {
+				m_wm_fm_c = presets[i].c;
+				m_wm_fm_m = presets[i].m;
+				m_wm_fm_index = presets[i].index;
+				m_wm_fm_fb = presets[i].fb;
+				m_wm_stale = true;
+			}
+		}
+		slider_i(UI_TEXT(smp_make_fm_c, "Carrier ratio"), m_wm_fm_c, 1, 8);
+		slider_i(UI_TEXT(smp_make_fm_m, "Modulator ratio"), m_wm_fm_m, 1, 16);
+		slider_f(UI_TEXT(smp_make_fm_index, "Modulation depth"), m_wm_fm_index, 0.0f, 12.0f);
+		slider_f(UI_TEXT(smp_make_fm_fb, "Feedback"), m_wm_fm_fb, 0.0f, 1.0f);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_make_fm_tip, "Two-operator FM: the modulator bends the carrier's phase. Depth 0 is a plain sine; more depth adds harmonics spaced by the modulator ratio. Feedback lets the modulator modulate itself (towards a sawtooth). The wave is one fixed spectrum: shape its change over time with the voice's envelope, or layer two waves in different elements."));
+	} else if (m_wm_mode == M_ORGAN) {
+		// ドローバー 9 本。縦のつまみ（下げるほど大きい、の本物とは逆で、上げるほど大きい）
+		struct preset { const char *name; int b[9]; };
+		const preset presets[] = {
+			{ UI_TEXT(smp_make_organ_full, "Full"), { 8, 8, 8, 8, 8, 8, 8, 8, 8 } },
+			{ UI_TEXT(smp_make_organ_jazz, "Jazz"), { 8, 8, 8, 0, 0, 0, 0, 0, 0 } },
+			{ UI_TEXT(smp_make_organ_gospel, "Gospel"), { 8, 8, 8, 8, 0, 0, 0, 0, 8 } },
+			{ UI_TEXT(smp_make_organ_flute, "Flute"), { 0, 0, 8, 4, 0, 2, 0, 0, 0 } },
+			{ UI_TEXT(smp_make_organ_reed, "Reed"), { 0, 0, 6, 8, 7, 6, 5, 4, 3 } },
+		};
+		for (size_t i = 0; i < std::size(presets); i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::SmallButton(presets[i].name)) {
+				std::copy(std::begin(presets[i].b), std::end(presets[i].b), m_wm_organ);
+				m_wm_stale = true;
+			}
+		}
+		static const char *feet[9] = { "16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'" };
+		for (int i = 0; i < 9; i++) {
+			if (i)
+				ImGui::SameLine();
+			ImGui::PushID(i);
+			ImGui::BeginGroup();
+			if (ImGui::VSliderInt("##bar", ImVec2(fs * 2.2f, fs * 7), &m_wm_organ[i], 0, 8))
+				m_wm_stale = true;
+			ImGui::TextUnformatted(feet[i]);
+			ImGui::EndGroup();
+			ImGui::PopID();
+		}
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_organ_note, "Nine drawbars, 3 dB a step. 8' plays C3 at key 60; 16' sounds an octave below it and 5 1/3' a fifth above, so the loop is twice as long (0.2 s)."));
+	} else if (m_wm_mode == M_UNISON) {
+		shape_row();
+		slider_i(UI_TEXT(smp_make_uni_voices, "Voices"), m_wm_uni_voices, 2, 9);
+		char cents[32];
+		std::snprintf(cents, sizeof(cents), "%.1f cent", wg::unison_cents(m_wm_uni_step));
+		slider_i(UI_TEXT(smp_make_uni_detune, "Detune"), m_wm_uni_step, 1, 6, cents);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_uni_note, "Several copies of the shape, each tuned a little apart, in one sample (a supersaw with Sawtooth). The beating repeats every 0.76 s, the length of the loop; detune moves in steps of 8.6 cents so that every copy closes at the loop point."));
+	} else if (m_wm_mode == M_VOWEL) {
+		const char *vowels[5] = { "A", "I", "U", "E", "O" };
+		for (int i = 0; i < 5; i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::SmallButton(vowels[i])) {
+				m_wm_vowel = float(i);
+				m_wm_stale = true;
+			}
+		}
+		slider_f(UI_TEXT(smp_make_vowel_pos, "Vowel (A I U E O)"), m_wm_vowel, 0.0f, 4.0f);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_vowel_note, "A sawtooth shaped by the three formants of a vowel. The formants are right at key 60 and move with the key, so it sounds most like a voice within an octave or so of C3."));
+	} else if (m_wm_mode == M_SYNC) {
+		slider_f(UI_TEXT(smp_make_sync_ratio, "Slave ratio"), m_wm_sync, 1.0f, 12.0f);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_sync_note, "Hard sync: a sawtooth running this many times faster is forced back to its start once a cycle. In-between ratios give the tearing sync-lead sound."));
+	} else {
+		slider_f(UI_TEXT(smp_make_fold_gain, "Fold amount"), m_wm_fold_gain, 0.1f, 12.0f);
+		slider_f(UI_TEXT(smp_make_fold_bias, "Asymmetry"), m_wm_fold_bias, 0.0f, 1.57f);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_fold_note, "Wavefolding: a sine pushed past its limit folds back on itself. More amount adds harmonics; asymmetry brings in the even ones."));
 	}
 
-	// ---- 共通: 足す倍音の上限と大きさ
-	if (m_wm_mode != 3) {
-		ImGui::SetNextItemWidth(fs * 16);
-		if (ImGui::SliderInt(UI_TEXT(smp_make_max_h, "Highest harmonic"), &m_wm_max_h, 1, wg::HARMONICS))
-			m_wm_stale = true;
+	// ---- 共通: 足す倍音の上限と大きさ（高さの無いノイズは、倍音にせずそのままサンプルにする）
+	const bool unpitched = m_wm_mode == M_NOISE || (m_wm_mode == M_FC && m_wm_fc >= 5);
+	const bool multi = m_wm_mode == M_ORGAN || m_wm_mode == M_UNISON;       // 倍音にならない成分を含む（長いループ）
+	ImGui::Separator();
+	if (!unpitched && m_wm_mode != M_ORGAN) {
+		slider_i(UI_TEXT(smp_make_max_h, "Highest harmonic"), m_wm_max_h, 1, wg::HARMONICS);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", UI_TEXT(smp_make_max_h_tip, "Harmonics above this are left out. Fewer gives a rounder sound and less aliasing on high keys"));
 	}
-	ImGui::SetNextItemWidth(fs * 16);
-	if (ImGui::SliderInt(UI_TEXT(smp_make_level, "Peak level (%)"), &m_wm_level, 1, 100))
+	slider_i(UI_TEXT(smp_make_level, "Peak level (%)"), m_wm_level, 1, 100);
+	// ローファイ: bit 数と、同じ値を続けるサンプル数
+	ImGui::SetNextItemWidth(fs * 7.5f);
+	if (ImGui::SliderInt("##lofibits", &m_wm_lofi_bits, 2, 16, "%d bit"))
 		m_wm_stale = true;
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 7.5f);
+	if (ImGui::SliderInt(UI_TEXT(smp_make_lofi, "Lo-fi"), &m_wm_lofi_hold, 1, 16, "1/%d"))
+		m_wm_stale = true;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_lofi_tip, "Rounds the finished wave to fewer bits and holds each value for several samples (a lower sample rate), like an old sampler. 16 bit and 1/1 leave it alone."));
 
 	// ---- 作り直す
 	if (m_wm_stale) {
 		m_wm_stale = false;
-		if (m_wm_mode == 3) {
-			m_wm_spec = wg::spectrum{};
+		const double level = m_wm_level / 100.0;
+		m_wm_spec = wg::spectrum{};
+		if (unpitched) {
 			m_wm_cycle.clear();
-			m_wm_pcm = wg::noise(44100, m_wm_level / 100.0);
+			m_wm_pcm = m_wm_mode == M_NOISE ? wg::noise(44100, level, 1, m_wm_noise_color)
+			                                : wg::famicom_noise(m_wm_fc == 6, level, m_wm_fc == 6 ? 4 : 2);
 		} else {
-			m_wm_spec = m_wm_mode == 0 ? wg::basic(wg::shape(m_wm_shape), m_wm_pulse)
-			          : m_wm_mode == 1 ? wg::from_bars(m_wm_bars, 32)
-			                           : wg::from_cycle(m_wm_draw, 256);
-			m_wm_cycle = wg::cycle(m_wm_spec, 256, m_wm_max_h);
-			m_wm_pcm = wg::render(m_wm_spec, m_wm_max_h, m_wm_level / 100.0);
+			switch (m_wm_mode) {
+			case M_BASIC: case M_UNISON: m_wm_spec = wg::basic(wg::shape(m_wm_shape), m_wm_pulse); break;
+			case M_BARS:  m_wm_spec = wg::from_bars(m_wm_bars, 32); break;
+			case M_DRAW: {
+				static const int STEPS[5] = { 0, 64, 32, 16, 8 }, BITS[6] = { 0, 8, 5, 4, 3, 2 };
+				m_wm_spec = m_wm_steps || m_wm_bits ? wg::from_cycle_stepped(m_wm_draw, 256, STEPS[m_wm_steps], BITS[m_wm_bits])
+				                                    : wg::from_cycle(m_wm_draw, 256);
+				break;
+			}
+			case M_FC:    m_wm_spec = wg::famicom(wg::famicom_wave(m_wm_fc)); break;
+			case M_FM:    m_wm_spec = wg::fm(m_wm_fm_c, m_wm_fm_m, m_wm_fm_index, m_wm_fm_fb); break;
+			case M_VOWEL: m_wm_spec = wg::vowel(m_wm_vowel); break;
+			case M_SYNC:  m_wm_spec = wg::sync(m_wm_sync); break;
+			case M_FOLD:  m_wm_spec = wg::fold(m_wm_fold_gain, m_wm_fold_bias); break;
+			default: break;
+			}
+			if (m_wm_mode == M_ORGAN)
+				m_wm_pcm = wg::render_partials(wg::organ(m_wm_organ), wg::ORGAN_MULT, level);
+			else if (m_wm_mode == M_UNISON)
+				m_wm_pcm = wg::render_partials(wg::unison(m_wm_spec, m_wm_uni_voices, m_wm_uni_step, m_wm_max_h), wg::UNISON_MULT, level);
+			else
+				m_wm_pcm = wg::render(m_wm_spec, m_wm_max_h, level);
+			if (multi) {
+				// 見せるのはループの頭の 4 周期ぶん（8' の高さで）
+				const size_t n = std::min<size_t>(m_wm_pcm.size(), size_t(wg::LOOP_FRAMES) * 4 / wg::CYCLES);
+				m_wm_cycle.assign(n, 0.0f);
+				for (size_t i = 0; i < n; i++)
+					m_wm_cycle[i] = float(m_wm_pcm[i]) / 32768.0f;
+			} else {
+				m_wm_cycle = wg::cycle(m_wm_spec, 256, m_wm_max_h);
+			}
 		}
+		wg::lofi(m_wm_pcm, m_wm_lofi_bits, m_wm_lofi_hold);
 	}
 
 	// ---- できた形（1 周期）と倍音の分布
-	if (m_wm_mode != 3) {
-		const float half = (w - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	if (!unpitched) {
+		const float half = multi ? w : (w - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
 		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(half, fs * 6);
 		ImGui::Dummy(sz);
 		frame(p, sz);
@@ -2240,25 +2429,29 @@ void sampling_editor::make_pane(bridge &br)
 			dl->AddLine(ImVec2(p.x + sz.x * float(i) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i] / peak)),
 			            ImVec2(p.x + sz.x * float(i + 1) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i + 1] / peak)),
 			            IM_COL32(110, 200, 255, 255), 1.5f);
-		ImGui::SameLine();
-		const ImVec2 q = ImGui::GetCursorScreenPos(), sq(half, fs * 6);
-		ImGui::Dummy(sq);
-		frame(q, sq);
-		double top = 1e-9;
-		for (int h = 1; h <= wg::HARMONICS; h++)
-			top = std::max(top, m_wm_spec.mag(h));
-		const float bw = sq.x / float(wg::HARMONICS);
-		for (int h = 1; h <= wg::HARMONICS; h++) {
-			// 高さは dB（-60dB を下の端に）
-			const double db = 20 * std::log10(std::max(m_wm_spec.mag(h) / top, 1e-6));
-			const float t = float(std::clamp(1.0 + db / 60.0, 0.0, 1.0));
-			if (t <= 0)
-				continue;
-			dl->AddRectFilled(ImVec2(q.x + bw * float(h - 1) + 0.5f, q.y + sq.y * (1.0f - t)),
-			                  ImVec2(q.x + bw * float(h) - 0.5f, q.y + sq.y),
-			                  h <= m_wm_max_h ? IM_COL32(110, 200, 255, 255) : IM_COL32(70, 80, 95, 255));
+		if (multi) {
+			ImGui::TextDisabled(UI_TEXT(smp_make_view_multi_fmt, "The first 4 cycles of the loop (%.2f s in all)."), double(m_wm_pcm.size()) / sp::SAMPLE_RATE);
+		} else {
+			ImGui::SameLine();
+			const ImVec2 q = ImGui::GetCursorScreenPos(), sq(half, fs * 6);
+			ImGui::Dummy(sq);
+			frame(q, sq);
+			double top = 1e-9;
+			for (int h = 1; h <= wg::HARMONICS; h++)
+				top = std::max(top, m_wm_spec.mag(h));
+			const float bw = sq.x / float(wg::HARMONICS);
+			for (int h = 1; h <= wg::HARMONICS; h++) {
+				// 高さは dB（-60dB を下の端に）
+				const double db = 20 * std::log10(std::max(m_wm_spec.mag(h) / top, 1e-6));
+				const float t = float(std::clamp(1.0 + db / 60.0, 0.0, 1.0));
+				if (t <= 0)
+					continue;
+				dl->AddRectFilled(ImVec2(q.x + bw * float(h - 1) + 0.5f, q.y + sq.y * (1.0f - t)),
+				                  ImVec2(q.x + bw * float(h) - 0.5f, q.y + sq.y),
+				                  h <= m_wm_max_h ? IM_COL32(110, 200, 255, 255) : IM_COL32(70, 80, 95, 255));
+			}
+			ImGui::TextDisabled("%s", UI_TEXT(smp_make_view_note, "Left: one cycle as it will play. Right: harmonics 1-64 (dB; grey ones are left out)."));
 		}
-		ImGui::TextDisabled("%s", UI_TEXT(smp_make_view_note, "Left: one cycle as it will play. Right: harmonics 1-64 (dB; grey ones are left out)."));
 	}
 
 	// ---- 試聴と登録
