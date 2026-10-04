@@ -12,6 +12,7 @@
 #include "mu2000.h"
 #include "xg/ram.h"
 
+#include <chrono>
 #include <cstdio>
 #include <initializer_list>
 #include <memory>
@@ -37,6 +38,9 @@ class driver
 	bool m_details_fresh = false;
 	int m_samp_tick = 0;
 	panel_macro m_macro;               // 前面のボタンを決まった順に押す（bridge::request_macro）
+	// マクロが回っている間、1 ブロックで早送りに使う時間（マイクロ秒）。ブロックは 10ms ほどなので、
+	// その半分弱を使い、音を作る残りの仕事に余裕を残す
+	static constexpr int FAST_FORWARD_US = 4000;
 public:
 	// 1 ブロックの頭で。画面から押されているボタンを音源へ
 	void apply_buttons(mu2000 &mu, const bridge &br)
@@ -70,7 +74,20 @@ public:
 				did = true;
 			}
 			std::string msg;
-			if (m_macro.tick(mu, msg)) {
+			bool finished = m_macro.tick(mu, msg);
+			// 早送り。回っている間は、このブロックの中で FAST_FORWARD_US だけ音源を先へ回す（出た音は捨てる）。
+			// 押す間と firmware の読み込みは音の時間で 8 秒ほどかかるが、全速なら実時間の 18 倍ほどで回るので、
+			// 1 秒ほどで済む。firmware の LOAD をそのまま使うので、読み込まれるものは実機で押したのと同じ
+			const auto t0 = std::chrono::steady_clock::now();
+			while (!finished && m_macro.active() &&
+			       std::chrono::steady_clock::now() - t0 < std::chrono::microseconds(FAST_FORWARD_US)) {
+				for (int i = 0; i < 441; i++) {
+					s32 l, r;
+					mu.run_sample(l, r);
+				}
+				finished = m_macro.tick(mu, msg);
+			}
+			if (finished) {
 				m_samp_msg = msg;
 				did = true;   // 読み込みでサンプルの表が変わる
 			}
