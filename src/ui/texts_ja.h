@@ -550,7 +550,7 @@ inline const ui_texts &ja_texts()
 		.smp_card_loaded = "カードから読み込みました",
 		.smp_card_slot = "差しているカード",
 		.smp_card_none = "（なし）",
-		.smp_card_image = "カードのファイル",
+		.smp_card_image = "カードか M2A のファイル",
 		.smp_card_open = "開く…",
 		.smp_card_path = "カードのファイルの場所",
 		.smp_card_open_path = "開く",
@@ -569,6 +569,11 @@ inline const ui_texts &ja_texts()
 		.smp_card_load = "この M2A を本体に読み込む",
 		.smp_card_load_tip = "前面パネルの SAMPLING → LOAD → ALL+SEQ を代わりに押して、このファイルを選ぶ（実機で押すのと同じ道）。この方法で選べるのはカードのいちばん上にあるファイルだけ",
 		.smp_card_load_warn = "読み込むと、いま本体にあるサンプルとサンプル音色は置き換わります。続けますか？",
+		.smp_card_write_fail = "新しいカードを書けませんでした",
+		.smp_card_too_big = "このファイルは 128MB のカードに入りません",
+		.smp_card_m2a_tip = "このファイルを入れた新しいカードとして見せている。差すか読み込むと、そのカードを設定のフォルダの cards に保存する",
+		.smp_card_m2a_warn = "このファイルを入れた新しいカードを作って差します（いま差しているカードは抜けます）。",
+		.dlg_card_or_m2a_desc = "SmartMedia の中身か M2A のファイル",
 	};
 	return t;
 }

@@ -258,6 +258,7 @@ int main(int argc, char **argv)
 
 	// カードの中身を本体を通さずに読む（サンプリングの窓の「カード」。card_fs.h・m2a.h）。
 	// 書いた M2A の波形が、firmware の表のサンプル 1 と同じ長さ・同じ音で、そのまま試聴できる
+	std::vector<u8> saved_m2a;
 	{
 		std::vector<smu2000::cardfs::entry> files;
 		std::vector<u8> m2a;
@@ -282,6 +283,7 @@ int main(int argc, char **argv)
 		            list.empty() ? 0u : list[0].frames(), err.c_str());
 		if (!(listed && tone_ok))
 			bad++;
+		saved_m2a = m2a;
 
 		// 外の PCM の試聴（preview_pcm）。音源を通さずに鳴り、終われば止まる
 		g.out.clear();
@@ -310,12 +312,48 @@ int main(int argc, char **argv)
 	h.mu.reset();
 	for (u32 i = 0; i < 30 * RATE && !h.mu.midi_ready(); i += RATE / 100)
 		h.pump(10);
-	h.mu.card() = g.mu.card();
+	// 読み戻すカードは、取り出した M2A を PC の側で新しいカードに書き直したもの（smartmedia::format に
+	// ファイルを渡す。サンプリングの窓で M2A のファイルを直に読み込むときと同じ）。firmware がそれを読めるか
+	{
+		smu2000::smartmedia made;
+		const u32 mb = smu2000::smartmedia::megabytes_for(saved_m2a.size());
+		std::vector<smu2000::smartmedia::root_file> put(1);
+		put[0].name = "FROMPC.M2A";
+		put[0].bytes = saved_m2a;
+		const bool ok_made = mb && made.create(mb) && made.format(put);
+		std::vector<smu2000::cardfs::entry> files;
+		std::vector<u8> back;
+		std::string err;
+		const bool same = ok_made && smu2000::cardfs::list(made.raw(), files, err) && files.size() == 1 &&
+		                  smu2000::cardfs::read(made.raw(), "FROMPC.M2A", back, err) && back == saved_m2a;
+		std::printf("%s M2A を新しいカードに書く         %u MB、%zu バイト %s\n", same ? "合" : "NG", mb, saved_m2a.size(), err.c_str());
+		if (!same)
+			bad++;
+		h.mu.card() = made;
+
+		// 16MB を超えるファイル（論理ブロックがゾーン 1 へ入る）と、2 つ目のファイルも書いて読み戻せる
+		std::vector<smu2000::smartmedia::root_file> big(2);
+		big[0].name = "BIG.M2A";
+		big[0].bytes.resize(20u << 20);
+		for (size_t i = 0; i < big[0].bytes.size(); i++)
+			big[0].bytes[i] = u8((i * 2654435761u) >> 13);
+		big[1].name = "SMALL.TXT";
+		big[1].bytes.assign(100, u8('x'));
+		smu2000::smartmedia large;
+		const u32 mb2 = smu2000::smartmedia::megabytes_for(big[0].bytes.size() + big[1].bytes.size());
+		std::vector<u8> b0, b1;
+		const bool big_ok = mb2 == 32 && large.create(mb2) && large.format(big) &&
+		                    smu2000::cardfs::read(large.raw(), "BIG.M2A", b0, err) && b0 == big[0].bytes &&
+		                    smu2000::cardfs::read(large.raw(), "SMALL.TXT", b1, err) && b1 == big[1].bytes;
+		std::printf("%s 20MB のファイルを 32MB のカードに  %s\n", big_ok ? "合" : "NG", err.c_str());
+		if (!big_ok)
+			bad++;
+	}
 	h.pump(1500);
 	// 読み戻しは、サンプリングの窓の「この M2A を読み込む」と同じボタンの押し方（ui::panel_macro）で
 	{
 		ui::panel_macro macro;
-		macro.start(ui::panel_macro::load_m2a("ALL_SEQ.M2A"), "done");
+		macro.start(ui::panel_macro::load_m2a("FROMPC.M2A"), "done");
 		std::string msg;
 		bool finished = false;
 		for (int i = 0; i < 200 * 100 && !finished; i++) {

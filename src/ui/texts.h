@@ -603,6 +603,11 @@ struct ui_texts {
 	const char *smp_card_load;
 	const char *smp_card_load_tip;
 	const char *smp_card_load_warn;
+	const char *smp_card_write_fail;
+	const char *smp_card_too_big;
+	const char *smp_card_m2a_tip;
+	const char *smp_card_m2a_warn;
+	const char *dlg_card_or_m2a_desc;
 };
 
 // Each language file defines one of these (never included directly).
