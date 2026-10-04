@@ -12,6 +12,7 @@
 
 #include "compat/mamecompat.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -64,12 +65,13 @@ struct sample
 	u32 frames() const { return (end - start) * 2; }
 };
 
-struct voice
+// サンプル音色の要素 1 つ（84 バイトのうち、窓で触る欄。doc/sampling-ram.md の要素の表）
+struct element
 {
-	bool assigned = false;   // 1 つ目の要素がサンプルを鳴らすか
-	std::string name;
+	bool on = false;         // 鳴らすか（音色の頭の、使う要素の印のビット）
+	bool assigned = false;   // サンプルを鳴らすか
 	int sample = 0;          // 1 から（assigned のとき）
-	// assigned でないとき、1 つ目の要素が鳴らす内蔵の波形の組（0-502。XG の音色が使うのと同じ番号）。-1 は鳴らさない
+	// assigned でないとき鳴らす内蔵の波形の組（0-502。XG の音色が使うのと同じ番号）。-1 は鳴らさない
 	int rom_wave = -1;
 	int level = 127;         // 0-127
 	int pan = 7;             // 0 = L7、7 = C、14 = R7、15 = Scaling
@@ -79,6 +81,17 @@ struct voice
 	// 押すと attack で最大へ、decay1 で level1 へ、decay2 で level2 へ（押しているあいだはそこに留まる）、離すと release で 0 へ
 	int attack = 63, decay1 = 0, decay2 = 0, release = 63;
 	int level1 = 127, level2 = 127;
+	// 鳴らす鍵と強さの範囲（両端を含む）
+	int key_lo = 0, key_hi = 127, vel_lo = 1, vel_hi = 127;
+};
+
+constexpr int VOICE_ELEMENTS = 4;
+
+struct voice
+{
+	std::string name;
+	std::array<element, VOICE_ELEMENTS> el;   // el[0] が要素 1
+	voice() { el[0].on = true; }
 };
 
 // 録音で入力のどれを録るか（firmware の InputSrc と同じ並び）

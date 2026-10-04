@@ -589,6 +589,11 @@ struct ui_texts {
 	const char *smp_sx_send;
 	const char *smp_sx_tip;
 	const char *smp_sx_sending_fmt;
+	const char *smp_element;
+	const char *smp_element_on;
+	const char *smp_element_tip;
+	const char *smp_key_range;
+	const char *smp_vel_range;
 	const char *smp_tab_edit;
 	const char *smp_tab_card;
 	const char *smp_card;

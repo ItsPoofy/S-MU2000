@@ -19,6 +19,7 @@
 #include "card_fs.h"
 #include "m2a.h"
 
+#include <array>
 #include <atomic>
 #include <deque>
 #include <memory>
@@ -166,6 +167,55 @@ private:
 	// 押して試聴する鍵と、鳴らしている鍵（-1 = なし）
 	int m_audition_key = 60, m_held_key = -1;
 	int m_attack = 63, m_decay1 = 0, m_decay2 = 0, m_release = 63, m_level1 = 127, m_level2 = 127;
+	int m_key_lo = 0, m_key_hi = 127, m_vel_lo = 1, m_vel_hi = 127;
+	bool m_el_on = true;
+	// 要素 1-4。上の編集欄は m_cur_el のもので、要素を切り替えるときに m_els と出し入れする
+	std::array<smu2000::sampling::element, smu2000::sampling::VOICE_ELEMENTS> m_els{};
+	int m_cur_el = 0;
+	void stash_el()
+	{
+		smu2000::sampling::element &x = m_els[size_t(m_cur_el)];
+		x.on = m_el_on;
+		x.assigned = m_sample != 0;
+		x.sample = m_sample;
+		x.rom_wave = m_sample ? -1 : m_rom_wave;
+		x.level = m_level;
+		x.pan = m_pan;
+		x.coarse = m_coarse;
+		x.fine = m_fine;
+		x.attack = m_attack;
+		x.decay1 = m_decay1;
+		x.decay2 = m_decay2;
+		x.release = m_release;
+		x.level1 = m_level1;
+		x.level2 = m_level2;
+		x.key_lo = m_key_lo;
+		x.key_hi = m_key_hi;
+		x.vel_lo = m_vel_lo;
+		x.vel_hi = m_vel_hi;
+	}
+	void load_el(int e)
+	{
+		m_cur_el = e;
+		const smu2000::sampling::element &x = m_els[size_t(e)];
+		m_el_on = x.on;
+		m_sample = x.assigned ? x.sample : 0;
+		m_rom_wave = x.assigned ? -1 : x.rom_wave;
+		m_level = x.level;
+		m_pan = x.pan;
+		m_coarse = x.coarse;
+		m_fine = x.fine;
+		m_attack = x.attack;
+		m_decay1 = x.decay1;
+		m_decay2 = x.decay2;
+		m_release = x.release;
+		m_level1 = x.level1;
+		m_level2 = x.level2;
+		m_key_lo = x.key_lo;
+		m_key_hi = x.key_hi;
+		m_vel_lo = x.vel_lo;
+		m_vel_hi = x.vel_hi;
+	}
 };
 
 } // namespace ui
