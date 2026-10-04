@@ -475,8 +475,13 @@ std::vector<std::vector<u8>> memory_sysex(const std::vector<u8> &dram, const std
 		return out;
 	out.push_back({ 0xf0, 0x43, u8(0x10 | (device & 0x0f)), 0x68, 0x00, 0x00, 0x7f, 0x00, 0xf7 });
 	// 波形。サンプリング RAM は 16bit の下のバイトが先なので、入れ替えて送る
-	out.push_back(bulk68(device, 0x00, 0x00, 0x00, { 0, 0, 0, 0 }));
+	// 書く位置は 64 塊ごとに入れ直す。実機は長く送ると 1000 通に 1 通ほど取りこぼし（2026-10-04 に 17,950 通で 17 通）、
+	// 位置は受けた通の数で進むので、入れ直さないと取りこぼした所から後ろが全部 1 塊ずつ前へずれる
 	for (size_t at = 0; at < size_t(next) * 4; at += 64) {
+		if (at % (64 * PCM_RESYNC_BLOCKS) == 0) {
+			const u32 b = u32(at / 64);
+			out.push_back(bulk68(device, 0x00, 0x00, 0x00, { u8(b >> 21 & 0x7f), u8(b >> 14 & 0x7f), u8(b >> 7 & 0x7f), u8(b & 0x7f) }));
+		}
 		u8 blk[64] = {};
 		for (size_t i = 0; i < 64 && at + i < size_t(next) * 4; i++)
 			blk[i] = pcm[(at + i) ^ 1];
