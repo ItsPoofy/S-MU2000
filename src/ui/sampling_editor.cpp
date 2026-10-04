@@ -194,8 +194,13 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// WAV のファイルの窓から読んだ中身
 	std::vector<u8> opened;
-	if (xgui::take_opened_wav(opened))
-		import_wav(opened, br);
+	if (xgui::take_opened_wav(opened)) {
+		// 同じ窓で SysEx も選べる。頭が F0 なら SysEx
+		if (!opened.empty() && opened[0] == 0xf0)
+			load_sysex(opened, br);
+		else
+			import_wav(opened, br);
+	}
 
 	const float fs = ImGui::GetFontSize();
 	// 3 列。左 = 入力・録音とサンプルの一覧、中 = サンプルの加工（波形・トリム・ループ）とカード・波形を作る、
@@ -345,6 +350,11 @@ void sampling_editor::record_pane(bridge &br)
 	if (xgui::file_dialogs()) {
 		if (ImGui::Button(UI_TEXT(smp_wav, "Import WAV...")))
 			xgui::ask_open_wav();
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(smp_syx_load, "Load SysEx...")))
+			xgui::ask_open_wav();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("%s", UI_TEXT(smp_syx_tip, "Loads a .syx of sampling data (Yamaha model 0x68: one saved here with Save all as SysEx, or bulk dumps read from a real MU2000). Waves and sample tables are written straight into memory, so it takes no time. A file that starts by erasing everything replaces the samples and sample voices here."));
 	} else {
 		ImGui::SetNextItemWidth(-fs * 6);
 		ImGui::InputTextWithHint("##path", UI_TEXT(smp_wav_path, "WAV file path"), m_path, sizeof(m_path));
@@ -354,6 +364,8 @@ void sampling_editor::record_pane(bridge &br)
 			std::vector<u8> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 			if (bytes.empty())
 				m_note = UI_TEXT(smp_wav_fail, "Could not read the WAV file");
+			else if (bytes[0] == 0xf0)
+				load_sysex(bytes, br);
 			else
 				import_wav(bytes, br);
 		}
@@ -393,12 +405,68 @@ void sampling_editor::import_wav(const std::vector<u8> &bytes, bridge &br)
 	});
 }
 
+// サンプリングの SysEx（機種 0x68）を読み込む。「全部を消す」が入っていて、いまサンプルがあるなら先に確かめる
+void sampling_editor::load_sysex(const std::vector<u8> &bytes, bridge &br)
+{
+	bool any = false, wipes = false;
+	for (size_t i = 0; i + 6 < bytes.size(); i++)
+		if (bytes[i] == 0xf0 && bytes[i + 1] == 0x43 && bytes[i + 3] == 0x68) {
+			any = true;
+			wipes = wipes || ((bytes[i + 2] & 0xf0) == 0x10 && bytes[i + 4] == 0 && bytes[i + 5] == 0 && bytes[i + 6] == 0x7f);
+		}
+	if (!any) {
+		m_note = UI_TEXT(smp_syx_none, "No sampling SysEx (model 0x68) in this file");
+		return;
+	}
+	m_syx = std::make_shared<std::vector<u8>>(bytes);
+	m_syx_at = -1;
+	if (wipes && !m_view.samples.empty())
+		m_syx_confirm = true;                   // 窓は samples_pane で出す
+	else
+		apply_sysex(br);
+}
+
+// 読み込みを進める。1 度目: 「全部を消す」があれば、それだけ MIDI で送って firmware に消させ、少し後でもう 1 度呼ぶ。
+// 2 度目（か、消す通が無いとき）: 波形と表を直に書く（mu2000::sampling_load_sysex）
+void sampling_editor::apply_sysex(bridge &br)
+{
+	if (!m_syx)
+		return;
+	std::shared_ptr<std::vector<u8>> bytes = m_syx;
+	if (m_syx_at < 0) {
+		bool wipes = false;
+		for (size_t i = 0; i + 6 < bytes->size() && !wipes; i++)
+			wipes = (*bytes)[i] == 0xf0 && (*bytes)[i + 1] == 0x43 && ((*bytes)[i + 2] & 0xf0) == 0x10 && (*bytes)[i + 3] == 0x68 &&
+			        (*bytes)[i + 4] == 0 && (*bytes)[i + 5] == 0 && (*bytes)[i + 6] == 0x7f;
+		if (wipes) {
+			br.send({ 0xf0, 0x43, 0x10, 0x68, 0x00, 0x00, 0x7f, 0x00, 0xf7 });
+			m_syx_at = ImGui::GetTime() + sp::INIT_WAIT_MS / 1000.0 + 0.3;
+			return;
+		}
+	}
+	m_syx.reset();
+	m_syx_at = -1;
+	std::string done = UI_TEXT(smp_syx_done_fmt, "Loaded the SysEx (%d messages written directly)");
+	br.post([bytes, done](mu2000 &mu) {
+		bool wipes = false;
+		std::vector<u8> rest;
+		const int n = mu.sampling_load_sysex(*bytes, wipes, rest);
+		for (u8 b : rest)
+			mu.midi_in(b, 0);
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), done.c_str(), n);
+		return std::string(buf);
+	});
+}
+
 // 外へ送る SysEx の列を、実機が受けきれる速さで少しずつ渡す（どのタブを開いていても進むように draw から呼ぶ）。
 // 速さは shingo45endo さんの M2A to SMF Converter の既定と同じ 1 秒に 2800 バイト
 void sampling_editor::pump_sysex(bridge &br)
 {
 	constexpr double BYTES_PER_S = 2800.0;
 	const double now = ImGui::GetTime();
+	if (m_syx && m_syx_at >= 0 && now >= m_syx_at)
+		apply_sysex(br);
 	if (m_sx_job && m_sx_job->done.load(std::memory_order_acquire)) {
 		std::shared_ptr<sx_job> job = std::move(m_sx_job);
 		if (job->to_file) {
@@ -524,6 +592,26 @@ void sampling_editor::samples_pane(bridge &br)
 		ImGui::SameLine();
 		if (ImGui::Button(UI_TEXT(dlg_cancel, "Cancel"), ImVec2(fs * 6, 0)))
 			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	// 読み込む SysEx が、いまのサンプルを消すとき
+	if (m_syx_confirm) {
+		ImGui::OpenPopup("###syx_confirm");
+		m_syx_confirm = false;
+	}
+	const std::string syx_title = std::string(UI_TEXT(smp_syx_load, "Load SysEx...")) + "###syx_confirm";
+	if (ImGui::BeginPopupModal(syx_title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextUnformatted(UI_TEXT(smp_syx_warn, "This file erases the samples and sample voices here and replaces them with its own. Go on?"));
+		if (ImGui::Button("OK", ImVec2(fs * 6, 0))) {
+			apply_sysex(br);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(dlg_cancel, "Cancel"), ImVec2(fs * 6, 0))) {
+			m_syx.reset();
+			ImGui::CloseCurrentPopup();
+		}
 		ImGui::EndPopup();
 	}
 }

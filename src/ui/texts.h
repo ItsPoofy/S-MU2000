@@ -595,6 +595,11 @@ struct ui_texts {
 	const char *smp_mem_tip;
 	const char *smp_mem_warn;
 	const char *smp_mem_time_fmt;
+	const char *smp_syx_load;
+	const char *smp_syx_tip;
+	const char *smp_syx_warn;
+	const char *smp_syx_done_fmt;
+	const char *smp_syx_none;
 	const char *smp_element;
 	const char *smp_element_on;
 	const char *smp_element_tip;

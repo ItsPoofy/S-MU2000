@@ -120,6 +120,7 @@ std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device = 0
 // 並びは shingo45endo さんの M2A to SMF Converter（MIT）で知り、firmware 自身のダンプと突き合わせて確かめた。
 // dram は CPU の DRAM（0x1000000 から）、pcm はサンプリング RAM。voices ならサンプルを鳴らす音色も付ける（voice_sysex）
 constexpr u32 INIT_WAIT_MS = 1000;
+constexpr u32 PCM_RESYNC_BLOCKS = 64;   // 波形の何塊ごとに書く位置を入れ直すか
 std::vector<std::vector<u8>> memory_sysex(const std::vector<u8> &dram, const std::vector<u8> &pcm, bool voices,
                                           int device = 0);
 

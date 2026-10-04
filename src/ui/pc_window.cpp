@@ -39,7 +39,7 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	// Bound here: the dialog reads the filter while it runs.
 	const std::wstring filter = card ? dlg_filter(UI_TEXT(dlg_card_or_m2a_desc, "SmartMedia image or M2A file"), "*.img;*.sm;*.m2a",
 	                                              UI_TEXT(dlg_all_files, "All files"), "*.*")
-	                          : wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio"), "*.wav",
+	                          : wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio or SysEx"), "*.wav;*.syx",
 	                                             UI_TEXT(dlg_all_files, "All files"), "*.*")
 	                                 : dlg_filter(UI_TEXT(dlg_sysex_desc, "SysEx"), "*.syx",
 	                                              UI_TEXT(dlg_all_files, "All files"), "*.*");
