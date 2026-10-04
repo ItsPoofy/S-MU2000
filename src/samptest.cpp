@@ -1232,6 +1232,46 @@ int main(int argc, char **argv)
 			      " 倍、ローファイの値 " + std::to_string(kinds.size()) + " 種類、ノイズの荒さ 白 " + std::to_string(rw) + " ピンク " +
 			      std::to_string(rp) + " ブラウン " + std::to_string(rb));
 
+			// PWM（幅のうねりをループに焼き込む）と、1 度だけ鳴る音（プラック・ドラム）。
+			// PWM は 0.76 秒のループでつなぎ目に段差が無く、頭（幅 50%）は 2 倍音が小さく、1/4 の所（幅 85%）は大きい。
+			// プラックは C3 で、頭より終わりが小さい。キックは低い方へ落ちる（終わりの方が頭より低い）。どれも長さは偶数
+			{
+				const std::vector<s16> pw = wg::pwm(0.5, 0.35, 1);
+				const auto pw_d = as_double(pw);
+				const auto sp_ = seam(pw);
+				const std::vector<double> pw_a(pw_d.begin(), pw_d.begin() + 2000), pw_b(pw_d.begin() + long(pw.size() / 4 - 1000), pw_d.begin() + long(pw.size() / 4 + 1000));
+				const std::vector<s16> pl = wg::pluck(1.5, 0.7, 0.8);
+				const auto pl_d = as_double(pl);
+				const std::vector<double> pl_a(pl_d.begin() + 2000, pl_d.begin() + 8000), pl_z(pl_d.end() - 12000, pl_d.end() - 6000);
+				const std::vector<s16> kick = wg::drum_hit(wg::drum::kick, 0.5, 0.4, 0.5);
+				const auto kk = as_double(kick);
+				auto crossings = [](const std::vector<double> &x, size_t from, size_t n) {
+					int c = 0;
+					for (size_t i = from + 1; i < from + n && i < x.size(); i++)
+						c += x[i - 1] < 0 && x[i] >= 0;
+					return c;
+				};
+				bool sizes = true, loud = true;
+				for (int d = 0; d < 6; d++) {
+					const std::vector<s16> h = wg::drum_hit(wg::drum(d), 0.5, 0.4, 0.5);
+					int peak = 0;
+					for (s16 v : h)
+						peak = std::max(peak, std::abs(int(v)));
+					sizes = sizes && h.size() >= 2000 && !(h.size() & 1) && std::abs(int(h.back())) < 400;
+					loud = loud && peak > 29000;
+				}
+				check(pw.size() == wg::LOOP_FRAMES * 8 && sp_.first <= sp_.second &&
+				      tone(pw_a, 523.25) < 0.35 * tone(pw_a, 261.63) && tone(pw_b, 523.25) > 0.5 * tone(pw_b, 261.63) &&
+				      !(pl.size() & 1) && tone(pl_a, 261.63) > 5 * tone(pl_a, 246.94) && tone(pl_a, 261.63) > 5 * tone(pl_a, 277.18) &&
+				      tone(pl_z, 261.63) < 0.5 * tone(pl_a, 261.63) && tone(pl_z, 261.63) > 0 &&
+				      crossings(kk, 0, 2205) > crossings(kk, 6615, 2205) && crossings(kk, 6615, 2205) >= 2 && sizes && loud,
+				      "作った波形: PWM・プラック・ドラム",
+				      "PWM の 2 倍音 頭 " + std::to_string(tone(pw_a, 523.25) / tone(pw_a, 261.63)) + "・1/4 " +
+				      std::to_string(tone(pw_b, 523.25) / tone(pw_b, 261.63)) + "、プラックの終わり/頭 " +
+				      std::to_string(tone(pl_z, 261.63) / tone(pl_a, 261.63)) + "、キックの波の数 頭 50ms " +
+				      std::to_string(crossings(kk, 0, 2205)) + "・150ms から " + std::to_string(crossings(kk, 6615, 2205)));
+			}
+
 			// 音色のエディット（LFO・フィルター・ピッチ EG・フィルター EG）。PGM015 にノコギリを入れて欄を変え、鍵 60 を 1.5 秒鳴らす。
 			// 50ms ごとの大きさと、頭と終わりの高さで効き目を見る
 			{
