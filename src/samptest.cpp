@@ -15,6 +15,7 @@
 #include "wav_in.h"
 #include "card_fs.h"
 #include "m2a.h"
+#include "wavegen.h"
 #include "ui/panel_macro.h"
 
 #include <cmath>
@@ -1101,6 +1102,54 @@ int main(int argc, char **argv)
 			      "エンベロープ: アタック・レベル・リリース",
 			      "頭 " + std::to_string(f1 / f0) + "、押している間 " + std::to_string(db) + " dB、離した後 " +
 			      std::to_string(a1 / h1) + "（既定 " + std::to_string(a0 / h0) + "）");
+		}
+
+		// 波形を作る（wavegen.h）。ノコギリを作ってサンプルに足し、ループを入れて PGM013 に割り当てる。
+		// 4214 サンプルに 25 周期なので、音程を直さなくても鍵 60 が C3（261.63Hz）、鍵 72 がその倍。
+		// サインには 2 倍音が無く、ノコギリにはある
+		{
+			namespace wg = smu2000::wavegen;
+			auto play = [&](const std::vector<s16> &pcm, const char *name, int key) {
+				std::string err;
+				const int n = k.mu.sampling_add(pcm.data(), pcm.size(), name, err);
+				k.mu.sampling_loop(n, true, 0);
+				sp::voice v;
+				v.name = name;
+				v.el[0].assigned = true;
+				v.el[0].sample = n;
+				k.mu.sampling_set_voice(12, v, err);
+				const u8 sel[] = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 0x0c };
+				for (u8 b : sel)
+					k.mu.midi_in(b, 0);
+				k.pump(300);
+				k.out.clear();
+				k.collect = true;
+				const u8 non[] = { 0x90, u8(key), 0x64 }, noff[] = { 0x80, u8(key), 0x40 };
+				for (u8 b : non)
+					k.mu.midi_in(b, 0);
+				k.pump(700);       // ループの長さ（0.1 秒）より長く鳴らす
+				k.collect = false;
+				for (u8 b : noff)
+					k.mu.midi_in(b, 0);
+				k.pump(400);
+				return n;
+			};
+			const std::vector<s16> saw = wg::render(wg::basic(wg::shape::saw)), sine = wg::render(wg::basic(wg::shape::sine));
+			int peak = 0;
+			for (s16 s : saw)
+				peak = std::max(peak, std::abs(int(s)));
+			const int n1 = play(saw, "saw", 60);
+			const double c3 = tone(k.out, 261.63), b2 = tone(k.out, 246.94), cs3 = tone(k.out, 277.18), saw2 = tone(k.out, 523.25);
+			play(sine, "sine", 60);
+			const double sine1 = tone(k.out, 261.63), sine2 = tone(k.out, 523.25);
+			play(saw, "saw2", 72);
+			const double c4 = tone(k.out, 523.25), c3at72 = tone(k.out, 261.63);
+			check(n1 > 0 && saw.size() == wg::LOOP_FRAMES && peak > 29000 && peak <= 32767 * 9 / 10 + 1 &&
+			      c3 > 0.003 && c3 > 20 * b2 && c3 > 20 * cs3 && saw2 > 0.2 * c3 && sine1 > 0.003 && sine2 < 0.02 * sine1 &&
+			      c4 > 20 * c3at72,
+			      "作った波形: 鍵 60 が C3、ノコギリに倍音",
+			      "ノコギリ 261.6Hz " + std::to_string(c3) + "（隣の鍵 " + std::to_string(std::max(b2, cs3)) + "）、2 倍音 " +
+			      std::to_string(saw2 / c3) + " 倍、サインの 2 倍音 " + std::to_string(sine2 / sine1) + " 倍");
 		}
 	}
 

@@ -230,6 +230,12 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 				ImGui::EndChild();
 				ImGui::EndTabItem();
 			}
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_make, "Make a wave"))) {
+				if (ImGui::BeginChild("make", ImVec2(0, 0), ImGuiChildFlags_Borders))
+					make_pane(br);
+				ImGui::EndChild();
+				ImGui::EndTabItem();
+			}
 			ImGui::EndTabBar();
 		}
 	}
@@ -1892,6 +1898,258 @@ void sampling_editor::card_pane(bridge &br)
 			ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 	}
+}
+
+// ---- 波形を作る（録る代わりに、PC で作った 1 周期の形をサンプルにする。wavegen.h）
+
+void sampling_editor::make_pane(bridge &br)
+{
+	namespace wg = smu2000::wavegen;
+	const float fs = ImGui::GetFontSize();
+	heading(UI_TEXT(smp_make, "Make a wave"));
+
+	// ---- 作り方
+	const int was_mode = m_wm_mode;
+	ImGui::RadioButton(UI_TEXT(smp_make_basic, "Basic shape"), &m_wm_mode, 0);
+	ImGui::SameLine();
+	ImGui::RadioButton(UI_TEXT(smp_make_bars, "Harmonics"), &m_wm_mode, 1);
+	ImGui::SameLine();
+	ImGui::RadioButton(UI_TEXT(smp_make_draw, "Draw"), &m_wm_mode, 2);
+	ImGui::SameLine();
+	ImGui::RadioButton(UI_TEXT(smp_make_noise, "Noise"), &m_wm_mode, 3);
+	if (was_mode != m_wm_mode)
+		m_wm_stale = true;
+
+	const float w = ImGui::GetContentRegionAvail().x;
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	auto frame = [&](const ImVec2 &p, const ImVec2 &sz) {
+		dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255), 4.0f);
+		dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + sz.x + 1, p.y + sz.y + 1), IM_COL32(110, 125, 150, 255), 4.0f, 0, 1.5f);
+	};
+
+	if (m_wm_mode == 0) {
+		// 基本の波形
+		const char *names[4] = { UI_TEXT(smp_make_sine, "Sine"), UI_TEXT(smp_make_saw, "Sawtooth"),
+		                         UI_TEXT(smp_make_square, "Square"), UI_TEXT(smp_make_tri, "Triangle") };
+		for (int i = 0; i < 4; i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::RadioButton(names[i], m_wm_shape == i)) {
+				m_wm_shape = i;
+				m_wm_stale = true;
+			}
+		}
+		if (m_wm_shape == int(wg::shape::square)) {
+			ImGui::SetNextItemWidth(fs * 16);
+			if (ImGui::SliderFloat(UI_TEXT(smp_make_pulse, "Pulse width"), &m_wm_pulse, 0.05f, 0.95f, "%.2f"))
+				m_wm_stale = true;
+		}
+	} else if (m_wm_mode == 1) {
+		// 倍音を足す: 1-32 倍音の棒。縦に引いて高さを決める（棒の上をなぞれば続けて描ける）
+		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_one, "Fundamental only"))) {
+			std::fill(std::begin(m_wm_bars), std::end(m_wm_bars), 0.0f);
+			m_wm_bars[0] = 1.0f;
+			m_wm_stale = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_all, "1/n (saw-like)"))) {
+			for (int h = 0; h < 32; h++)
+				m_wm_bars[h] = 1.0f / float(h + 1);
+			m_wm_stale = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(smp_make_bars_odd, "Odd only (square-like)"))) {
+			for (int h = 0; h < 32; h++)
+				m_wm_bars[h] = (h & 1) ? 0.0f : 1.0f / float(h + 1);
+			m_wm_stale = true;
+		}
+		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(w, fs * 7);
+		ImGui::InvisibleButton("##bars", sz);
+		frame(p, sz);
+		const float bw = sz.x / 32.0f;
+		if (ImGui::IsItemActive()) {
+			const ImVec2 m = ImGui::GetIO().MousePos;
+			const int h = std::clamp(int((m.x - p.x) / bw), 0, 31);
+			m_wm_bars[h] = std::clamp(1.0f - (m.y - p.y) / sz.y, 0.0f, 1.0f);
+			m_wm_stale = true;
+		}
+		for (int h = 0; h < 32; h++) {
+			const float x0 = p.x + bw * float(h) + 1.0f, x1 = p.x + bw * float(h + 1) - 1.0f;
+			dl->AddRectFilled(ImVec2(x0, p.y + sz.y * (1.0f - m_wm_bars[h])), ImVec2(x1, p.y + sz.y),
+			                  IM_COL32(110, 200, 255, 255));
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_make_bars_tip, "Drag up and down to set the level of harmonics 1 to 32 (left is the fundamental)"));
+	} else if (m_wm_mode == 2) {
+		// 手描き: 1 周期ぶんをマウスでなぞる。前の点とのあいだも埋める
+		if (!m_wm_draw_init) {
+			for (int i = 0; i < 256; i++)
+				m_wm_draw[i] = float(std::sin(2 * wg::PI * (double(i) + 0.5) / 256.0));
+			m_wm_draw_init = true;
+		}
+		if (ImGui::SmallButton(UI_TEXT(smp_make_draw_sine, "Start from a sine"))) {
+			for (int i = 0; i < 256; i++)
+				m_wm_draw[i] = float(std::sin(2 * wg::PI * (double(i) + 0.5) / 256.0));
+			m_wm_stale = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(smp_make_draw_flat, "Flat"))) {
+			std::fill(std::begin(m_wm_draw), std::end(m_wm_draw), 0.0f);
+			m_wm_stale = true;
+		}
+		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(w, fs * 9);
+		ImGui::InvisibleButton("##draw", sz);
+		frame(p, sz);
+		dl->AddLine(ImVec2(p.x, p.y + sz.y * 0.5f), ImVec2(p.x + sz.x, p.y + sz.y * 0.5f), IM_COL32(80, 90, 110, 255));
+		if (ImGui::IsItemActive()) {
+			const ImVec2 m = ImGui::GetIO().MousePos;
+			const int i = std::clamp(int((m.x - p.x) / sz.x * 256.0f), 0, 255);
+			const float v = std::clamp(1.0f - 2.0f * (m.y - p.y) / sz.y, -1.0f, 1.0f);
+			const int from = m_wm_draw_last < 0 ? i : m_wm_draw_last;
+			const float v0 = m_wm_draw[from];
+			const int lo = std::min(from, i), hi = std::max(from, i);
+			for (int k = lo; k <= hi; k++)
+				m_wm_draw[k] = hi == lo ? v : (k == i ? v : v0 + (v - v0) * float(k - from) / float(i - from));
+			m_wm_draw_last = i;
+			m_wm_stale = true;
+		} else {
+			m_wm_draw_last = -1;
+		}
+		for (int i = 0; i + 1 < 256; i++)
+			dl->AddLine(ImVec2(p.x + sz.x * (float(i) + 0.5f) / 256.0f, p.y + sz.y * 0.5f * (1.0f - m_wm_draw[i])),
+			            ImVec2(p.x + sz.x * (float(i) + 1.5f) / 256.0f, p.y + sz.y * 0.5f * (1.0f - m_wm_draw[i + 1])),
+			            IM_COL32(255, 210, 90, 255), 1.5f);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_make_draw_tip, "Drag to draw one cycle. What plays is this shape rebuilt from its first harmonics (below), so sharp corners are rounded"));
+	} else {
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_noise_note, "White noise, one second, looped. It has no pitch, so every key plays it faster or slower."));
+	}
+
+	// ---- 共通: 足す倍音の上限と大きさ
+	if (m_wm_mode != 3) {
+		ImGui::SetNextItemWidth(fs * 16);
+		if (ImGui::SliderInt(UI_TEXT(smp_make_max_h, "Highest harmonic"), &m_wm_max_h, 1, wg::HARMONICS))
+			m_wm_stale = true;
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_make_max_h_tip, "Harmonics above this are left out. Fewer gives a rounder sound and less aliasing on high keys"));
+	}
+	ImGui::SetNextItemWidth(fs * 16);
+	if (ImGui::SliderInt(UI_TEXT(smp_make_level, "Peak level (%)"), &m_wm_level, 1, 100))
+		m_wm_stale = true;
+
+	// ---- 作り直す
+	if (m_wm_stale) {
+		m_wm_stale = false;
+		if (m_wm_mode == 3) {
+			m_wm_spec = wg::spectrum{};
+			m_wm_cycle.clear();
+			m_wm_pcm = wg::noise(44100, m_wm_level / 100.0);
+		} else {
+			m_wm_spec = m_wm_mode == 0 ? wg::basic(wg::shape(m_wm_shape), m_wm_pulse)
+			          : m_wm_mode == 1 ? wg::from_bars(m_wm_bars, 32)
+			                           : wg::from_cycle(m_wm_draw, 256);
+			m_wm_cycle = wg::cycle(m_wm_spec, 256, m_wm_max_h);
+			m_wm_pcm = wg::render(m_wm_spec, m_wm_max_h, m_wm_level / 100.0);
+		}
+	}
+
+	// ---- できた形（1 周期）と倍音の分布
+	if (m_wm_mode != 3) {
+		const float half = (w - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(half, fs * 6);
+		ImGui::Dummy(sz);
+		frame(p, sz);
+		dl->AddLine(ImVec2(p.x, p.y + sz.y * 0.5f), ImVec2(p.x + sz.x, p.y + sz.y * 0.5f), IM_COL32(80, 90, 110, 255));
+		float peak = 1e-6f;
+		for (float v : m_wm_cycle)
+			peak = std::max(peak, std::fabs(v));
+		for (size_t i = 0; i + 1 < m_wm_cycle.size(); i++)
+			dl->AddLine(ImVec2(p.x + sz.x * float(i) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i] / peak)),
+			            ImVec2(p.x + sz.x * float(i + 1) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i + 1] / peak)),
+			            IM_COL32(110, 200, 255, 255), 1.5f);
+		ImGui::SameLine();
+		const ImVec2 q = ImGui::GetCursorScreenPos(), sq(half, fs * 6);
+		ImGui::Dummy(sq);
+		frame(q, sq);
+		double top = 1e-9;
+		for (int h = 1; h <= wg::HARMONICS; h++)
+			top = std::max(top, m_wm_spec.mag(h));
+		const float bw = sq.x / float(wg::HARMONICS);
+		for (int h = 1; h <= wg::HARMONICS; h++) {
+			// 高さは dB（-60dB を下の端に）
+			const double db = 20 * std::log10(std::max(m_wm_spec.mag(h) / top, 1e-6));
+			const float t = float(std::clamp(1.0 + db / 60.0, 0.0, 1.0));
+			if (t <= 0)
+				continue;
+			dl->AddRectFilled(ImVec2(q.x + bw * float(h - 1) + 0.5f, q.y + sq.y * (1.0f - t)),
+			                  ImVec2(q.x + bw * float(h) - 0.5f, q.y + sq.y),
+			                  h <= m_wm_max_h ? IM_COL32(110, 200, 255, 255) : IM_COL32(70, 80, 95, 255));
+		}
+		ImGui::TextDisabled("%s", UI_TEXT(smp_make_view_note, "Left: one cycle as it will play. Right: harmonics 1-64 (dB; grey ones are left out)."));
+	}
+
+	// ---- 試聴と登録
+	const bool playing = m_view.preview_number == -1;
+	ImGui::BeginDisabled(m_wm_pcm.empty());
+	if (!playing) {
+		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
+			std::vector<s16> pcm = m_wm_pcm;
+			br.post([pcm](mu2000 &mu) mutable {
+				mu.preview_pcm(std::move(pcm), 0);   // 頭へ戻ってくり返す（止めるまで）
+				return std::string();
+			});
+		}
+	} else if (ImGui::Button(UI_TEXT(smp_play_stop, "Stop playing"))) {
+		br.post([](mu2000 &mu) {
+			mu.preview_stop();
+			return std::string();
+		});
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_play_tip, "Plays the wave on the PC at the pitch of key 60 (C3), looping, without adding it to the MU2000"));
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_name, "Name"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 8);
+	ImGui::InputText("##wmname", m_wm_name, sizeof(m_wm_name));
+	ImGui::SameLine();
+	if (ImGui::Button(UI_TEXT(smp_make_add, "Add as a sample"))) {
+		std::vector<s16> pcm = m_wm_pcm;
+		const std::string name = m_wm_name;
+		const bool assign = m_wm_assign;
+		const int slot = m_bank * 128 + (m_pgm - 1);
+		const std::string done = UI_TEXT(smp_make_added_fmt, "Added sample %03d (%s), looped");
+		br.post([pcm, name, assign, slot, done](mu2000 &mu) {
+			std::string err;
+			const int n = mu.sampling_add(pcm.data(), pcm.size(), name, err);
+			if (!n)
+				return err;
+			mu.sampling_loop(n, true, 0);      // 全体をくり返す
+			if (assign) {
+				// 割り当ての欄の音色の要素 1 に入れる（ほかの値はそのまま）
+				sp::voice v;
+				mu.sampling_voice(slot, v);
+				v.el[0].on = true;
+				v.el[0].assigned = true;
+				v.el[0].sample = n;
+				v.el[0].rom_wave = -1;
+				mu.sampling_set_voice(slot, v, err);
+			}
+			char buf[120];
+			std::snprintf(buf, sizeof(buf), done.c_str(), n, name.c_str());
+			return std::string(buf);
+		});
+		m_dirty = false;       // 割り当ての欄を、書き換わった音色で読み直す
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_add_tip, "Writes the wave into the sampling RAM as a new sample with the loop on. At key 60 it plays C3, so it needs no pitch correction. It uses about 0.1 second of the sampling memory."));
+	char abuf[96];
+	std::snprintf(abuf, sizeof(abuf), UI_TEXT(smp_make_assign_fmt, "Also put it in element 1 of Bank# %d, program %d"), m_bank, m_pgm);
+	ImGui::Checkbox(abuf, &m_wm_assign);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_make_assign_tip, "The voice chosen under Voice assignment on the Sample tab. Play it with bank MSB 16; level, pan, envelope and the other elements are set there."));
 }
 
 } // namespace ui

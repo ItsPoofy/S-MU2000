@@ -18,6 +18,7 @@
 #include "xg_ui.h"
 #include "card_fs.h"
 #include "m2a.h"
+#include "wavegen.h"
 
 #include <array>
 #include <atomic>
@@ -57,8 +58,27 @@ private:
 	void card_refresh(bridge &br);
 	void card_open_file(bridge &br, int index);
 	void card_select_wave(int index);
+	void make_pane(bridge &br);
 
 	bridge::sampling_view m_view;
+
+	// ---- 波形を作る（wavegen.h）。作り方ごとの値と、そこから作った倍音・1 周期の形・サンプルにする波形。
+	// 値を触ったら m_wm_stale を立て、描く前に作り直す
+	int m_wm_mode = 0;                 // 0 = 基本の波形、1 = 倍音を足す、2 = 手描き、3 = ノイズ
+	int m_wm_shape = 1;                // smu2000::wavegen::shape
+	float m_wm_pulse = 0.5f;           // 矩形の上側の割合
+	float m_wm_bars[32] = { 1.0f };    // 倍音 1-32 の強さ
+	float m_wm_draw[256] = {};         // 手描きの 1 周期（-1〜1）
+	bool m_wm_draw_init = false;
+	int m_wm_draw_last = -1;           // 描いている途中の、前の点
+	int m_wm_max_h = 64;               // 足す倍音の上限
+	int m_wm_level = 90;               // いちばん大きい所（%）
+	char m_wm_name[9] = "wave";
+	bool m_wm_assign = true;           // 登録したら、割り当ての欄の音色の要素 1 に入れる
+	bool m_wm_stale = true;
+	smu2000::wavegen::spectrum m_wm_spec;
+	std::vector<float> m_wm_cycle;     // 見せる用の 1 周期
+	std::vector<s16> m_wm_pcm;         // サンプルにする波形
 
 	// ---- カード（SmartMedia の中身を、本体に読み込まずに見る。card_fs.h・m2a.h）
 	// 中身は差しているカード（m_card_src 0）か、開いた画像ファイル（1）。差しているカードを読むのは
