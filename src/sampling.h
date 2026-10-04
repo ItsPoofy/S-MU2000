@@ -88,6 +88,14 @@ enum class source { ad1, ad2, both };
 // つなぎ目のまわりの形がいちばん似ているもの。loop_from は偶数。見つからなければ false（src/sampling.cpp）
 bool find_loop(const std::vector<s16> &pcm, u32 from, u32 to, u32 min_len, u32 &loop_from, u32 &loop_to);
 
+// サンプル音色を書く SysEx（機種 0x68 のパラメータチェンジ。doc/sampling-ram.md）。
+//   F0 43 1n 68 <AH> <AM> <AL> <値> F7
+//   AH = 0x40 + 0x10 × Bank# + 区画（0 = 頭、1-4 = 要素 1-4）、AM = PGM − 1
+//   頭:   AL 01 = 使う要素の印（+0）、02 = +1、03-0A = 名前 8 文字
+//   要素: AL 00 = 波形（2 バイト。要素の [2] [3]）、02-51 = 要素の [4]-[83]
+// rec は音色の記録 350 バイト。slot はそれを書く先（0-255）。1 通ずつ返す
+std::vector<std::vector<u8>> voice_sysex(int slot, const u8 *rec, int device = 0);
+
 } // namespace smu2000::sampling
 
 #endif

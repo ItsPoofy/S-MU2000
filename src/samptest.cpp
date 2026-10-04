@@ -620,6 +620,43 @@ int main(int argc, char **argv)
 			check(with.first && without.first && with.second > 0.003 && without.second < 0.0001,
 			      "内蔵ウェーブを割り当てると鳴る",
 			      "組 16 で rms " + std::to_string(with.second) + "、組無しで " + std::to_string(without.second));
+
+			// サンプル音色を書く SysEx（機種 0x68）。PGM010 に組 16 と音程・エンベロープを書き、その記録を
+			// SysEx にして PGM021 へ送ると、firmware が同じ記録を作る（要素の [0] は firmware が付ける印なので除く）
+			sp::voice w;
+			w.name = "SxCopy";
+			w.rom_wave = 16;
+			w.coarse = 7;
+			w.attack = 40;
+			w.release = 20;
+			w.pan = 3;
+			std::string e;
+			k.mu.sampling_set_voice(9, w, e);
+			const u32 v9 = sp::TAB_VOICE + sp::VOICE_SIZE * 9 - 0x1000000, v20 = sp::TAB_VOICE + sp::VOICE_SIZE * 20 - 0x1000000;
+			const std::vector<u8> rec9(k.mu.dram().begin() + v9, k.mu.dram().begin() + v9 + sp::VOICE_SIZE);
+			const auto msgs = sp::voice_sysex(20, rec9.data());
+			size_t bytes = 0;
+			for (const auto &m : msgs) {
+				for (u8 b : m)
+					k.mu.midi_in(b, 0);
+				bytes += m.size();
+				k.pump(5);
+			}
+			k.pump(300);
+			int differ = 0;
+			for (u32 i = 0; i < sp::VOICE_SIZE; i++) {
+				const bool elem0 = i >= 12 && i < 12 + 4 * 84 && (i - 12) % 84 == 0;
+				if (!elem0 && k.mu.dram()[v20 + i] != rec9[i]) {
+					if (!differ)
+						std::printf("    最初の違い +%x: %02x → %02x\n", i, rec9[i], k.mu.dram()[v20 + i]);
+					differ++;
+				}
+			}
+			sp::voice back;
+			k.mu.sampling_voice(20, back);
+			check(differ == 0 && back.name == "SxCopy" && back.rom_wave == 16 && back.coarse == 7,
+			      "サンプル音色の SysEx で写す",
+			      std::to_string(msgs.size()) + " 通 " + std::to_string(bytes) + " バイト、違う " + std::to_string(differ) + " バイト");
 		}
 
 		// 窓の道（bridge::post → driver::sampling_tick）と WAV の取り込み。48kHz・2ch の WAV
