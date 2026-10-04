@@ -282,6 +282,176 @@ inline std::vector<partial> unison(const spectrum &s, int voices, int step, int 
 }
 inline double unison_cents(int step) { return 1200.0 * std::log2(1.0 + double(step) / (CYCLES * UNISON_MULT)); }
 
+// PWM（パルス幅のうねり）をループに焼き込む。矩形の上側の割合が center ± depth のあいだを、ループ（0.76 秒）の中で
+// sweeps 回ゆれる。倍音ごとに足すので折り返しが出ず、幅もループの頭と終わりで同じ所に戻る
+inline std::vector<s16> pwm(double center, double depth, int sweeps, int max_h = HARMONICS, double level = 0.9)
+{
+	const u32 frames = LOOP_FRAMES * UNISON_MULT;
+	const double cycles = double(CYCLES * UNISON_MULT), f0 = 44100.0 * cycles / frames;
+	std::vector<double> x(frames, 0.0);
+	for (u32 i = 0; i < frames; i++) {
+		const double t = double(i) / frames;
+		const double wd = std::clamp(center + depth * std::sin(2 * PI * sweeps * t), 0.03, 0.97);
+		const double th = 2 * PI * cycles * t;
+		double v = 0;
+		// 位相 0〜2πw が +1、残りが -1 の矩形: a_h = 2 sin(2πhw)/(πh)、b_h = 2 (1 − cos(2πhw))/(πh)
+		for (int h = 1; h <= std::min(max_h, HARMONICS) && h * f0 < 20000.0; h++)
+			v += (std::sin(2 * PI * h * wd) * std::cos(h * th) + (1.0 - std::cos(2 * PI * h * wd)) * std::sin(h * th)) / h;
+		x[i] = v;
+	}
+	double peak = 1e-12;
+	for (double v : x)
+		peak = std::max(peak, std::fabs(v));
+	std::vector<s16> out(frames);
+	for (u32 i = 0; i < frames; i++)
+		out[i] = s16(std::lround(x[i] / peak * std::clamp(level, 0.0, 1.0) * 32767.0));
+	return out;
+}
+
+// ---- 1 度だけ鳴って消える音（ループを入れずに登録する）
+namespace detail {
+inline void normalize(std::vector<double> &x, std::vector<s16> &out, double level)
+{
+	double peak = 1e-12;
+	for (double v : x)
+		peak = std::max(peak, std::fabs(v));
+	out.resize(x.size());
+	// 終わりの 5ms は 0 へ寄せる（切れ目のプチを消す）
+	const size_t fade = std::min<size_t>(220, x.size());
+	for (size_t i = 0; i < x.size(); i++) {
+		const double f = i + fade >= x.size() ? double(x.size() - 1 - i) / double(fade) : 1.0;
+		out[i] = s16(std::lround(x[i] / peak * f * std::clamp(level, 0.0, 1.0) * 32767.0));
+	}
+}
+struct rng {
+	u32 r;
+	explicit rng(u32 seed) : r(seed ? seed : 1) {}
+	double next() { r ^= r << 13; r ^= r >> 17; r ^= r << 5; return double(r & 0xffff) / 32767.5 - 1.0; }
+};
+} // namespace detail
+
+// はじいた弦（Karplus–Strong）。ノイズを 1 周期ぶん詰めた遅延をくり返し、回るたびに少し丸める。
+// 遅延の長さは 168.56 サンプル（鍵 60 で C3）。sustain は 0〜1（大きいほど長く鳴る）、bright は 0〜1（はじく強さ・明るさ）
+inline std::vector<s16> pluck(double seconds, double sustain, double bright, u32 seed = 1, double level = 0.9)
+{
+	const u32 frames = u32(std::clamp(seconds, 0.1, 4.0) * 44100.0) & ~1u;
+	const double period = double(LOOP_FRAMES) / CYCLES;            // 168.56
+	const int n = int(period);
+	const double frac = period - n;
+	const double g = 0.985 + 0.0148 * std::clamp(sustain, 0.0, 1.0);
+	std::vector<double> x(frames, 0.0);
+	detail::rng r(seed);
+	// 始めのノイズは、bright が低いほど丸める
+	double lp = 0;
+	const double a = 0.05 + 0.95 * std::clamp(bright, 0.0, 1.0);
+	for (int i = 0; i <= n + 1 && u32(i) < frames; i++) {
+		lp += a * (r.next() - lp);
+		x[size_t(i)] = lp;
+	}
+	for (u32 i = u32(n) + 2; i < frames; i++)
+		x[i] = g * ((1.0 - frac) * x[i - u32(n)] + frac * x[i - u32(n) - 1]);
+	std::vector<s16> out;
+	detail::normalize(x, out, level);
+	return out;
+}
+
+// ドラム（アナログのリズムマシンふう）。tune は高さ（0〜1）、decay は長さ（0〜1）、tone は音色（0〜1。種類ごとに意味が違う）
+enum class drum { kick, snare, tom, hat, clap, cowbell };
+
+inline std::vector<s16> drum_hit(drum k, double tune, double decay, double tone, double level = 0.9)
+{
+	tune = std::clamp(tune, 0.0, 1.0);
+	decay = std::clamp(decay, 0.0, 1.0);
+	tone = std::clamp(tone, 0.0, 1.0);
+	const double R = 44100.0;
+	detail::rng r(12345);
+	std::vector<double> x;
+	auto alloc = [&](double sec) { x.assign(size_t(sec * R) & ~size_t(1), 0.0); };
+	switch (k) {
+	case drum::kick:
+	case drum::tom: {
+		// サインの高さを上から落とす。tone はアタックのクリック
+		const double f1 = k == drum::kick ? 40.0 + 40.0 * tune : 90.0 + 160.0 * tune;
+		const double f0 = f1 * (k == drum::kick ? 4.0 : 1.8);
+		const double ta = (k == drum::kick ? 0.12 : 0.10) + 0.5 * decay, tp = k == drum::kick ? 0.03 : 0.05;
+		alloc(std::min(2.5, ta * 6));
+		double ph = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			const double t = double(i) / R;
+			ph += 2 * PI * (f1 + (f0 - f1) * std::exp(-t / tp)) / R;
+			x[i] = std::sin(ph) * std::exp(-t / ta) + tone * 0.5 * r.next() * std::exp(-t / 0.003);
+		}
+		break;
+	}
+	case drum::snare: {
+		// 胴の 2 つのサインと、高い方を残したノイズ。tone はノイズ（響き線）の割合
+		const double f = 150.0 + 120.0 * tune, ta = 0.06 + 0.12 * decay, tn = 0.08 + 0.3 * decay;
+		alloc(std::min(2.0, tn * 6));
+		double hp = 0, prev = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			const double t = double(i) / R, w = r.next();
+			hp = 0.7 * (hp + w - prev);
+			prev = w;
+			x[i] = (1.0 - 0.7 * tone) * (std::sin(2 * PI * f * t) + 0.5 * std::sin(2 * PI * f * 1.59 * t)) * std::exp(-t / ta) +
+			       (0.3 + 0.7 * tone) * hp * std::exp(-t / tn);
+		}
+		break;
+	}
+	case drum::hat:
+	case drum::cowbell: {
+		// 倍音にならない高さの矩形を重ねる（ハットは 6 つ、カウベルは 2 つ）。ハットは高い方だけ残す
+		static constexpr double HAT[6] = { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
+		const double mul = k == drum::hat ? 1.0 + 2.0 * tune : 0.8 + 0.6 * tune;
+		const double ta = k == drum::hat ? 0.02 + 0.5 * decay * decay : 0.05 + 0.4 * decay;
+		alloc(std::min(2.0, ta * 6 + 0.05));
+		double hp = 0, prev = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			const double t = double(i) / R;
+			double v = 0;
+			if (k == drum::hat) {
+				for (double f : HAT)
+					v += std::fmod(f * mul * 2.0 * t, 1.0) < 0.5 ? 1.0 : -1.0;
+				v = v / 6.0 + tone * 0.6 * r.next();
+				hp = 0.85 * (hp + v - prev);
+				prev = v;
+				v = hp;
+			} else {
+				v = (std::fmod(540.0 * mul * t, 1.0) < 0.5 ? 1.0 : -1.0) + (std::fmod(800.0 * mul * t, 1.0) < 0.5 ? 1.0 : -1.0);
+				hp += (0.15 + 0.6 * tone) * (v - hp);          // tone が低いほど丸い
+				v = hp;
+			}
+			x[i] = v * std::exp(-t / ta);
+		}
+		break;
+	}
+	case drum::clap: {
+		// ノイズの短い山を 3 つ続けてから、尾を引く。tune は帯の高さ、tone は山の間隔
+		const double fc = 800.0 + 1600.0 * tune, gap = 0.008 + 0.012 * tone, tn = 0.05 + 0.35 * decay;
+		alloc(std::min(2.0, tn * 6 + 0.1));
+		// 帯を通すフィルタ（2 次の共振）
+		const double w0 = 2 * PI * fc / R, q = 2.0, alpha = std::sin(w0) / (2 * q);
+		const double b0 = alpha / (1 + alpha), a1 = -2 * std::cos(w0) / (1 + alpha), a2 = (1 - alpha) / (1 + alpha);
+		double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			const double t = double(i) / R, w = r.next();
+			const double y = b0 * w - b0 * x2 - a1 * y1 - a2 * y2;
+			x2 = x1; x1 = w; y2 = y1; y1 = y;
+			double env = 0;
+			for (int n = 0; n < 3; n++)
+				if (t >= n * gap && t < (n + 1) * gap)
+					env = std::exp(-(t - n * gap) / 0.004);
+			if (t >= 3 * gap)
+				env = std::exp(-(t - 3 * gap) / tn);
+			x[i] = y * env;
+		}
+		break;
+	}
+	}
+	std::vector<s16> out;
+	detail::normalize(x, out, level);
+	return out;
+}
+
 // 倍音の棒（強さだけ、位相は sin）から
 inline spectrum from_bars(const float *amp, int count)
 {

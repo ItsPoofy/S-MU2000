@@ -2177,12 +2177,13 @@ void sampling_editor::make_pane(bridge &br)
 	heading(UI_TEXT(smp_make, "Make a wave"));
 
 	// ---- 作り方（幅に入るだけ横に並べ、入らなければ折り返す）
-	enum { M_BASIC, M_BARS, M_DRAW, M_NOISE, M_FC, M_FM, M_ORGAN, M_UNISON, M_VOWEL, M_SYNC, M_FOLD, M_COUNT };
+	enum { M_BASIC, M_BARS, M_DRAW, M_NOISE, M_FC, M_FM, M_ORGAN, M_UNISON, M_VOWEL, M_SYNC, M_FOLD, M_PWM, M_PLUCK, M_DRUM, M_COUNT };
 	const char *mode_names[M_COUNT] = {
 		UI_TEXT(smp_make_basic, "Basic shape"), UI_TEXT(smp_make_bars, "Harmonics"), UI_TEXT(smp_make_draw, "Draw"),
 		UI_TEXT(smp_make_noise, "Noise"), UI_TEXT(smp_make_fc, "Famicom"), UI_TEXT(smp_make_fm, "FM"),
 		UI_TEXT(smp_make_organ, "Organ"), UI_TEXT(smp_make_unison, "Unison"), UI_TEXT(smp_make_vowel, "Voice"),
-		UI_TEXT(smp_make_sync, "Sync"), UI_TEXT(smp_make_fold, "Fold"),
+		UI_TEXT(smp_make_sync, "Sync"), UI_TEXT(smp_make_fold, "Fold"), UI_TEXT(smp_make_pwm, "PWM"),
+		UI_TEXT(smp_make_pluck, "Pluck"), UI_TEXT(smp_make_drum, "Drum"),
 	};
 	const int was_mode = m_wm_mode;
 	{
@@ -2438,6 +2439,36 @@ void sampling_editor::make_pane(bridge &br)
 	} else if (m_wm_mode == M_SYNC) {
 		slider_f(UI_TEXT(smp_make_sync_ratio, "Slave ratio"), m_wm_sync, 1.0f, 12.0f);
 		ImGui::TextWrapped("%s", UI_TEXT(smp_make_sync_note, "Hard sync: a sawtooth running this many times faster is forced back to its start once a cycle. In-between ratios give the tearing sync-lead sound."));
+	} else if (m_wm_mode == M_PWM) {
+		slider_f(UI_TEXT(smp_make_pwm_center, "Pulse width"), m_wm_pwm_center, 0.1f, 0.9f);
+		slider_f(UI_TEXT(smp_make_pwm_depth, "Sweep depth"), m_wm_pwm_depth, 0.0f, 0.45f);
+		slider_i(UI_TEXT(smp_make_pwm_sweeps, "Sweeps per loop"), m_wm_pwm_sweeps, 1, 8);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_pwm_note, "A pulse whose width swings back and forth, baked into a 0.76 s loop (one sweep per loop is 1.3 Hz at key 60; higher keys sweep faster)."));
+	} else if (m_wm_mode == M_PLUCK) {
+		slider_f(UI_TEXT(smp_make_pluck_sustain, "Sustain"), m_wm_pluck_sustain, 0.0f, 1.0f);
+		slider_f(UI_TEXT(smp_make_pluck_bright, "Brightness"), m_wm_pluck_bright, 0.0f, 1.0f);
+		slider_f(UI_TEXT(smp_make_length, "Length (s)"), m_wm_pluck_len, 0.3f, 4.0f, "%.1f");
+		if (ImGui::SmallButton(UI_TEXT(smp_make_pluck_again, "Pluck again"))) {
+			m_wm_seed++;
+			m_wm_stale = true;
+		}
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_pluck_note, "A plucked string (Karplus-Strong): a burst of noise goes round a delay one cycle long and is softened each time. It plays once and dies away (no loop). Each pluck is a little different."));
+	} else if (m_wm_mode == M_DRUM) {
+		const char *kinds[6] = { UI_TEXT(smp_make_drum_kick, "Kick"), UI_TEXT(smp_make_drum_snare, "Snare"),
+		                         UI_TEXT(smp_make_drum_tom, "Tom"), UI_TEXT(smp_make_drum_hat, "Hi-hat"),
+		                         UI_TEXT(smp_make_drum_clap, "Clap"), UI_TEXT(smp_make_drum_cowbell, "Cowbell") };
+		for (int i = 0; i < 6; i++) {
+			if (i)
+				ImGui::SameLine();
+			if (ImGui::RadioButton(kinds[i], m_wm_drum == i)) {
+				m_wm_drum = i;
+				m_wm_stale = true;
+			}
+		}
+		slider_f(UI_TEXT(smp_make_drum_tune, "Tune"), m_wm_drum_tune, 0.0f, 1.0f);
+		slider_f(UI_TEXT(smp_make_drum_decay, "Decay"), m_wm_drum_decay, 0.0f, 1.0f);
+		slider_f(UI_TEXT(smp_make_drum_tone, "Tone"), m_wm_drum_tone, 0.0f, 1.0f);
+		ImGui::TextWrapped("%s", UI_TEXT(smp_make_drum_note, "Drum sounds in the manner of analogue rhythm machines, played once (no loop). Tone is the click of the kick and tom, the snares of the snare, the noise of the hi-hat, the gap between the claps, the brightness of the cowbell. Give each its own key range in a voice to build a kit."));
 	} else {
 		slider_f(UI_TEXT(smp_make_fold_gain, "Fold amount"), m_wm_fold_gain, 0.1f, 12.0f);
 		slider_f(UI_TEXT(smp_make_fold_bias, "Asymmetry"), m_wm_fold_bias, 0.0f, 1.57f);
@@ -2446,9 +2477,10 @@ void sampling_editor::make_pane(bridge &br)
 
 	// ---- 共通: 足す倍音の上限と大きさ（高さの無いノイズは、倍音にせずそのままサンプルにする）
 	const bool unpitched = m_wm_mode == M_NOISE || (m_wm_mode == M_FC && m_wm_fc >= 5);
-	const bool multi = m_wm_mode == M_ORGAN || m_wm_mode == M_UNISON;       // 倍音にならない成分を含む（長いループ）
+	const bool multi = m_wm_mode == M_ORGAN || m_wm_mode == M_UNISON || m_wm_mode == M_PWM;   // 倍音にならない成分を含む（長いループ）
+	const bool oneshot = m_wm_mode == M_PLUCK || m_wm_mode == M_DRUM;       // 1 度だけ鳴って消える（ループを入れない）
 	ImGui::Separator();
-	if (!unpitched && m_wm_mode != M_ORGAN) {
+	if (!unpitched && !oneshot && m_wm_mode != M_ORGAN) {
 		slider_i(UI_TEXT(smp_make_max_h, "Highest harmonic"), m_wm_max_h, 1, wg::HARMONICS);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", UI_TEXT(smp_make_max_h_tip, "Harmonics above this are left out. Fewer gives a rounder sound and less aliasing on high keys"));
@@ -2470,7 +2502,18 @@ void sampling_editor::make_pane(bridge &br)
 		m_wm_stale = false;
 		const double level = m_wm_level / 100.0;
 		m_wm_spec = wg::spectrum{};
-		if (unpitched) {
+		if (oneshot) {
+			m_wm_pcm = m_wm_mode == M_PLUCK ? wg::pluck(m_wm_pluck_len, m_wm_pluck_sustain, m_wm_pluck_bright, m_wm_seed + 1, level)
+			                                : wg::drum_hit(wg::drum(m_wm_drum), m_wm_drum_tune, m_wm_drum_decay, m_wm_drum_tone, level);
+			// 見せるのは全体。600 の桝ごとに、いちばん大きく振れた値
+			m_wm_cycle.assign(600, 0.0f);
+			for (size_t i = 0; i < m_wm_pcm.size(); i++) {
+				float &c = m_wm_cycle[i * 600 / m_wm_pcm.size()];
+				const float v = float(m_wm_pcm[i]) / 32768.0f;
+				if (std::fabs(v) > std::fabs(c))
+					c = v;
+			}
+		} else if (unpitched) {
 			m_wm_cycle.clear();
 			m_wm_pcm = m_wm_mode == M_NOISE ? wg::noise(44100, level, 1, m_wm_noise_color)
 			                                : wg::famicom_noise(m_wm_fc == 6, level, m_wm_fc == 6 ? 4 : 2);
@@ -2493,6 +2536,8 @@ void sampling_editor::make_pane(bridge &br)
 			}
 			if (m_wm_mode == M_ORGAN)
 				m_wm_pcm = wg::render_partials(wg::organ(m_wm_organ), wg::ORGAN_MULT, level);
+			else if (m_wm_mode == M_PWM)
+				m_wm_pcm = wg::pwm(m_wm_pwm_center, m_wm_pwm_depth, m_wm_pwm_sweeps, m_wm_max_h, level);
 			else if (m_wm_mode == M_UNISON)
 				m_wm_pcm = wg::render_partials(wg::unison(m_wm_spec, m_wm_uni_voices, m_wm_uni_step, m_wm_max_h), wg::UNISON_MULT, level);
 			else
@@ -2512,7 +2557,7 @@ void sampling_editor::make_pane(bridge &br)
 
 	// ---- できた形（1 周期）と倍音の分布
 	if (!unpitched) {
-		const float half = multi ? w : (w - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+		const float half = multi || oneshot ? w : (w - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
 		const ImVec2 p = ImGui::GetCursorScreenPos(), sz(half, fs * 6);
 		ImGui::Dummy(sz);
 		frame(p, sz);
@@ -2524,7 +2569,9 @@ void sampling_editor::make_pane(bridge &br)
 			dl->AddLine(ImVec2(p.x + sz.x * float(i) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i] / peak)),
 			            ImVec2(p.x + sz.x * float(i + 1) / float(m_wm_cycle.size() - 1), p.y + sz.y * 0.5f * (1.0f - 0.92f * m_wm_cycle[i + 1] / peak)),
 			            IM_COL32(110, 200, 255, 255), 1.5f);
-		if (multi) {
+		if (oneshot) {
+			ImGui::TextDisabled(UI_TEXT(smp_make_view_once_fmt, "The whole sound (%.2f s). It plays once, without a loop."), double(m_wm_pcm.size()) / sp::SAMPLE_RATE);
+		} else if (multi) {
 			ImGui::TextDisabled(UI_TEXT(smp_make_view_multi_fmt, "The first 4 cycles of the loop (%.2f s in all)."), double(m_wm_pcm.size()) / sp::SAMPLE_RATE);
 		} else {
 			ImGui::SameLine();
@@ -2580,13 +2627,16 @@ void sampling_editor::make_pane(bridge &br)
 		const std::string name = m_wm_name;
 		const bool assign = m_wm_assign;
 		const int slot = m_bank * 128 + (m_pgm - 1);
-		const std::string done = UI_TEXT(smp_make_added_fmt, "Added sample %03d (%s), looped");
-		br.post([pcm, name, assign, slot, done](mu2000 &mu) {
+		const bool loop = !oneshot;                                          // プラックとドラムは 1 度だけ鳴らす
+		const std::string done = loop ? UI_TEXT(smp_make_added_fmt, "Added sample %03d (%s), looped")
+		                              : UI_TEXT(smp_make_added_once_fmt, "Added sample %03d (%s), no loop");
+		br.post([pcm, name, assign, slot, done, loop](mu2000 &mu) {
 			std::string err;
 			const int n = mu.sampling_add(pcm.data(), pcm.size(), name, err);
 			if (!n)
 				return err;
-			mu.sampling_loop(n, true, 0);      // 全体をくり返す
+			if (loop)
+				mu.sampling_loop(n, true, 0);      // 全体をくり返す
 			if (assign) {
 				// 割り当ての欄の音色の要素 1 に入れる（ほかの値はそのまま）
 				sp::voice v;

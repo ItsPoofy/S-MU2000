@@ -82,6 +82,11 @@ private:
 	int m_wm_steps = 0, m_wm_bits = 0; // 手描き: 段数と bit 数の選び（0 = そのまま）
 	u32 m_wm_seed = 0;                 // 倍音のランダムの種
 	int m_wm_lofi_bits = 16, m_wm_lofi_hold = 1;         // ローファイ: bit 数と、同じ値を続けるサンプル数
+	float m_wm_pwm_center = 0.5f, m_wm_pwm_depth = 0.35f; // PWM: 幅の中心と、ゆれる深さ
+	int m_wm_pwm_sweeps = 1;                              // PWM: ループの中でゆれる回数
+	float m_wm_pluck_sustain = 0.7f, m_wm_pluck_bright = 0.8f, m_wm_pluck_len = 1.5f;   // プラック
+	int m_wm_drum = 0;                                    // ドラム: wavegen::drum
+	float m_wm_drum_tune = 0.5f, m_wm_drum_decay = 0.4f, m_wm_drum_tone = 0.5f;
 	float m_wm_bars[32] = { 1.0f };    // 倍音 1-32 の強さ
 	float m_wm_draw[256] = {};         // 手描きの 1 周期（-1〜1）
 	bool m_wm_draw_init = false;
