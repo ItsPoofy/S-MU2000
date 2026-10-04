@@ -83,6 +83,19 @@ struct element
 	int level1 = 127, level2 = 127;
 	// 鳴らす鍵と強さの範囲（両端を含む）
 	int key_lo = 0, key_hi = 127, vel_lo = 1, vel_hi = 127;
+	// フィルター。cutoff は切る高さ（0-127、127 で開ききる）、resonance は 0-127
+	int cutoff = 127, resonance = 8;
+	// LFO。形は 0 = ノコギリ、1 = 三角、2 = S&H。phase_init なら鍵を押すたびに同じ所から（外すとでたらめな所から）。
+	// 速さ 0-63、遅れ 0-127（60 でおよそ 1 秒）、音程・フィルター・音量にかける深さ 0-127
+	int lfo_wave = 1;
+	bool lfo_phase_init = true;
+	int lfo_speed = 31, lfo_delay = 0, lfo_pitch = 0, lfo_filter = 0, lfo_amp = 0;
+	// 音程とフィルターの EG。速さ 4 つ（アタック・ディケイ 1・ディケイ 2・リリース、0-63）と、レベル 5 つ
+	// （始め・アタックの行き先・ディケイ 1 の行き先・ディケイ 2 の行き先 = 押している間・離した後。-64〜+63、0 で動かない）。
+	// peg_depth は音程 EG の大きさ（0-127。64 以上でレベル -64 が 1 オクターブ下）
+	int peg_depth = 1;
+	int peg_rate[4] = { 63, 63, 63, 63 }, peg_level[5] = { 0, 0, 0, 0, 0 };
+	int feg_rate[4] = { 63, 63, 63, 63 }, feg_level[5] = { 0, 0, 0, 0, 0 };
 };
 
 constexpr int VOICE_ELEMENTS = 4;

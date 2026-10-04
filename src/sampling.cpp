@@ -823,6 +823,24 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 		x.release = m_dram[b + 76] & 0x3f;
 		x.level1 = m_dram[b + 77] & 0x7f;
 		x.level2 = m_dram[b + 78] & 0x7f;
+		x.cutoff = m_dram[b + 37] & 0x7f;
+		x.resonance = m_dram[b + 35] & 0x7f;
+		x.lfo_wave = std::min(int(m_dram[b + 9]), 2);
+		x.lfo_phase_init = m_dram[b + 10] != 0;
+		x.lfo_speed = m_dram[b + 11] & 0x3f;
+		x.lfo_delay = m_dram[b + 12] & 0x7f;
+		x.lfo_pitch = m_dram[b + 14] & 0x7f;
+		x.lfo_filter = m_dram[b + 15] & 0x7f;
+		x.lfo_amp = m_dram[b + 16] & 0x7f;
+		x.peg_depth = m_dram[b + 21] & 0x7f;
+		for (int i = 0; i < 4; i++) {
+			x.peg_rate[i] = m_dram[b + 26 + u32(i)] & 0x3f;
+			x.feg_rate[i] = m_dram[b + 50 + u32(i)] & 0x3f;
+		}
+		for (int i = 0; i < 5; i++) {
+			x.peg_level[i] = int(m_dram[b + 30 + u32(i)] & 0x7f) - 0x40;
+			x.feg_level[i] = int(m_dram[b + 54 + u32(i)] & 0x7f) - 0x40;
+		}
 	}
 	return true;
 }
@@ -887,6 +905,24 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		m_dram[b + 76] = u8(std::clamp(x.release, 0, 63));
 		m_dram[b + 77] = u8(std::clamp(x.level1, 0, 127));
 		m_dram[b + 78] = u8(std::clamp(x.level2, 0, 127));
+		m_dram[b + 37] = u8(std::clamp(x.cutoff, 0, 127));
+		m_dram[b + 35] = u8(std::clamp(x.resonance, 0, 127));
+		m_dram[b + 9] = u8(std::clamp(x.lfo_wave, 0, 2));
+		m_dram[b + 10] = x.lfo_phase_init ? 1 : 0;
+		m_dram[b + 11] = u8(std::clamp(x.lfo_speed, 0, 63));
+		m_dram[b + 12] = u8(std::clamp(x.lfo_delay, 0, 127));
+		m_dram[b + 14] = u8(std::clamp(x.lfo_pitch, 0, 127));
+		m_dram[b + 15] = u8(std::clamp(x.lfo_filter, 0, 127));
+		m_dram[b + 16] = u8(std::clamp(x.lfo_amp, 0, 127));
+		m_dram[b + 21] = u8(std::clamp(x.peg_depth, 0, 127));
+		for (int i = 0; i < 4; i++) {
+			m_dram[b + 26 + u32(i)] = u8(std::clamp(x.peg_rate[i], 0, 63));
+			m_dram[b + 50 + u32(i)] = u8(std::clamp(x.feg_rate[i], 0, 63));
+		}
+		for (int i = 0; i < 5; i++) {
+			m_dram[b + 30 + u32(i)] = u8(0x40 + std::clamp(x.peg_level[i], -64, 63));
+			m_dram[b + 54 + u32(i)] = u8(0x40 + std::clamp(x.feg_level[i], -64, 63));
+		}
 	}
 	return true;
 }
