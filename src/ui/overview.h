@@ -133,6 +133,14 @@ private:
 	// そのチャンネルへオールサウンドオフ）、戻すパートは覚えておいたチャンネルに戻す。
 	// 曲の XG リセットなどで受信チャンネルが書き換わったら、覚えを捨ててもう一度消す
 	void apply_mutes(xg::model &m, bridge &br);
+	// ミュートか、ほかのパートのソロで消えているか
+	bool silenced(int part) const
+	{
+		bool any_solo = false;
+		for (int p = 0; p < XG_PARTS; p++)
+			any_solo |= m_solo[p];
+		return m_mute[part] || (any_solo && !m_solo[part]);
+	}
 	// パートの欄の右端の M / S の印
 	void mute_buttons(int part, float x, float y, float w, float h);
 	void row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h);

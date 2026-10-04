@@ -217,6 +217,9 @@ public:
 	static constexpr size_t SCOPE_N = 4096;
 	void want_scope(int part) { m_scope_want.store(part, std::memory_order_relaxed); }
 	int scope_wanted() const { return m_scope_want.load(std::memory_order_relaxed); }
+	// 音源の中で消すパート（bit n = パート n）。一覧のミュート・ソロが入れる（mu2000::set_part_mute）
+	void set_part_mute(u64 mask) { m_part_mute.store(mask, std::memory_order_relaxed); }
+	u64 part_mute() const { return m_part_mute.load(std::memory_order_relaxed); }
 	// 置くもの: 0 が声の和（mu2000::scope_read）、1 + fx × 2 + out がエフェクト fx（mu2000::scope_fx）の
 	// 入口（out = 0。MEG への送り）と出口（out = 1）。all は SCOPE_SRCS × SCOPE_N 個を続けて
 	static constexpr int SCOPE_SRCS = 1 + 2 * mu2000::SCOPE_FX_N;
@@ -525,6 +528,7 @@ private:
 	snapshot              m_snap;
 	std::atomic<unsigned> m_xg_seq{0};
 	std::atomic<int>      m_scope_want{-1};
+	std::atomic<u64>      m_part_mute{0};
 	std::atomic<unsigned> m_scope_seq{0};
 	std::vector<float>    m_scope = std::vector<float>(size_t(SCOPE_SRCS) * SCOPE_N);
 	int                   m_scope_part = -1;
