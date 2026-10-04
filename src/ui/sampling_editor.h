@@ -55,6 +55,8 @@ private:
 	void assign_pane(bridge &br);
 	void card_pane(bridge &br);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
+	void load_sysex(const std::vector<u8> &bytes, bridge &br);
+	void apply_sysex(bridge &br);
 	// カード: 一覧を作り直す・選んだファイルを読む（差しているカードは音を作る糸で、画像はここで）
 	void card_refresh(bridge &br);
 	void card_open_file(bridge &br, int index);
@@ -185,6 +187,10 @@ private:
 	double m_sx_next = 0;     // 次の 1 通を送ってよい時刻（ImGui::GetTime）。実機が受けきれる速さに抑える
 	bool m_sx_wipe_wait = false;
 	bool m_mem_confirm = false;
+	// 読み込む SysEx。「全部を消す」が入っていれば、確かめてから先にそれだけ送り、m_syx_at に残りを直に書く
+	std::shared_ptr<std::vector<u8>> m_syx;
+	double m_syx_at = -1;
+	bool m_syx_confirm = false;
 	char m_voice_name[9] = {};
 	int m_level = 127, m_pan = 7;
 	int m_coarse = 0, m_fine = 0;

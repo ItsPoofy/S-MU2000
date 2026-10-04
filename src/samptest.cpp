@@ -1235,6 +1235,44 @@ int main(int argc, char **argv)
 			const double c3 = tone(m.out, 261.63), b2 = tone(m.out, 246.94);
 			check(c3 > 0.003 && c3 > 20 * b2, "まるごとの SysEx: 戻した音色が鳴る",
 			      "261.6Hz " + std::to_string(c3) + "、隣の鍵 " + std::to_string(b2));
+
+			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
+			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
+			for (u8 b : msgs[0])
+				m.mu.midi_in(b, 0);
+			m.pump(sp::INIT_WAIT_MS);
+			const bool wiped2 = m.mu.sampling_list().empty();
+			std::vector<u8> all;
+			for (const auto &x : msgs)
+				all.insert(all.end(), x.begin(), x.end());
+			bool wipes = false;
+			std::vector<u8> rest;
+			const int direct = m.mu.sampling_load_sysex(all, wipes, rest);
+			for (u8 b : rest)
+				m.mu.midi_in(b, 0);
+			const auto list_now = m.mu.sampling_list();      // 直に書いたぶんは、時間を進めなくても入っている
+			m.pump(1500);
+			int e_pcm = 0, e_tab = 0, e_voice = 0;
+			for (u32 i = 0; i < used; i++)
+				e_pcm += m.mu.sample_ram()[i] != pcm0[i];
+			for (u32 i = 0; i < 36 * 2 + 4; i++) {
+				const u32 at = i < 72 ? sp::TAB_SAMPLE - 0x1000000 + i : sp::NEXT_FREE - 0x1000000 + (i - 72);
+				e_tab += m.mu.dram()[at] != dram0[at];
+			}
+			// 鳴らすための表の +3 は、firmware が受けたときと同じ 7f になる
+			for (u32 i = 0; i < 16 * 2; i++)
+				if (i % 16 != 3)
+					e_tab += m.mu.dram()[sp::TAB_PLAY - 0x1000000 + i] != dram0[sp::TAB_PLAY - 0x1000000 + i];
+				else
+					e_tab += m.mu.dram()[sp::TAB_PLAY - 0x1000000 + i] != 0x7f;
+			for (u32 i = 0; i < sp::VOICE_SIZE; i++)
+				if (!(i >= 12 && i < 12 + 4 * 84 && (i - 12) % 84 == 0))
+					e_voice += m.mu.dram()[v5 + i] != dram0[v5 + i];
+			check(wiped2 && wipes && direct == int(msgs.size()) - 1 - 334 && list_now.size() == 2 && e_pcm == 0 && e_tab == 0 &&
+			      e_voice == 0,
+			      "SysEx を直に読み込む",
+			      "直に書いた " + std::to_string(direct) + " 通、違い 波形 " + std::to_string(e_pcm) + " 表 " + std::to_string(e_tab) +
+			      " 音色 " + std::to_string(e_voice));
 		}
 	}
 

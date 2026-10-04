@@ -684,6 +684,108 @@ int mu2000::sampling_add(const s16 *pcm, size_t frames, const std::string &name,
 	return n;
 }
 
+// 機種 0x68 の SysEx（memory_sysex の列や、実機から読み出した一括ダンプ）を読み込む。波形・サンプルの記録・名前・
+// 鳴らすための表・次に録る語は、firmware が受けたときと同じ結果を表とサンプリング RAM に直に書く（MIDI の速さで
+// 待たない）。ほかの通（音色など）は rest に集めて返すので、MIDI の入口に入れて firmware に任せること。「全部を消す」の通は処理せず、
+// あったかどうかを wipes で返す（先にそれだけ MIDI で送り、firmware が消し終えてから呼ぶこと）
+int mu2000::sampling_load_sysex(const std::vector<u8> &bytes, bool &wipes, std::vector<u8> &rest)
+{
+	int direct = 0;
+	wipes = false;
+	rest.clear();
+	u32 at = 0;                                    // 波形を書く位置（64 バイトの塊の番号）
+	auto v7 = [](const u8 *d, int n) {
+		u32 v = 0;
+		for (int i = 0; i < n; i++)
+			v = v << 7 | (d[i] & 0x7f);
+		return v;
+	};
+	for (size_t i = 0; i < bytes.size(); i++) {
+		if (bytes[i] != 0xf0)
+			continue;
+		size_t end = i + 1;
+		while (end < bytes.size() && bytes[end] != 0xf7 && bytes[end] != 0xf0)
+			end++;
+		if (end >= bytes.size() || bytes[end] != 0xf7) {
+			i = end - 1;
+			continue;
+		}
+		const u8 *m = &bytes[i];
+		const size_t len = end - i + 1;
+		i = end;
+		if (len < 9 || m[1] != 0x43 || m[3] != 0x68)
+			continue;
+		if ((m[2] & 0xf0) == 0x10 && m[4] == 0x00 && m[5] == 0x00 && m[6] == 0x7f) {
+			wipes = true;
+			continue;
+		}
+		bool done = false;
+		if ((m[2] & 0xf0) == 0x00 && len >= 11) {
+			const u32 count = u32(m[4]) << 7 | m[5];
+			const u8 ah = m[6], am = m[7], al = m[8];
+			const u8 *d = m + 9;
+			int sum = 0;
+			for (size_t k = 4; k + 1 < len; k++)
+				sum += m[k];
+			if (count + 11 == len && !(sum & 0x7f)) {
+				if (ah == 0x00 && am == 0x00 && al == 0x00 && count == 4) {
+					at = v7(d, 4);
+					done = true;
+				} else if (ah == 0x00 && am == 0x01 && count == 74) {
+					// 7 バイトの下 7bit と、その上の 1bit を集めた 1 バイトが 9 組、最後の 1 バイトは 2 バイトで
+					u8 blk[64];
+					for (int g = 0; g < 9; g++)
+						for (int k = 0; k < 7; k++)
+							blk[g * 7 + k] = u8(d[g * 8 + k] | ((d[g * 8 + 7] >> (6 - k)) & 1) << 7);
+					blk[63] = u8(d[72] | (d[73] & 1) << 7);
+					if (size_t(at) * 64 + 64 <= m_sampram.size())
+						for (u32 k = 0; k < 64; k++)
+							m_sampram[size_t(at) * 64 + (k ^ 1)] = blk[k];      // 送られてくるのは上のバイトが先
+					at++;
+					done = true;
+				} else if (ah == 0x00 && am == 0x00 && al == 0x10 && count == 5) {
+					wr32(m_dram, sp::NEXT_FREE - DRAM, (v7(d, 5) & 0xffffff) | WORD_FLAG);
+					done = true;
+				} else if ((ah & 0xf0) == 0x10 && (u32(ah & 0x03) << 7 | am) < u32(sp::MAX_SAMPLES)) {
+					const int n = int(u32(ah & 0x03) << 7 | am) + 1;
+					const u32 r = sample_rec(n), p = play_rec(n);
+					if (al == 0x00 && count == 22) {
+						const u32 pair = v7(d + 3, 2);
+						m_dram[r] = u8((n - 1) >> 8);
+						m_dram[r + 1] = u8(n - 1);
+						m_dram[r + 2] = d[0];
+						m_dram[r + 3] = d[1];
+						wr32(m_dram, r + 4, pair < u32(sp::MAX_SAMPLES) ? sp::TAB_SAMPLE + 36 * pair : 0);
+						wr32(m_dram, r + 8, 0xffffffff);
+						wr32(m_dram, r + 12, v7(d + 5, 5));
+						wr32(m_dram, r + 16, (v7(d + 10, 5) & 0xffffff) | WORD_FLAG);
+						wr32(m_dram, r + 20, (v7(d + 15, 5) & 0xffffff) | WORD_FLAG);
+						wr32(m_dram, r + 24, u32(d[21]) << 24 | u32(d[20]) << 16);
+						done = true;
+					} else if (al == 0x70 && count == 8) {
+						std::memcpy(&m_dram[r + 28], d, 8);
+						done = true;
+					} else if (al == 0x20 && count == 24) {
+						m_dram[p] = d[0];
+						m_dram[p + 1] = d[2];
+						m_dram[p + 2] = u8(d[3] & 1 ? -int(d[4]) : int(d[4]));
+						m_dram[p + 3] = d[1];                  // firmware も下 7bit だけで書く
+						wr32(m_dram, p + 4, u32(u8(d[22] << 7 | d[23])) << 24 | (v7(d + 15, 5) & 0xffffff));
+						wr32(m_dram, p + 8, u32(u8(d[20] << 7 | d[21])) << 24 | (v7(d + 10, 5) & 0xffffff));
+						wr32(m_dram, p + 12, (v7(d + 5, 5) & 0xffffff) | WORD_FLAG);
+						done = true;
+					}
+				}
+			}
+		}
+		if (done)
+			direct++;
+		else
+			rest.insert(rest.end(), m, m + len);
+	}
+	return direct;
+}
+
 bool mu2000::sampling_voice(int slot, sp::voice &out) const
 {
 	if (slot < 0 || slot >= sp::MAX_VOICES)

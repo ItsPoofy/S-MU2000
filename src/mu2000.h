@@ -335,6 +335,9 @@ public:
 	// 16bit・44.1kHz の波形をサンプリング RAM の空きへ書き、firmware の表に足す。足したサンプルの番号（1 から）か、
 	// 足せなければ 0（理由は err）
 	int sampling_add(const s16 *pcm, size_t frames, const std::string &name, std::string &err);
+	// 機種 0x68 の SysEx を読み込む。波形とサンプルの表は直に書き、ほかの通は rest に返す（midi_in へ）。直に書いた通の数を返す。
+	// 「全部を消す」の通は処理せず wipes で知らせる（src/sampling.cpp）
+	int sampling_load_sysex(const std::vector<u8> &bytes, bool &wipes, std::vector<u8> &rest);
 	// サンプル音色（slot 0-255。Bank# 0 の PGM001 が 0）
 	bool sampling_voice(int slot, smu2000::sampling::voice &out) const;
 	bool sampling_set_voice(int slot, const smu2000::sampling::voice &v, std::string &err);
