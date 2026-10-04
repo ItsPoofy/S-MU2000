@@ -324,7 +324,7 @@ inline const ui_texts &en_texts()
 		.ov_range_fmt = "%s %s (%d-%d)",
 		.ov_kb_audition_tip = "Left-click to play (lower is louder). Right-click to mark a key for voice audition, right-click again to clear it\n"
 		                      "Mark as many keys as you like for a chord; with no mark, changing voice plays nothing. Marks are per part and are not remembered\n"
-		                      "PC keyboard plays too: A W S E D F T G Y H U J K O L P ; from C (Z / X for octave)",
+		                      "PC keyboard plays too, white keys only: the A row from C3, the Q row an octave up, the number row another octave up. Hold Z to flatten or X to sharpen what you play. Shift holds the modulation wheel up. PageUp / PageDown shift the octave",
 		.ov_kb_play_tip = "Press to play (either mouse button). Lower is louder",
 		.ov_mod_tip_fmt = "Modulation (CC1)  %d\nWheel (Ctrl for coarse), or drag up/down",
 		.ov_off_no_part = "OFF (applies to no part)",
