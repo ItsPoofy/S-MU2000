@@ -44,6 +44,7 @@ constexpr int MAX_SAMPLES = 512;
 constexpr u32 TAB_VOICE = 0x1054e00;
 constexpr u32 VOICE_SIZE = 350;
 constexpr int MAX_VOICES = 256;
+constexpr int ROM_WAVE_SETS = 503;   // 内蔵の波形の組の数（xg/native_voice.h の SET_TABLE）
 constexpr u32 SAMPLE_RATE = 44100;
 // サンプリング RAM は 4MB = 0x100000 語（1 語に 16bit のサンプル 2 つ、下の 16bit が先）
 constexpr u32 RAM_WORDS = 0x100000;
@@ -68,6 +69,8 @@ struct voice
 	bool assigned = false;   // 1 つ目の要素がサンプルを鳴らすか
 	std::string name;
 	int sample = 0;          // 1 から（assigned のとき）
+	// assigned でないとき、1 つ目の要素が鳴らす内蔵の波形の組（0-502。XG の音色が使うのと同じ番号）。-1 は鳴らさない
+	int rom_wave = -1;
 	int level = 127;         // 0-127
 	int pan = 7;             // 0 = L7、7 = C、14 = R7、15 = Scaling
 	int coarse = 0;          // 半音（-24〜+24）

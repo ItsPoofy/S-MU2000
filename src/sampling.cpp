@@ -552,9 +552,13 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 		return false;
 	const u32 o = voice_rec(slot);
 	out.name = text(m_dram, o + 2, 8);
-	out.assigned = m_dram[o + 12] == 0x01;
+	// 要素の波形の欄（+14・+15）は内蔵の音色の要素と同じ。0x4000 が立っていればサンプル、
+	// 立っていなければ内蔵の波形の組（7bit が 2 つ）、3f 7f は無し
 	const u16 sv = u16(m_dram[o + 14] << 8 | m_dram[o + 15]);
+	out.assigned = (sv & 0x4000) != 0;
 	out.sample = out.assigned ? int(sv & 0x1ff) + 1 : 0;
+	const int set = (m_dram[o + 14] << 7) | (m_dram[o + 15] & 0x7f);
+	out.rom_wave = !out.assigned && set < sp::ROM_WAVE_SETS ? set : -1;
 	out.level = m_dram[o + 0x47];
 	out.pan = m_dram[o + 0x51];
 	out.coarse = int(m_dram[o + 0x1d]) - 0x40;
@@ -588,6 +592,12 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 		const u16 sv = u16(0x4000 | (v.sample - 1));
 		m_dram[o + 14] = u8(sv >> 8);
 		m_dram[o + 15] = u8(sv);
+	} else if (v.rom_wave >= 0 && v.rom_wave < sp::ROM_WAVE_SETS) {
+		// 内蔵の波形の組。+12 は firmware がサンプルのときだけ 01 にする欄で、鳴るかどうかは変えない
+		m_dram[o + 12] = 0x00;
+		m_dram[o + 13] = 0x7f;
+		m_dram[o + 14] = u8(v.rom_wave >> 7);
+		m_dram[o + 15] = u8(v.rom_wave & 0x7f);
 	} else {
 		m_dram[o + 12] = 0x00;
 		m_dram[o + 13] = 0x7f;
