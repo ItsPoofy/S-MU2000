@@ -16,6 +16,8 @@
 #pragma once
 
 #include "xg_ui.h"
+#include "card_fs.h"
+#include "m2a.h"
 
 #include <atomic>
 #include <memory>
@@ -47,9 +49,43 @@ private:
 	void samples_pane();
 	void wave_pane(bridge &br);
 	void assign_pane(bridge &br);
+	void card_pane(bridge &br);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
+	// カード: 一覧を作り直す・選んだファイルを読む（差しているカードは音を作る糸で、画像はここで）
+	void card_refresh(bridge &br);
+	void card_open_file(bridge &br, int index);
+	void card_select_wave(int index);
 
 	bridge::sampling_view m_view;
+
+	// ---- カード（SmartMedia の中身を、本体に読み込まずに見る。card_fs.h・m2a.h）
+	// 中身は差しているカード（m_card_src 0）か、開いた画像ファイル（1）。差しているカードを読むのは
+	// 音を作る糸の仕事なので、答えは card_job で届く
+	struct card_job {
+		std::atomic<bool> done{ false };
+		bool ok = false;
+		std::string err;
+		std::vector<smu2000::cardfs::entry> files;   // 一覧
+		std::vector<u8> bytes;                       // 読んだファイル
+		int index = -1;                              // 読んだファイルの番号（-1 は一覧）
+	};
+	int m_card_src = 0;
+	std::string m_card_file;                    // 開いた画像の場所
+	std::vector<u8> m_card_img;                 // 開いた画像の中身
+	char m_card_input[512] = {};                // 画像の場所（ファイルの窓が無い所で）
+	std::vector<smu2000::cardfs::entry> m_card_files;
+	std::string m_card_note;                    // 一覧や読み込みの結果
+	bool m_card_stale = true;                   // 一覧を作り直す
+	std::string m_card_seen;                    // 一覧を作ったときに差していたカード
+	int m_card_sel = -1;                        // 選んだファイル
+	std::shared_ptr<card_job> m_card_job;
+	std::vector<u8> m_m2a;                      // 選んだ M2A の中身
+	std::vector<smu2000::m2a::wave> m_m2a_waves;
+	int m_m2a_sel = -1;                         // 選んだ波形
+	std::vector<s16> m_m2a_pcm;                 // その波形（44.1kHz・モノラル）
+	std::vector<s16> m_m2a_lo, m_m2a_hi;        // 見取り図
+	std::string m_load_after_insert;            // 差してから読み込むファイルの名前
+	bool m_load_confirm = false;                // 読み込む前の確かめ
 	int m_source = 0;                  // smu2000::sampling::source
 	int m_trigger_db = 0;              // 0 = 引き金なし、ほかは -60〜-6 dBFS
 	char m_name[9] = {};               // 録るサンプルの名前（空なら firmware と同じ takeNNN）

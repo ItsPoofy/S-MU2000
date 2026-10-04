@@ -435,6 +435,14 @@ void plug_view::card_eject() { m_engine.card_eject(); }
 // (the host interface on save, and removed() when the window goes)
 void plug_view::card_tick()
 {
+	// サンプリングの窓の「カード」: 頼まれたカードを差し、差しているカードの場所を知らせる。
+	// ここはパネルを描いている途中なので、知らせの窓（alert）は出さずに記録だけ残す
+	ui::bridge &br = m_engine.panel();
+	std::string want, err;
+	if (br.take_card_request(want) && !m_engine.card_insert(want, err))
+		m_engine.log_line(("SmartMedia を差せない: " + err).c_str());
+	br.set_card_path(m_engine.card_path());
+
 	const uint64_t now = smu2000::perf_ticks() * 1000 / smu2000::perf_freq();
 	if (now - m_last_flush < 2000)
 		return;

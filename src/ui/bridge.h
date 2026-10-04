@@ -15,6 +15,7 @@
 
 #include "snapshot.h"
 #include "mu2000.h"
+#include "panel_macro.h"
 
 #include <atomic>
 #include <cstring>
@@ -303,7 +304,9 @@ public:
 		int wave_number = 0;
 		u32 wave_frames = 0;
 		u32 wave_from = 0, wave_to = 0;   // 見取り図にした範囲（サンプルの位置）
-		int preview_number = 0;           // 試聴しているサンプル（0 = していない）
+		int preview_number = 0;           // 試聴しているサンプル（0 = していない、-1 = 外の PCM）
+		bool macro_busy = false;          // ボタンのマクロ（request_macro）が回っている
+		bool card_in = false;             // 差し込み口に SmartMedia がある
 		u32 preview_pos = 0;              // 試聴している位置（サンプルの位置）
 		std::vector<s16> wave_lo, wave_hi;
 		// 拡大した部分の波形（request_detail）。区切りは DETAIL_BUCKETS 個まで（範囲が狭ければ 1 サンプルに 1 つ）
@@ -392,7 +395,62 @@ public:
 	void request_ain_list() { m_ain_list_want.store(true, std::memory_order_relaxed); }
 	bool take_ain_list_request() { return m_ain_list_want.exchange(false, std::memory_order_relaxed); }
 
+	// SmartMedia の差し込み口（サンプリングの窓の「カード」）。差しているカードの場所は gui・プラグインが
+	// 置き（空 = 差していない）、窓が「このカードを差す」と頼んだ場所を gui・プラグインが拾って差す
+	void set_card_path(const std::string &path)
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		if (m_card_path != path)
+			m_card_path = path;
+	}
+	std::string card_path() const
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		return m_card_path;
+	}
+	void request_card(const std::string &path)
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		m_card_want = path;
+		m_card_wanted = true;
+	}
+	bool take_card_request(std::string &path)
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		if (!m_card_wanted)
+			return false;
+		m_card_wanted = false;
+		path = m_card_want;
+		return true;
+	}
+
+	// 前面のボタンを決まった順に押す（panel_macro.h）。音を作る糸の driver が拾って回し、終わったら
+	// done（失敗ならその理由）を sampling_view::message に出す。回っている間は sampling_view::macro_busy
+	void request_macro(std::vector<panel_macro::step> steps, std::string done)
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		m_macro_want = std::move(steps);
+		m_macro_done = std::move(done);
+		m_macro_wanted = true;
+	}
+	bool take_macro_request(std::vector<panel_macro::step> &steps, std::string &done)
+	{
+		std::lock_guard<std::mutex> lock(m_card_lock);
+		if (!m_macro_wanted)
+			return false;
+		m_macro_wanted = false;
+		steps = std::move(m_macro_want);
+		done = std::move(m_macro_done);
+		return true;
+	}
+
 private:
+	std::vector<panel_macro::step> m_macro_want;
+	std::string m_macro_done;
+	bool m_macro_wanted = false;
+	mutable std::mutex m_card_lock;
+	std::string m_card_path, m_card_want;
+	bool m_card_wanted = false;
 	mutable std::mutex m_job_lock;
 	std::deque<sampling_job> m_jobs;
 	mutable std::mutex m_view_lock;

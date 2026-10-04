@@ -207,14 +207,27 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
+	// 右は 2 つのタブ: 選んだサンプルの波形と音色への割り当て / SmartMedia の中身（カード）
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
-		const float h = ImGui::GetContentRegionAvail().y * 0.64f;
-		if (ImGui::BeginChild("wave", ImVec2(0, h), ImGuiChildFlags_Borders))
-			wave_pane(br);
-		ImGui::EndChild();
-		if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
-			assign_pane(br);
-		ImGui::EndChild();
+		if (ImGui::BeginTabBar("right_tabs")) {
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_edit, "Sample"))) {
+				const float h = ImGui::GetContentRegionAvail().y * 0.64f;
+				if (ImGui::BeginChild("wave", ImVec2(0, h), ImGuiChildFlags_Borders))
+					wave_pane(br);
+				ImGui::EndChild();
+				if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
+					assign_pane(br);
+				ImGui::EndChild();
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_card, "Card"))) {
+				if (ImGui::BeginChild("card", ImVec2(0, 0), ImGuiChildFlags_Borders))
+					card_pane(br);
+				ImGui::EndChild();
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
 	}
 	ImGui::EndChild();
 	ImGui::End();
@@ -1282,6 +1295,356 @@ void sampling_editor::assign_pane(bridge &br)
 		ImGui::SetTooltip(UI_TEXT(smp_play_hint_fmt, "Play it with bank MSB 16, LSB %d, program %d. Changes take effect when the voice is selected again."),
 		                  m_bank, m_pgm);
 	ImGui::EndChild();
+}
+
+// ---- カード（SmartMedia の中身を見る・試聴する・差す・読み込む）
+
+namespace {
+
+// 44.1kHz に直す（直線でつなぐ）。M2A は本体が書けば 44.1kHz なので、たいてい何もしない
+std::vector<s16> to_44k(const std::vector<s16> &in, u32 rate)
+{
+	if (rate == 44100 || rate == 0 || in.empty())
+		return in;
+	const double step = double(rate) / 44100.0;
+	std::vector<s16> out(size_t(double(in.size()) / step));
+	for (size_t i = 0; i < out.size(); i++) {
+		const double at = double(i) * step;
+		const size_t a = size_t(at);
+		const double f = at - double(a);
+		const double v = in[a] * (1.0 - f) + (a + 1 < in.size() ? in[a + 1] : in[a]) * f;
+		out[i] = s16(std::lround(v));
+	}
+	return out;
+}
+
+
+} // namespace
+
+void sampling_editor::card_refresh(bridge &br)
+{
+	m_card_files.clear();
+	m_card_sel = -1;
+	m_m2a.clear();
+	m_m2a_waves.clear();
+	m_m2a_sel = -1;
+	m_m2a_pcm.clear();
+	m_card_note.clear();
+	m_card_stale = false;
+	if (m_card_src == 1) {
+		std::string err;
+		if (m_card_img.empty())
+			return;
+		if (!smu2000::cardfs::list(m_card_img, m_card_files, err))
+			m_card_note = err;
+		return;
+	}
+	// 差しているカードは音を作る糸で読む
+	auto job = std::make_shared<card_job>();
+	m_card_job = job;
+	br.post([job](mu2000 &mu) {
+		if (!mu.card_inserted())
+			job->err = "no card in the slot";
+		else
+			job->ok = smu2000::cardfs::list(mu.card().raw(), job->files, job->err);
+		job->done.store(true, std::memory_order_release);
+		return std::string();
+	});
+}
+
+void sampling_editor::card_open_file(bridge &br, int index)
+{
+	m_card_sel = index;
+	m_m2a.clear();
+	m_m2a_waves.clear();
+	m_m2a_sel = -1;
+	m_m2a_pcm.clear();
+	if (index < 0 || index >= int(m_card_files.size()))
+		return;
+	const std::string path = m_card_files[size_t(index)].path;
+	if (m_card_src == 1) {
+		std::string err;
+		if (!smu2000::cardfs::read(m_card_img, path, m_m2a, err))
+			m_card_note = err;
+		else if (!smu2000::m2a::parse(m_m2a, m_m2a_waves, err))
+			m_card_note = err;
+		return;
+	}
+	auto job = std::make_shared<card_job>();
+	job->index = index;
+	m_card_job = job;
+	br.post([job, path](mu2000 &mu) {
+		job->ok = mu.card_inserted() && smu2000::cardfs::read(mu.card().raw(), path, job->bytes, job->err);
+		job->done.store(true, std::memory_order_release);
+		return std::string();
+	});
+}
+
+void sampling_editor::card_select_wave(int index)
+{
+	m_m2a_sel = index;
+	m_m2a_pcm.clear();
+	m_m2a_lo.clear();
+	m_m2a_hi.clear();
+	if (index < 0 || index >= int(m_m2a_waves.size()))
+		return;
+	const smu2000::m2a::wave &w = m_m2a_waves[size_t(index)];
+	m_m2a_pcm = to_44k(smu2000::m2a::pcm(m_m2a, w), w.rate);
+	// 見取り図（1024 区切りの最小と最大）
+	const size_t n = m_m2a_pcm.size(), nb = std::min<size_t>(1024, n);
+	if (!nb)
+		return;
+	m_m2a_lo.assign(nb, 32767);
+	m_m2a_hi.assign(nb, -32768);
+	for (size_t i = 0; i < n; i++) {
+		const size_t b = i * nb / n;
+		m_m2a_lo[b] = std::min(m_m2a_lo[b], m_m2a_pcm[i]);
+		m_m2a_hi[b] = std::max(m_m2a_hi[b], m_m2a_pcm[i]);
+	}
+}
+
+void sampling_editor::card_pane(bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	const std::string slot = br.card_path();
+
+	// 音を作る糸からの答え
+	if (m_card_job && m_card_job->done.load(std::memory_order_acquire)) {
+		std::shared_ptr<card_job> job = std::move(m_card_job);
+		if (!job->ok) {
+			m_card_note = job->err;
+		} else if (job->index < 0) {
+			m_card_files = std::move(job->files);
+		} else if (job->index == m_card_sel) {
+			std::string err;
+			m_m2a = std::move(job->bytes);
+			if (!smu2000::m2a::parse(m_m2a, m_m2a_waves, err))
+				m_card_note = err;
+		}
+	}
+	// 開いた画像（ファイルの窓から）
+	std::string picked;
+	if (xgui::take_opened_card(picked)) {
+		std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t *>(picked.c_str())), std::ios::binary);
+		m_card_img.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+		m_card_file = picked;
+		m_card_src = 1;
+		m_card_stale = true;
+		if (m_card_img.empty())
+			m_card_note = UI_TEXT(smp_card_read_fail, "Could not read the card image");
+	}
+	// 差しているカードが変わったら（差す・抜く・読み込みで書かれた）一覧を作り直す
+	if (m_card_src == 0 && slot != m_card_seen) {
+		m_card_seen = slot;
+		m_card_stale = true;
+	}
+	// 差してから読み込む: 差し終わったら読み込みを始める
+	if (!m_load_after_insert.empty() && slot == m_card_file && m_view.card_in && !m_view.macro_busy) {
+		br.request_macro(panel_macro::load_m2a(m_load_after_insert), UI_TEXT(smp_card_loaded, "Loaded from the card"));
+		m_load_after_insert.clear();
+		m_card_src = 0;
+		m_card_stale = true;
+	}
+	if (m_card_stale && !m_card_job)
+		card_refresh(br);
+
+	heading(UI_TEXT(smp_card, "SmartMedia"));
+	// ---- どのカードを見るか
+	const bool was = m_card_src;
+	if (ImGui::RadioButton(UI_TEXT(smp_card_slot, "Card in the slot"), m_card_src == 0))
+		m_card_src = 0;
+	ImGui::SameLine();
+	ImGui::TextDisabled("%s", slot.empty() ? UI_TEXT(smp_card_none, "(none)")
+	                                        : std::filesystem::path(reinterpret_cast<const char8_t *>(slot.c_str())).filename().string().c_str());
+	if (ImGui::RadioButton(UI_TEXT(smp_card_image, "Card image file"), m_card_src == 1))
+		m_card_src = 1;
+	ImGui::SameLine();
+	if (xgui::file_dialogs()) {
+		if (ImGui::Button(UI_TEXT(smp_card_open, "Open...")))
+			xgui::ask_open_card();
+	} else {
+		ImGui::SetNextItemWidth(-fs * 6);
+		ImGui::InputTextWithHint("##cardpath", UI_TEXT(smp_card_path, "Card image path"), m_card_input, sizeof(m_card_input));
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(smp_card_open_path, "Open")) && m_card_input[0])
+			xgui::give_opened_card(m_card_input);
+	}
+	if (!m_card_file.empty()) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("%s", std::filesystem::path(reinterpret_cast<const char8_t *>(m_card_file.c_str())).filename().string().c_str());
+	}
+	if (was != bool(m_card_src))
+		m_card_stale = true;
+	ImGui::SameLine();
+	if (ImGui::SmallButton(UI_TEXT(smp_card_reload, "Reload")))
+		m_card_stale = true;
+	if (!m_card_note.empty())
+		ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "%s", m_card_note.c_str());
+
+	// ---- ファイルの一覧と、選んだ M2A の波形の一覧を並べる
+	const float list_h = std::max(fs * 6, ImGui::GetContentRegionAvail().y * 0.38f);
+	const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	if (ImGui::BeginChild("card_files", ImVec2(half, list_h), ImGuiChildFlags_Borders)) {
+		if (m_card_job && m_card_job->index < 0)
+			ImGui::TextDisabled("%s", UI_TEXT(smp_card_reading, "Reading..."));
+		else if (m_card_files.empty())
+			ImGui::TextDisabled("%s", UI_TEXT(smp_card_empty, "No files"));
+		if (!m_card_files.empty() && ImGui::BeginTable("files", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableSetupColumn(UI_TEXT(smp_card_col_file, "File"));
+			ImGui::TableSetupColumn(UI_TEXT(smp_card_col_size, "Size"), ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableHeadersRow();
+			for (size_t i = 0; i < m_card_files.size(); i++) {
+				const smu2000::cardfs::entry &e = m_card_files[i];
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				if (ImGui::Selectable(e.path.c_str(), int(i) == m_card_sel, ImGuiSelectableFlags_SpanAllColumns))
+					card_open_file(br, int(i));
+				ImGui::TableNextColumn();
+				if (e.size >= 1024 * 1024)
+					ImGui::Text("%.1f MB", e.size / 1048576.0);
+				else
+					ImGui::Text("%.0f KB", e.size / 1024.0);
+			}
+			ImGui::EndTable();
+		}
+	}
+	ImGui::EndChild();
+	ImGui::SameLine();
+	if (ImGui::BeginChild("card_waves", ImVec2(0, list_h), ImGuiChildFlags_Borders)) {
+		if (m_card_sel >= 0 && m_m2a_waves.empty())
+			ImGui::TextDisabled("%s", m_card_job ? UI_TEXT(smp_card_reading, "Reading...")
+			                                     : UI_TEXT(smp_card_no_waves, "No samples in this file"));
+		if (!m_m2a_waves.empty() && ImGui::BeginTable("waves", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableSetupColumn(UI_TEXT(smp_name, "Name"));
+			ImGui::TableSetupColumn(UI_TEXT(smp_col_len, "Length"), ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn(UI_TEXT(smp_loop, "Loop"), ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableHeadersRow();
+			for (size_t i = 0; i < m_m2a_waves.size(); i++) {
+				const smu2000::m2a::wave &w = m_m2a_waves[i];
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				char label[64];
+				std::snprintf(label, sizeof(label), "%s##w%zu", w.name.empty() ? "-" : w.name.c_str(), i);
+				if (ImGui::Selectable(label, int(i) == m_m2a_sel, ImGuiSelectableFlags_SpanAllColumns))
+					card_select_wave(int(i));
+				ImGui::TableNextColumn();
+				ImGui::Text("%.2f s", w.rate ? double(w.frames) / w.rate : 0.0);
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(w.loop ? UI_TEXT(smp_card_yes, "yes") : "-");
+			}
+			ImGui::EndTable();
+		}
+	}
+	ImGui::EndChild();
+
+	// ---- 選んだ波形: 試聴と見取り図
+	const bool playing = m_view.preview_number == -1;
+	ImGui::BeginDisabled(m_m2a_pcm.empty());
+	if (!playing) {
+		if (ImGui::Button(UI_TEXT(smp_play, "Play"))) {
+			std::vector<s16> pcm = m_m2a_pcm;
+			const smu2000::m2a::wave &w = m_m2a_waves[size_t(m_m2a_sel)];
+			const u32 loop = w.loop && w.rate ? u32(u64(w.loop_start) * 44100 / w.rate) : ~0u;
+			br.post([pcm, loop](mu2000 &mu) mutable {
+				mu.preview_pcm(std::move(pcm), loop);
+				return std::string();
+			});
+		}
+	} else if (ImGui::Button(UI_TEXT(smp_play_stop, "Stop playing"))) {
+		br.post([](mu2000 &mu) {
+			mu.preview_stop();
+			return std::string();
+		});
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_card_play_tip, "Plays the sample straight from the file, without loading it into the MU2000"));
+	if (m_m2a_sel >= 0 && m_m2a_sel < int(m_m2a_waves.size())) {
+		const smu2000::m2a::wave &w = m_m2a_waves[size_t(m_m2a_sel)];
+		ImGui::SameLine();
+		ImGui::TextDisabled("%s  %u Hz  %u bit  %s  %s %d", w.name.c_str(), w.rate, w.bits,
+		                    w.channels > 1 ? "stereo" : "mono", UI_TEXT(smp_card_key, "key"), w.unity);
+	}
+	const float btn_h = ImGui::GetFrameHeightWithSpacing() * 2.2f;
+	const ImVec2 p = ImGui::GetCursorScreenPos();
+	const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(fs * 4, ImGui::GetContentRegionAvail().y - btn_h));
+	ImGui::Dummy(sz);
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255), 4.0f);
+	const float mid = p.y + sz.y * 0.5f, halfh = sz.y * 0.5f - 2.0f;
+	dl->AddLine(ImVec2(p.x, mid), ImVec2(p.x + sz.x, mid), IM_COL32(80, 90, 110, 255));
+	if (!m_m2a_hi.empty()) {
+		const int cols = std::max(1, int(sz.x));
+		const size_t nb = m_m2a_hi.size();
+		for (int x = 0; x < cols; x++) {
+			const size_t b0 = size_t(x) * nb / size_t(cols), b1 = std::max(b0 + 1, size_t(x + 1) * nb / size_t(cols));
+			int lo = 32767, hi = -32768;
+			for (size_t b = b0; b < b1 && b < nb; b++) {
+				lo = std::min(lo, int(m_m2a_lo[b]));
+				hi = std::max(hi, int(m_m2a_hi[b]));
+			}
+			if (hi < lo)
+				continue;
+			dl->AddLine(ImVec2(p.x + float(x) + 0.5f, mid - halfh * float(hi) / 32768.0f),
+			            ImVec2(p.x + float(x) + 0.5f, std::max(mid - halfh * float(lo) / 32768.0f, mid - halfh * float(hi) / 32768.0f + 1.0f)),
+			            IM_COL32(110, 200, 255, 255));
+		}
+		const smu2000::m2a::wave &w = m_m2a_waves[size_t(m_m2a_sel)];
+		if (w.loop && !m_m2a_pcm.empty() && w.rate) {
+			const float xl = p.x + sz.x * float(double(w.loop_start) * 44100 / w.rate / double(m_m2a_pcm.size()));
+			dl->AddLine(ImVec2(xl, p.y), ImVec2(xl, p.y + sz.y), IM_COL32(200, 120, 255, 255), 2.0f);
+		}
+		if (playing && !m_m2a_pcm.empty()) {
+			const float xp = p.x + sz.x * float(double(m_view.preview_pos) / double(m_m2a_pcm.size()));
+			dl->AddLine(ImVec2(xp, p.y), ImVec2(xp, p.y + sz.y), IM_COL32(255, 255, 255, 230), 1.5f);
+		}
+	}
+	dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + sz.x + 1, p.y + sz.y + 1), IM_COL32(110, 125, 150, 255), 4.0f, 0, 1.5f);
+
+	// ---- 差す・読み込む
+	const smu2000::cardfs::entry *file = (m_card_sel >= 0 && m_card_sel < int(m_card_files.size()))
+	                                     ? &m_card_files[size_t(m_card_sel)] : nullptr;
+	const bool is_m2a = file && file->path.size() > 4 &&
+	                    file->path.compare(file->path.size() - 4, 4, ".M2A") == 0;
+	const bool at_root = file && file->path.find('/') == std::string::npos;
+	const bool busy = m_view.macro_busy || m_view.rec_state != 0 || !m_load_after_insert.empty();
+	ImGui::BeginDisabled(m_card_src != 1 || m_card_file.empty() || m_card_file == slot || busy);
+	if (ImGui::Button(UI_TEXT(smp_card_insert, "Insert this card")))
+		br.request_card(m_card_file);
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_card_insert_tip, "Puts this card image into the MU2000's slot (the card in it now comes out)"));
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!is_m2a || !at_root || busy || (m_card_src == 0 && !m_view.card_in));
+	if (ImGui::Button(m_view.macro_busy ? UI_TEXT(smp_card_loading, "Loading...")
+	                                    : UI_TEXT(smp_card_load, "Load this M2A into the MU2000")))
+		m_load_confirm = true;
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_card_load_tip, "Presses SAMPLING > LOAD > ALL+SEQ on the front panel for you and picks this file, as you would on the real unit. Only files at the top of the card can be picked this way."));
+	if (m_load_confirm) {
+		ImGui::OpenPopup("load_confirm");
+		m_load_confirm = false;
+	}
+	if (ImGui::BeginPopupModal("load_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextUnformatted(UI_TEXT(smp_card_load_warn, "Loading replaces the samples and sample voices in the MU2000 now. Go on?"));
+		if (ImGui::Button("OK", ImVec2(fs * 6, 0)) && file) {
+			// 8.3 の名前（一番上のファイルなので path そのもの）
+			if (m_card_src == 1 && m_card_file != slot) {
+				m_load_after_insert = file->path;   // 先に差して、差し終わったら読み込む
+				br.request_card(m_card_file);
+			} else {
+				br.request_macro(panel_macro::load_m2a(file->path), UI_TEXT(smp_card_loaded, "Loaded from the card"));
+			}
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(dlg_cancel, "Cancel"), ImVec2(fs * 6, 0)))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
 }
 
 } // namespace ui

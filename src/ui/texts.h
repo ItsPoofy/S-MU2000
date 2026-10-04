@@ -577,6 +577,32 @@ struct ui_texts {
 	const char *smp_env_decay2;
 	const char *smp_env_level2;
 	const char *smp_env_release;
+	const char *smp_tab_edit;
+	const char *smp_tab_card;
+	const char *smp_card;
+	const char *smp_card_read_fail;
+	const char *smp_card_loaded;
+	const char *smp_card_slot;
+	const char *smp_card_none;
+	const char *smp_card_image;
+	const char *smp_card_open;
+	const char *smp_card_path;
+	const char *smp_card_open_path;
+	const char *smp_card_reload;
+	const char *smp_card_reading;
+	const char *smp_card_empty;
+	const char *smp_card_col_file;
+	const char *smp_card_col_size;
+	const char *smp_card_no_waves;
+	const char *smp_card_yes;
+	const char *smp_card_play_tip;
+	const char *smp_card_key;
+	const char *smp_card_insert;
+	const char *smp_card_insert_tip;
+	const char *smp_card_loading;
+	const char *smp_card_load;
+	const char *smp_card_load_tip;
+	const char *smp_card_load_warn;
 };
 
 // Each language file defines one of these (never included directly).
