@@ -286,6 +286,9 @@ LRESULT CALLBACK pc_window::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 		// （trickle）。マウスの軌跡が溜まって、絵の点も送る値も遅れてついてくる
 		if (msg == WM_CHAR && !ImGui::GetIO().WantTextInput)
 			return 0;
+		// 日本語配列の ￥（スキャンコード 0x7D）は ImGui の受け口が拾わない。Oem102（JIS には無いキー）として渡す
+		if ((msg == WM_KEYDOWN || msg == WM_KEYUP) && ((lp >> 16) & 0xff) == 0x7d)
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Oem102, msg == WM_KEYDOWN);
 		if (ImGui_ImplWin32_WndProcHandler(h, msg, wp, lp))
 			return 1;
 	}
