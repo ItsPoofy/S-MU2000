@@ -294,11 +294,25 @@ public:
 	{
 		// ROM 読みと起動（音にして 4 秒ぶんの空回し）は時間がかかるので、
 		// ここでは走らせるだけ。終わるまでは無音を返す
+		m_engine.unpark();
 		m_engine.start();
 		return kResultOk;
 	}
 
-	tresult PLUGIN_API terminate() override { return kResultOk; }
+	// ホストからもらったものはここで手放す（VST3 の決まり）。ホストは terminate の後で
+	// IComponentHandler を消してから本体を release することがあり（FL Studio）、持ったままだと
+	// 最後の release で消えた物を触って落ちる。この DLL のコードを走るスレッドもここで止める
+	// （本体が手放されないまま DLL を外されても、消えたコードを走らないように）
+	tresult PLUGIN_API terminate() override
+	{
+		end_all_edits();
+		if (IComponentHandler *h = m_handler) {
+			m_handler = nullptr;
+			h->release();
+		}
+		m_engine.park();
+		return kResultOk;
+	}
 
 	// ---- IComponent
 
@@ -1376,7 +1390,13 @@ SMTG_EXPORT_SYMBOL IPluginFactory *PLUGIN_API GetPluginFactory()
 #if defined(_WIN32)
 
 __declspec(dllexport) bool InitDll() { return true; }
-__declspec(dllexport) bool ExitDll() { return true; }
+// DLL を外す直前。手放されずに残った本体があれば、そのスレッドを止めておく
+// （DllMain の中ではスレッドを待てないので、ここでやる）
+__declspec(dllexport) bool ExitDll()
+{
+	smu2000::vst3::engine::park_all();
+	return true;
+}
 
 #elif defined(__APPLE__)
 
@@ -1389,7 +1409,11 @@ SMTG_EXPORT_SYMBOL bool bundleEntry(CFBundleRef bundle)
 	return true;
 }
 
-SMTG_EXPORT_SYMBOL bool bundleExit(void) { return true; }
+SMTG_EXPORT_SYMBOL bool bundleExit(void)
+{
+	smu2000::vst3::engine::park_all();
+	return true;
+}
 
 #endif
 

@@ -193,6 +193,10 @@ std::mutex             g_rom_mutex;
 std::string            g_rom_dir;
 std::weak_ptr<rom_set> g_roms;
 
+// 生きている engine（park_all が止める）
+std::mutex           g_live_mutex;
+std::vector<engine *> g_live;
+
 } // namespace
 
 
@@ -201,10 +205,48 @@ engine::engine()
 	build_table();
 	for (std::vector<uint8_t> &p : m_pending)
 		p.reserve(4096);
+	std::lock_guard<std::mutex> lock(g_live_mutex);
+	g_live.push_back(this);
+}
+
+void engine::park()
+{
+	std::lock_guard<std::mutex> lock(m_park_mutex);
+	// 起動の途中なら打ち切る。打ち切ったら、次の start でやり直せるようにしておく
+	if (m_thread.joinable()) {
+		m_abort.store(true, std::memory_order_relaxed);
+		m_thread.join();
+		m_abort.store(false, std::memory_order_relaxed);
+		if (state() == status::loading)
+			m_boot_once.store(false, std::memory_order_release);
+	}
+	if (m_mu && m_mu->threaded()) {
+		m_mu->set_threaded(false);
+		m_parked = true;
+	}
+}
+
+void engine::unpark()
+{
+	std::lock_guard<std::mutex> lock(m_park_mutex);
+	if (m_parked && m_mu)
+		m_mu->set_threaded(m_threaded);
+	m_parked = false;
+}
+
+void engine::park_all()
+{
+	std::lock_guard<std::mutex> lock(g_live_mutex);
+	for (engine *e : g_live)
+		e->park();
 }
 
 engine::~engine()
 {
+	{
+		std::lock_guard<std::mutex> lock(g_live_mutex);
+		g_live.erase(std::remove(g_live.begin(), g_live.end(), this), g_live.end());
+	}
 	m_abort.store(true, std::memory_order_relaxed);
 	if (m_thread.joinable())
 		m_thread.join();
@@ -379,6 +421,7 @@ void engine::boot()
 	if (fast_midi)
 		logf("plugin.ini: fast_midi=1（実物より速く直列に流す。実機と同じ間隔ではなくなる）");
 	mu->set_threaded(threaded);
+	m_threaded = threaded;
 	if (!threaded)
 		logf("plugin.ini: threaded=0（スレーブを別スレッドにしない）");
 	if (native_fx) {
