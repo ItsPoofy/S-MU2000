@@ -23,7 +23,8 @@ namespace smu2000::sampling {
 //   +0 00 3c 00 ff（基準の鍵 60 ほか）
 //   +4 上の 8bit = 0x40 ならループしない、0x00 ならループする。
 //      下の 24bit = 鳴り始めがループの頭より何サンプル手前か
-//   +8 u32 ループの頭から終わりまでのサンプル数 − 4
+//   +8 u32 ループの頭から鳴り終わりまでのサンプル数。音源はここで折り返す（か、止まる）。firmware が録ったサンプルでは
+//      全体の長さ − 4（終わりの 4 サンプルは余白 = TAIL_PAD）
 //   +12 u32 ループの頭の語（サンプリング RAM の 32bit 語の位置）| 0x01000000
 // 録った直後は +4 が 40 00 00 00、+12 が開始の語（全体を 1 度鳴らす）。
 // EDIT → SAMPLE の Loop は +4 の上を 0x00 にし（記録の +2 に 0x02 を足す）、Start は +4 の下・+8・+12 を動かす
@@ -49,6 +50,8 @@ constexpr int ROM_WAVE_SETS = 503;   // 内蔵の波形の組の数（xg/native_
 constexpr u32 SAMPLE_RATE = 44100;
 // サンプリング RAM は 4MB = 0x100000 語（1 語に 16bit のサンプル 2 つ、下の 16bit が先）
 constexpr u32 RAM_WORDS = 0x100000;
+// サンプルの終わりに置く余白（サンプル数）。鳴り終わり・ループの終わりは、サンプルの終わりよりこれだけ手前まで
+constexpr u32 TAIL_PAD = 4;
 
 struct sample
 {
@@ -58,7 +61,8 @@ struct sample
 	u32 rate = SAMPLE_RATE;
 	int peak = -1;           // 波形の最大の絶対値（16bit）。-1 はまだ測っていない（sampling_peak）
 	// 鳴らす所（波形は切らず、鳴らすための表だけで決める。firmware の EDIT → SAMPLE の Start・End・Loop と同じ欄）。
-	// play_from から鳴り始め、play_to で鳴り終わる。loop なら押しているあいだ loop_from から play_to までをくり返す。
+	// play_from から鳴り始め、play_to で鳴り終わる。loop なら押しているあいだ loop_from から play_to までをくり返す
+	// （play_to のサンプルは鳴らさず loop_from へ戻る。play_to はサンプルの終わりの TAIL_PAD 手前まで）。
 	// どれも頭からのサンプル数。loop_from は偶数で play_from 以上
 	bool loop = false;
 	u32 play_from = 0, play_to = 0, loop_from = 0;

@@ -2715,7 +2715,8 @@ void sampling_editor::make_pane(bridge &br)
 	ImGui::InputText("##wmname", m_wm_name, sizeof(m_wm_name));
 	ImGui::SameLine();
 	if (ImGui::Button(UI_TEXT(smp_make_add, "Add as a sample"))) {
-		std::vector<s16> pcm = m_wm_pcm;
+		// ループで鳴らすものは、終わりに頭の 4 サンプルを足す（音源はその手前で折り返すので、ループの長さが波形ちょうどになる）
+		std::vector<s16> pcm = oneshot ? m_wm_pcm : wg::with_loop_tail(m_wm_pcm);
 		const std::string name = m_wm_name;
 		const bool assign = m_wm_assign;
 		const int slot = m_bank * 128 + (m_pgm - 1);

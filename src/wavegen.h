@@ -7,6 +7,7 @@
 // そこから LOOP_FRAMES サンプルにちょうど CYCLES 周期が入る波形を作る。全体をループにすると
 // 44100 × 25 / 4214 = 261.628Hz で、鍵 60 の高さ（261.626Hz）と 0.02 セントしか違わないので、
 // 音色の側で音程を直さなくてよい（ループの頭は偶数の位置にしか置けないが、長さは 4214 で偶数）。
+// 登録するときは with_loop_tail で終わりに頭の 4 サンプルを足す（音源は「全体 − 4」の所で折り返すので、ループがちょうど 4214 になる）。
 // 1 周期は 168.56 サンプルと半端だが、倍音を足して作るので問題にならない。倍音は 20kHz より下だけを足す
 // （鍵 60 で 76 倍音まで。ここでは HARMONICS までにする）。
 
@@ -588,6 +589,16 @@ inline std::vector<s16> render(const spectrum &s, int max_h = HARMONICS, double 
 	for (u32 i = 0; i < LOOP_FRAMES; i++)
 		out[i] = s16(std::lround(x[i] * g));
 	return out;
+}
+
+// ループで鳴らす波形を登録する形にする: 終わりに頭の pad サンプルを足す。音源は「全体 − pad」の所で折り返し、
+// 折り返す所の次のサンプルも読むので、そこに頭と同じものが要る（mu2000 の TAIL_PAD = 4）
+inline std::vector<s16> with_loop_tail(std::vector<s16> pcm, size_t pad = 4)
+{
+	const size_t n = pcm.size();
+	for (size_t i = 0; i < pad && n; i++)
+		pcm.push_back(pcm[i % n]);
+	return pcm;
 }
 
 // ノイズ。frames サンプル。高さが無いので全体をループにするだけ。

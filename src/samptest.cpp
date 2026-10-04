@@ -825,7 +825,7 @@ int main(int argc, char **argv)
 			br.request_detail(2, 0, 0, 0);
 		}
 
-		// トリム。サンプル 1 の [1000, 1000 + 0.25 秒) だけを残す。後ろのサンプル 2・3 は前へ詰まり、空きが増える。
+		// トリム。サンプル 1 の [1000, 1000 + 0.25 秒) だけを残す（鳴り終わりの後ろに余白 4 サンプルが付く）。後ろのサンプル 2・3 は前へ詰まり、空きが増える。
 		// サンプル 3 を使う PGM002 は、この後の確認で 880Hz のまま鳴る
 		{
 			const auto l0 = k.mu.sampling_list();
@@ -834,7 +834,7 @@ int main(int argc, char **argv)
 			const bool ok = k.mu.sampling_trim(1, 1000, 1000 + keep, err);
 			const auto l1 = k.mu.sampling_list();
 			const u32 freed = l0[0].end - l1[0].end;
-			check(ok && l1.size() == 3 && l1[0].frames() == (keep + 1) / 2 * 2 && l1[1].start == l1[0].end &&
+			check(ok && l1.size() == 3 && l1[0].frames() == (keep + sp::TAIL_PAD + 1) / 2 * 2 && l1[0].play_to == keep && l1[1].start == l1[0].end &&
 			      l1[2].start == l1[1].end && l1[2].frames() == l0[2].frames() &&
 			      k.mu.sampling_free_frames() == free0 + freed * 2,
 			      "トリム: 残して後ろを詰める",
@@ -1001,7 +1001,7 @@ int main(int argc, char **argv)
 				if (x.number == n5)
 					s6 = x;
 			check(p440 > 0.01 && p440 > 10 * p660 && q660 > 0.01 && q660 > 10 * q440 && s6.play_from == mid &&
-			      s6.play_to == s6.frames() && !s6.loop && s6.loop_from == mid,
+			      s6.play_to == s6.frames() - sp::TAIL_PAD && !s6.loop && s6.loop_from == mid,
 			      "鳴り始め・鳴り終わり: 終点までループ、始点から鳴る",
 			      "E まで 440 " + std::to_string(p440) + " 660 " + std::to_string(p660) + "、S から 440 " +
 			      std::to_string(q440) + " 660 " + std::to_string(q660));
@@ -1137,7 +1137,9 @@ int main(int argc, char **argv)
 			namespace wg = smu2000::wavegen;
 			auto play = [&](const std::vector<s16> &pcm, const char *name, int key) {
 				std::string err;
-				const int n = k.mu.sampling_add(pcm.data(), pcm.size(), name, err);
+				// 窓と同じに、終わりに頭の 4 サンプルを足して登録する（音源はその手前で折り返す）
+				const std::vector<s16> padded = wg::with_loop_tail(pcm);
+				const int n = k.mu.sampling_add(padded.data(), padded.size(), name, err);
 				k.mu.sampling_loop(n, true, 0);
 				sp::voice v;
 				v.name = name;
@@ -1166,16 +1168,38 @@ int main(int argc, char **argv)
 				peak = std::max(peak, std::abs(int(s)));
 			const int n1 = play(saw, "saw", 60);
 			const double c3 = tone(k.out, 261.63), b2 = tone(k.out, 246.94), cs3 = tone(k.out, 277.18), saw2 = tone(k.out, 523.25);
-			play(sine, "sine", 60);
+			const int n_sine = play(sine, "sine", 60);
 			const double sine1 = tone(k.out, 261.63), sine2 = tone(k.out, 523.25);
+			// ループが波形の長さちょうどで回っているか。上向きのゼロ交差の間隔から高さを出す（4 サンプル短いと 261.88Hz になる）。
+			// 100ms ごとの大きさも、ループが合っていればそろう
+			auto pitch_of = [](const std::vector<double> &x, size_t from, size_t to) {
+				double first = -1, last = -1;
+				int cnt = 0;
+				for (size_t i = from + 1; i < to && i < x.size(); i++)
+					if (x[i - 1] < 0 && x[i] >= 0) {
+						const double t = double(i - 1) + x[i - 1] / (x[i - 1] - x[i]);
+						if (first < 0)
+							first = t;
+						last = t;
+						cnt++;
+					}
+				return cnt > 1 ? double(RATE) * (cnt - 1) / (last - first) : 0.0;
+			};
+			const double sine_hz = pitch_of(k.out, RATE / 10, RATE * 65 / 100);
+			sp::sample sine_s;
+			for (const sp::sample &x : k.mu.sampling_list())
+				if (x.number == n_sine)
+					sine_s = x;
 			play(saw, "saw2", 72);
 			const double c4 = tone(k.out, 523.25), c3at72 = tone(k.out, 261.63);
 			check(n1 > 0 && saw.size() == wg::LOOP_FRAMES && peak > 29000 && peak <= 32767 * 9 / 10 + 1 &&
 			      c3 > 0.003 && c3 > 20 * b2 && c3 > 20 * cs3 && saw2 > 0.2 * c3 && sine1 > 0.003 && sine2 < 0.02 * sine1 &&
-			      c4 > 20 * c3at72,
+			      c4 > 20 * c3at72 && std::fabs(sine_hz - 261.6276) < 0.03 && sine_s.frames() == wg::LOOP_FRAMES + 4 &&
+			      sine_s.loop && sine_s.loop_from == 0 && sine_s.play_to == wg::LOOP_FRAMES,
 			      "作った波形: 鍵 60 が C3、ノコギリに倍音",
 			      "ノコギリ 261.6Hz " + std::to_string(c3) + "（隣の鍵 " + std::to_string(std::max(b2, cs3)) + "）、2 倍音 " +
-			      std::to_string(saw2 / c3) + " 倍、サインの 2 倍音 " + std::to_string(sine2 / sine1) + " 倍");
+			      std::to_string(saw2 / c3) + " 倍、サインの 2 倍音 " + std::to_string(sine2 / sine1) + " 倍、サインの高さ " +
+			      std::to_string(sine_hz) + "Hz（ループ " + std::to_string(sine_s.play_to - sine_s.loop_from) + " サンプル）");
 
 			// ファミコンと FM の形。矩形 25% は 2 倍音が基音の 0.707 倍・4 倍音が無い、三角（階段）は奇数の倍音だけで
 			// 階段の角が 31・33 倍音に出る、ノイズは長い周期が 32767 段・短い周期が 93 段でくり返す。
