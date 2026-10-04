@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "compat/cli_text.h"
 #include <atomic>
 #include <functional>
 #include <chrono>
@@ -318,9 +319,9 @@ public:
 		std::string err;
 		if (!path.empty() && panel.lay().load(path, err)) {
 			if (!quiet)
-				std::printf("配置: %s\n", path.c_str());
+				std::printf(CLI_T("Layout: %s\n", "配置: %s\n"), path.c_str());
 		} else if (!path.empty() && !quiet) {
-			std::printf("配置: %s を開けない。組み込みの配置を使う\n", path.c_str());
+			std::printf(CLI_T("Layout: cannot open %s. Using the built-in layout\n", "配置: %s を開けない。組み込みの配置を使う\n"), path.c_str());
 		}
 		if (!err.empty())
 			std::fprintf(stderr, "%s", err.c_str());
@@ -481,13 +482,13 @@ public:
 	bool choose_out(int dev, bool keep = false)
 	{
 		return open_out(thru_a, out_dev, out_name, out_keep,
-		                "MIDI 出力", dev, keep);
+		                CLI_T("MIDI output", "MIDI 出力"), dev, keep);
 	}
 
 	bool choose_out_b(int dev, bool keep = false)
 	{
 		return open_out(thru_b, out_dev_b, out_name_b, out_keep_b,
-		                "MIDI 出力 B", dev, keep);
+		                CLI_T("MIDI output B", "MIDI 出力 B"), dev, keep);
 	}
 
 	// 音色の窓の送り先。dev が負ならパネルの設定
@@ -506,7 +507,7 @@ public:
 				if (name == out_name || name == out_name_b || edit_out.open(dev, err))
 					edit_out_name = name;
 				else
-					std::fprintf(stderr, "送り先 %s: %s\n", name.c_str(), err.c_str());
+					std::fprintf(stderr, CLI_T("Send to %s: %s\n", "送り先 %s: %s\n"), name.c_str(), err.c_str());
 			}
 		}
 		save_settings();
@@ -540,7 +541,7 @@ public:
 	bool choose_out_mu(int dev, bool keep = false)
 	{
 		return open_out(mu_out, out_dev_mu, out_name_mu, out_keep_mu,
-		                "MIDI 出力（本体の OUT）", dev, keep);
+		                CLI_T("MIDI output (the unit's OUT)", "MIDI 出力（本体の OUT）"), dev, keep);
 	}
 
 	// サンプリングの窓の録音デバイスの欄（bridge::set_ain_devices / request_ain）。
@@ -673,8 +674,9 @@ public:
 			return;
 		reported_drops = drops;
 		std::fprintf(stderr,
-		             "MIDI が多すぎるので捨てた: THRU A %llu / THRU B %llu / 受信 %llu バイト"
-		             "（MIDI の輪ができていないか確かめる）\n",
+		             CLI_T("Dropped MIDI, too much of it: THRU A %llu / THRU B %llu / received %llu bytes"
+" (check for a MIDI loop)\n", "MIDI が多すぎるので捨てた: THRU A %llu / THRU B %llu / 受信 %llu バイト"
+		             "（MIDI の輪ができていないか確かめる）\n"),
 		             (unsigned long long)eng->guard_a.dropped(),
 		             (unsigned long long)eng->guard_b.dropped(),
 		             (unsigned long long)eng->mu.midi_dropped());
@@ -703,7 +705,7 @@ public:
 			eng->mu.card().eject();
 		}
 		if (!card_path.empty())
-			std::printf("SmartMedia を抜いた: %s\n", card_path.c_str());
+			std::printf(CLI_T("SmartMedia removed: %s\n", "SmartMedia を抜いた: %s\n"), card_path.c_str());
 		std::fflush(stdout);
 		card_path.clear();
 		save_settings();
@@ -731,7 +733,7 @@ public:
 			eng->mu.card_swapped();   // firmware に抜けたのを見せる（前のカードの FAT を忘れさせる）
 		}
 		card_path = path;
-		std::printf("SmartMedia を差した: %s（%uMB）\n",
+		std::printf(CLI_T("SmartMedia inserted: %s (%uMB)\n", "SmartMedia を差した: %s（%uMB）\n"),
 		            path.c_str(), eng->mu.card().megabytes());
 		std::fflush(stdout);
 		save_settings();
@@ -776,19 +778,19 @@ public:
 	{
 		std::string err;
 		if (!play.start(path, br, err)) {
-			std::fprintf(stderr, "開けない: %s\n", err.c_str());
+			std::fprintf(stderr, CLI_T("Cannot open: %s\n", "開けない: %s\n"), err.c_str());
 			char m[512];
 			std::snprintf(m, sizeof(m), UI_TEXT(dlg_cannot_fmt, "Cannot open: %s"), err.c_str());
 			menu_error(m);
 			return false;
 		}
-		std::printf("再生: %s（%.1f 秒）\n", path.c_str(), play.length());
+		std::printf(CLI_T("Playing: %s (%.1f s)\n", "再生: %s（%.1f 秒）\n"), path.c_str(), play.length());
 		// The machine has two ports, so a four-port file is either folded
 		// onto them or has its extra parts dropped
 		if (play.ports_used() > 2)
-			std::printf("  この曲は %d 口ぶん。C・D は未対応なので、口 3 以降は%s\n",
+			std::printf(CLI_T("  This song uses %d ports. C and D are not supported, so ports 3 and up are %s\n", "  この曲は %d 口ぶん。C・D は未対応なので、口 3 以降は%s\n"),
 			            play.ports_used(),
-			            play.fold_extra_ports() ? " A・B に重ねて鳴らす" : "鳴らさない");
+			            play.fold_extra_ports() ? CLI_T("played on top of A and B", " A・B に重ねて鳴らす") : CLI_T("not played", "鳴らさない"));
 		std::fflush(stdout);
 		return true;
 	}
@@ -888,7 +890,7 @@ public:
 		// Digital matches S/PDIF (some DPCM samples keep their DC, as on
 		// the hardware); analog cuts DC like LINE OUT and PHONES do
 		eng->analog.store(on);
-		std::printf("音の出口: %s\n", on ? "アナログ（直流を切る）" : "デジタル");
+		std::printf(CLI_T("Sound output: %s\n", "音の出口: %s\n"), on ? CLI_T("analogue (DC removed)", "アナログ（直流を切る）") : CLI_T("digital", "デジタル"));
 		std::fflush(stdout);
 		save_settings();
 	}
@@ -1010,8 +1012,8 @@ public:
 		// "a host is here" notice
 		eng.mu.set_usb_host(a.usb_host);
 		play.set_usb_ports(a.usb_host);        // ファイルの口 3・4 を C・D へ送るか
-		std::printf(a.usb_host ? "MIDI は USB の口（A-D の 64 パート）\n"
-		                     : "--host-midi: DIN の口 A・B だけ（パート 1-32）\n");
+		std::printf(a.usb_host ? CLI_T("MIDI goes to the USB ports (A-D, 64 parts)\n", "MIDI は USB の口（A-D の 64 パート）\n")
+		                     : CLI_T("--host-midi: the DIN ports A and B only (parts 1-32)\n", "--host-midi: DIN の口 A・B だけ（パート 1-32）\n"));
 		return true;
 	}
 
@@ -1040,7 +1042,7 @@ public:
 			if (!smf::load(a.shot_mid, evs, err)) {
 				std::fprintf(stderr, "%s\n", err.c_str());
 			} else {
-				std::printf("MIDI %zu 件を %.1f 秒ぶん流す\n", evs.size(), a.shot_secs);
+				std::printf(CLI_T("Feeding %zu MIDI events, %.1f s of them\n", "MIDI %zu 件を %.1f 秒ぶん流す\n"), evs.size(), a.shot_secs);
 				size_t at = 0;
 				s32 l, r;
 				for (size_t i = 0; i < size_t(a.shot_secs * AUDIO_RATE); i++) {
@@ -1082,7 +1084,7 @@ public:
 			if (eng)
 				eng->analog.store(r.analog);
 			if (r.analog)
-				std::printf("音の出口: アナログ（直流を切る）\n");
+				std::printf(CLI_T("Sound output: analogue (DC removed)\n", "音の出口: アナログ（直流を切る）\n"));
 			play.set_fold_extra_ports(r.fold34);
 			play.set_thin_bends(r.thin_bends);
 		}
@@ -1091,7 +1093,7 @@ public:
 		if (eng)
 			eng->use_nvram = !factory;
 		if (factory)
-			std::printf("工場出荷状態で起動する（覚えていた設定は終わるときに上書きされる）\n");
+			std::printf(CLI_T("Starting from factory defaults (the remembered settings are overwritten on exit)\n", "工場出荷状態で起動する（覚えていた設定は終わるときに上書きされる）\n"));
 	}
 
 	// A found port prints by name; a missing one keeps showing its
@@ -1102,10 +1104,10 @@ public:
 		if (!now.empty())
 			std::printf("%s: %s\n", label, now.c_str());
 		else if (!keep.empty())
-			std::printf("%s: なし（「%s」が見つからないか開けない。覚えたままにしてある）\n",
+			std::printf(CLI_T("%s: none (\"%s\" was not found or could not be opened; it stays remembered)\n", "%s: なし（「%s」が見つからないか開けない。覚えたままにしてある）\n"),
 			            label, keep.c_str());
 		else
-			std::printf("%s: なし\n", label);
+			std::printf(CLI_T("%s: none\n", "%s: なし\n"), label);
 	}
 
 	// Opens the remembered MIDI ports by name (--midi and friends win).
@@ -1179,8 +1181,8 @@ public:
 		std::string err;
 		if (!out->start(latency_ms, [this](s16 *o, u32 n) { eng->fill(o, n); },
 		                err, exclusive, audio_name)) {
-			std::fprintf(stderr, "音声: %s\n", err.c_str());
-			eng->message = "音声デバイスを開けない";
+			std::fprintf(stderr, CLI_T("Audio: %s\n", "音声: %s\n"), err.c_str());
+			eng->message = CLI_T("cannot open the audio device", "音声デバイスを開けない");
 			eng->state.store(2);
 			eng->publish();
 			return false;
@@ -1224,8 +1226,8 @@ public:
 			std::printf("A/D INPUT: %s（%s）\n", ain->device_name().c_str(),
 			            ain->format_line().c_str());
 		else
-			std::printf("A/D INPUT: なし（%s）\n",
-			            dev < 0 ? "デバイスが見つからない" : aerr.c_str());
+			std::printf(CLI_T("A/D INPUT: none (%s)\n", "A/D INPUT: なし（%s）\n"),
+			            dev < 0 ? CLI_T("device not found", "デバイスが見つからない") : aerr.c_str());
 		std::fflush(stdout);
 		save_settings();
 	}
@@ -1270,14 +1272,14 @@ public:
 		if (eng) {
 			eng->settle_for_save();
 			if (eng->state.load() == 1 && !smu2000::nvram::save(eng->mu))
-				std::fprintf(stderr, "設定を残せなかった: %s\n",
+				std::fprintf(stderr, CLI_T("Could not save the settings: %s\n", "設定を残せなかった: %s\n"),
 				             smu2000::nvram::path(eng->mu).c_str());
 			// Snapshot for the settings just saved, or the next boot after
 			// touching them is the slow one. The window is gone, so the
 			// second it takes holds nobody up; old snapshots are pruned here
 			if (eng->state.load() == 1) {
 				if (smu2000::bootcache::refresh(eng->mu))
-					std::printf("次の起動ぶんの写しを作った\n");
+					std::printf(CLI_T("Made the boot copy for the next start\n", "次の起動ぶんの写しを作った\n"));
 				smu2000::bootcache::prune();
 			}
 		}
@@ -1295,7 +1297,7 @@ public:
 	void print_exit_stats(u64 drops)
 	{
 		if (out && out->produced()) {
-			std::printf("CPU %.1f%%、1 回の最悪 %.2f ms、間に合わなかった %llu 回\n",
+			std::printf(CLI_T("CPU %.1f%%, worst single block %.2f ms, late %llu times\n", "CPU %.1f%%、1 回の最悪 %.2f ms、間に合わなかった %llu 回\n"),
 			            out->cpu_percent(), out->worst_ms(),
 			            (unsigned long long)drops);
 			print_audio_details();

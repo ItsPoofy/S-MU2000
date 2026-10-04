@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 
+#include "compat/cli_text.h"
 #include "smartmedia.h"
 #include "state.h"
 
@@ -339,7 +340,7 @@ bool smartmedia::load(const std::string &path, std::string &err)
 {
 	std::FILE *f = open_file(path, "rb");
 	if (!f) {
-		err = "カードのファイルを開けない: " + path;
+		err = CLI_T("Cannot open the card file: ", "カードのファイルを開けない: ") + path;
 		return false;
 	}
 	std::fseek(f, 0, SEEK_END);
@@ -351,7 +352,7 @@ bool smartmedia::load(const std::string &path, std::string &err)
 			mb = m;
 	if (!mb) {
 		std::fclose(f);
-		err = "カードのファイルの大きさが 16/32/64/128MB の SmartMedia と合わない: " + path;
+		err = CLI_T("The card file is not the size of a 16/32/64/128MB SmartMedia: ", "カードのファイルの大きさが 16/32/64/128MB の SmartMedia と合わない: ") + path;
 		return false;
 	}
 	create(mb);
@@ -359,7 +360,7 @@ bool smartmedia::load(const std::string &path, std::string &err)
 	std::fclose(f);
 	if (got != m_data.size()) {
 		eject();
-		err = "カードのファイルを読み切れない: " + path;
+		err = CLI_T("Could not read the whole card file: ", "カードのファイルを読み切れない: ") + path;
 		return false;
 	}
 	clear_dirty();
@@ -394,7 +395,7 @@ bool smartmedia::write_blocks(const std::string &path, const std::vector<block> 
 		return true;
 	std::FILE *f = open_file(path, "r+b");
 	if (!f) {
-		err = "カードのファイルに書き戻せない: " + path;
+		err = CLI_T("Cannot write back to the card file: ", "カードのファイルに書き戻せない: ") + path;
 		return false;
 	}
 	bool ok = true;
@@ -406,7 +407,7 @@ bool smartmedia::write_blocks(const std::string &path, const std::vector<block> 
 	if (std::fclose(f) != 0)
 		ok = false;
 	if (!ok)
-		err = "カードのファイルに書き戻し切れない: " + path;
+		err = CLI_T("Could not write everything back to the card file: ", "カードのファイルに書き戻し切れない: ") + path;
 	return ok;
 }
 
@@ -414,13 +415,13 @@ bool smartmedia::save(const std::string &path, std::string &err) const
 {
 	std::FILE *f = open_file(path, "wb");
 	if (!f) {
-		err = "カードのファイルを書けない: " + path;
+		err = CLI_T("Cannot write the card file: ", "カードのファイルを書けない: ") + path;
 		return false;
 	}
 	const size_t put = std::fwrite(m_data.data(), 1, m_data.size(), f);
 	std::fclose(f);
 	if (put != m_data.size()) {
-		err = "カードのファイルを書き切れない: " + path;
+		err = CLI_T("Could not write the whole card file: ", "カードのファイルを書き切れない: ") + path;
 		return false;
 	}
 	return true;

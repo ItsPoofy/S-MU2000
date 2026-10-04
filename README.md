@@ -135,6 +135,10 @@ build/render.exe <rom directory> <MIDI> <output wav> [seconds]  Render a file to
                  [--usb]                            Start on USB ports, routing song ports 1-4 to A-D
                  [--fast-midi]                      Deliver MIDI as fast as the firmware can read
                  [--card image.img] [--adc-in input.wav]  Insert SmartMedia / feed A/D INPUT
+                 [--sample-rate Hz] [--bit-depth 8|16|24|32]  Output format (default 44100 Hz, 16-bit; 32 is float)
+                 [--gain x] [--normalize]           Scale the level / use the full range
+                                                    Run a tool with no arguments for the full list of options;
+                                                    add -jp for messages in Japanese
 build/panel.exe  <rom directory> [--keys "play,edit"] [--list]  Drive the panel as text only
 build/boot.exe   <rom directory> [cycles]           Boot check
 build/statetest.exe <rom directory> [MIDI]          Check that state save/restore is exact
