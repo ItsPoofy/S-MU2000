@@ -86,6 +86,11 @@ private:
 	int m_wm_pwm_sweeps = 1;                              // PWM: ループの中でゆれる回数
 	float m_wm_pluck_sustain = 0.7f, m_wm_pluck_bright = 0.8f, m_wm_pluck_len = 1.5f;   // プラック
 	int m_wm_drum = 0;                                    // ドラム: wavegen::drum
+	int m_wm_pd = 0;                                      // 位相ひずみ: wavegen::pd_wave
+	float m_wm_pd_amount = 0.7f, m_wm_pd_ratio = 4.0f;
+	float m_wm_bell_ratio = 3.5f, m_wm_bell_index = 5.0f, m_wm_bell_decay = 1.2f;   // FM のベル
+	bool m_wm_vowel_morph = false;                        // 声: 2 つ目の母音へ行って戻る
+	float m_wm_vowel_to = 1.0f;
 	float m_wm_drum_tune = 0.5f, m_wm_drum_decay = 0.4f, m_wm_drum_tone = 0.5f;
 	float m_wm_bars[32] = { 1.0f };    // 倍音 1-32 の強さ
 	float m_wm_draw[256] = {};         // 手描きの 1 周期（-1〜1）

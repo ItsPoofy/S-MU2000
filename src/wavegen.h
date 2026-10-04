@@ -452,6 +452,94 @@ inline std::vector<s16> drum_hit(drum k, double tune, double decay, double tone,
 	return out;
 }
 
+// 位相ひずみ（Casio CZ のやり方）。コサインを読む位相の進み方を曲げて、サインからノコギリ・矩形へ近づける。
+// amount は 0〜1（0 でサイン）。reso は、ratio 倍の速さのコサインに 1 周期で閉じる窓（ノコギリ形）をかけた「レゾナンス」の波形
+enum class pd_wave { saw, square, reso };
+
+inline spectrum phase_distortion(pd_wave k, double amount, double ratio = 4.0)
+{
+	constexpr int N = 2048;
+	std::vector<float> c(N);
+	amount = std::clamp(amount, 0.0, 1.0);
+	// 0〜1 の位相 q を、折れ目 x（0.5 から 0.01 へ）で曲げる: 前半は速く、後半はゆっくり
+	auto knee = [&](double q) {
+		const double x = 0.5 - 0.49 * amount;
+		return q < x ? 0.5 * q / x : 0.5 + 0.5 * (q - x) / (1.0 - x);
+	};
+	for (int i = 0; i < N; i++) {
+		const double p = (double(i) + 0.5) / N;
+		double v = 0;
+		switch (k) {
+		case pd_wave::saw:
+			v = -std::cos(2 * PI * knee(p));
+			break;
+		case pd_wave::square: {
+			// 半周期ごとに、速く半回転して止まる
+			const double h = p < 0.5 ? p * 2 : p * 2 - 1;
+			const double q = std::min(1.0, h / (1.0 - 0.98 * amount));
+			v = -std::cos(PI * (q + (p < 0.5 ? 0.0 : 1.0)));
+			break;
+		}
+		case pd_wave::reso:
+			v = (1.0 - p) * (1.0 - std::cos(2 * PI * std::max(ratio, 1.0) * p)) * (0.2 + 0.8 * amount) +
+			    (1.0 - amount) * 0.8 * std::sin(2 * PI * p);
+			break;
+		}
+		c[size_t(i)] = float(v);
+	}
+	return from_cycle(c.data(), N);
+}
+
+// 母音が行って戻るうねりをループに焼き込む（0.76 秒の中で v0 → v1 → v0）。倍音ごとの大きさを時間で変えて足す
+inline std::vector<s16> vowel_morph(double v0, double v1, int max_h = HARMONICS, double level = 0.9)
+{
+	constexpr int STEPS = 64;                          // 母音の形を作り直す回数（そのあいだは直線でつなぐ）
+	const u32 frames = LOOP_FRAMES * UNISON_MULT;
+	const double cycles = double(CYCLES * UNISON_MULT), f0 = 44100.0 * cycles / frames;
+	std::vector<spectrum> sp(STEPS + 1);
+	for (int k = 0; k <= STEPS; k++)
+		sp[size_t(k)] = vowel(v0 + (v1 - v0) * 0.5 * (1.0 - std::cos(2 * PI * k / STEPS)));
+	std::vector<double> x(frames, 0.0);
+	for (int h = 1; h <= std::min(max_h, HARMONICS) && h * f0 < 20000.0; h++) {
+		const double w = 2 * PI * h * cycles / frames, cw = std::cos(w), sw = std::sin(w);
+		double c = 1, s = 0;
+		for (u32 i = 0; i < frames; i++) {
+			const double t = double(i) / frames * STEPS;
+			const int k = std::min(int(t), STEPS - 1);
+			const double a = sp[size_t(k)].b[h] + (sp[size_t(k) + 1].b[h] - sp[size_t(k)].b[h]) * (t - k);
+			x[i] += a * s;
+			const double nc = c * cw - s * sw;
+			s = s * cw + c * sw;
+			c = nc;
+		}
+	}
+	double peak = 1e-12;
+	for (double v : x)
+		peak = std::max(peak, std::fabs(v));
+	std::vector<s16> out(frames);
+	for (u32 i = 0; i < frames; i++)
+		out[i] = s16(std::lround(x[i] / peak * std::clamp(level, 0.0, 1.0) * 32767.0));
+	return out;
+}
+
+// FM のベル（1 度鳴って消える）。キャリアは鍵 60 の C3、モジュレーターはその ratio 倍（半端な比で金属の響き）。
+// 変調の深さ index は時間とともに減り（明るさが先に消える）、音量は decay 秒で 1/e になる
+inline std::vector<s16> fm_bell(double seconds, double ratio, double index, double decay, double level = 0.9)
+{
+	const u32 frames = u32(std::clamp(seconds, 0.2, 4.0) * 44100.0) & ~1u;
+	const double f0 = 44100.0 * CYCLES / LOOP_FRAMES;
+	std::vector<double> x(frames);
+	for (u32 i = 0; i < frames; i++) {
+		const double t = double(i) / 44100.0;
+		const double mod = std::sin(2 * PI * f0 * ratio * t);
+		x[i] = std::sin(2 * PI * f0 * t + index * std::exp(-t / (decay * 0.6)) * mod) * std::exp(-t / decay) *
+		       std::min(1.0, t / 0.002);
+	}
+	std::vector<s16> out;
+	detail::normalize(x, out, level);
+	return out;
+}
+
 // 倍音の棒（強さだけ、位相は sin）から
 inline spectrum from_bars(const float *amp, int count)
 {

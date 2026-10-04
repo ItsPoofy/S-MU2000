@@ -1272,6 +1272,29 @@ int main(int argc, char **argv)
 				      std::to_string(crossings(kk, 0, 2205)) + "・150ms から " + std::to_string(crossings(kk, 6615, 2205)));
 			}
 
+			// 位相ひずみ・母音のうつり変わり・FM のベル。位相ひずみは量 0 でサイン、ノコギリは 2 倍音が出て、矩形は偶数の倍音が無い。
+			// 母音のループはつなぎ目が合い、頭（あ）は 3 倍音が、まん中（い）は 1 倍音が大きい。ベルは C3 が鳴って減る
+			{
+				const wg::spectrum pd0 = wg::phase_distortion(wg::pd_wave::saw, 0.0), pd1 = wg::phase_distortion(wg::pd_wave::saw, 0.9),
+				                   pq = wg::phase_distortion(wg::pd_wave::square, 0.9), pr = wg::phase_distortion(wg::pd_wave::reso, 1.0, 6.0);
+				const std::vector<s16> vm = wg::vowel_morph(0.0, 1.0);
+				const auto vm_d = as_double(vm);
+				const auto sv = seam(vm);
+				const std::vector<double> vm_a(vm_d.begin(), vm_d.begin() + 3000), vm_m(vm_d.begin() + long(vm.size() / 2 - 1500), vm_d.begin() + long(vm.size() / 2 + 1500));
+				const std::vector<s16> bell = wg::fm_bell(2.0, 3.5, 5.0, 0.5);
+				const auto bl = as_double(bell);
+				const std::vector<double> bl_a(bl.begin() + 500, bl.begin() + 6500), bl_z(bl.begin() + 60000, bl.begin() + 66000);
+				check(pd0.mag(2) < 0.001 * pd0.mag(1) && pd1.mag(2) > 0.3 * pd1.mag(1) && pq.mag(2) < 0.01 * pq.mag(1) &&
+				      pq.mag(3) > 0.2 * pq.mag(1) && pr.mag(6) > pr.mag(2) &&
+				      vm.size() == wg::LOOP_FRAMES * 8 && sv.first <= sv.second &&
+				      tone(vm_a, 784.9) > tone(vm_a, 261.63) && tone(vm_m, 261.63) > tone(vm_m, 784.9) &&
+				      !(bell.size() & 1) && tone(bl_a, 261.63) > 0.01 && tone(bl_z, 261.63) < 0.2 * tone(bl_a, 261.63),
+				      "作った波形: 位相ひずみ・母音のうねり・ベル",
+				      "PD ノコギリの 2 倍音 " + std::to_string(pd1.mag(2) / pd1.mag(1)) + "、矩形の 3 倍音 " + std::to_string(pq.mag(3) / pq.mag(1)) +
+				      "、母音 頭の 3 倍音/基音 " + std::to_string(tone(vm_a, 784.9) / tone(vm_a, 261.63)) + "・まん中 " +
+				      std::to_string(tone(vm_m, 784.9) / tone(vm_m, 261.63)) + "、ベルの終わり/頭 " + std::to_string(tone(bl_z, 261.63) / tone(bl_a, 261.63)));
+			}
+
 			// 音色のエディット（LFO・フィルター・ピッチ EG・フィルター EG）。PGM015 にノコギリを入れて欄を変え、鍵 60 を 1.5 秒鳴らす。
 			// 50ms ごとの大きさと、頭と終わりの高さで効き目を見る
 			{
