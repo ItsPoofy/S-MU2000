@@ -182,6 +182,16 @@ std::string engine::message() const
 	return state() == status::loading ? std::string("起動中") : m_message;
 }
 
+void engine::trace(const char *what, const void *self, long long a, long long b)
+{
+#if defined(_WIN32)
+	const unsigned long tid = GetCurrentThreadId();
+#else
+	const unsigned long tid = 0;
+#endif
+	logf("host: %s [%p] %lld %lld (thread %lu)", what, self, a, b, tid);
+}
+
 void engine::log_line(const char *text)
 {
 	logf("%s", text);

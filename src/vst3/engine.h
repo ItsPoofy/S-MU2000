@@ -188,6 +188,9 @@ public:
 
 	// 記録（%LOCALAPPDATA%\S-MU2000\log.txt）へ 1 行書く
 	void log_line(const char *text);
+	// ホストからの呼び出しを記録に残す（どのスレッドが、何を、どこまで）。固まる・落ちるの報告で、最後にどこまで
+	// 進んだかを見るため。呼ばれるのは起動・終了・画面の開閉などまれなものだけ（音声の処理では呼ばない）
+	static void trace(const char *what, const void *self = nullptr, long long a = 0, long long b = 0);
 
 	// 再生位置が飛んだ、止まった等。変換器の中身だけ捨てる
 	void flush_resampler();
