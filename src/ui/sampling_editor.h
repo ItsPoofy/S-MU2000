@@ -67,9 +67,21 @@ private:
 
 	// ---- 波形を作る（wavegen.h）。作り方ごとの値と、そこから作った倍音・1 周期の形・サンプルにする波形。
 	// 値を触ったら m_wm_stale を立て、描く前に作り直す
-	int m_wm_mode = 0;                 // 0 = 基本の波形、1 = 倍音を足す、2 = 手描き、3 = ノイズ
+	int m_wm_mode = 0;                 // 作り方（make_pane の M_BASIC…。基本・倍音・手描き・ノイズ・ファミコン・FM・オルガン・ユニゾン・声・シンク・フォールド）
 	int m_wm_shape = 1;                // smu2000::wavegen::shape
 	float m_wm_pulse = 0.5f;           // 矩形の上側の割合
+	int m_wm_fc = 1;                   // ファミコン: 0-3 = 矩形 12.5・25・50・75%、4 = 三角、5 = ノイズ、6 = 短いノイズ
+	int m_wm_fm_c = 1, m_wm_fm_m = 1;  // FM: キャリアとモジュレーターの比
+	float m_wm_fm_index = 2.5f, m_wm_fm_fb = 0.3f;   // FM: 変調の深さ（ラジアン）とフィードバック（0〜1）
+	int m_wm_noise_color = 0;          // ノイズ: 0 = 白、1 = ピンク、2 = ブラウン
+	int m_wm_organ[9] = { 8, 8, 8, 0, 0, 0, 0, 0, 0 };   // オルガン: ドローバー 9 本（0〜8）
+	int m_wm_uni_voices = 5, m_wm_uni_step = 1;          // ユニゾン: 重ねる数と、隣とのずれ（8.6 セント刻み）
+	float m_wm_vowel = 0.0f;           // 声: 0〜4（あ・い・う・え・お）
+	float m_wm_sync = 2.5f;            // シンク: 従う側の速さの比
+	float m_wm_fold_gain = 3.0f, m_wm_fold_bias = 0.0f;  // フォールド: 折り返す量と、かたより
+	int m_wm_steps = 0, m_wm_bits = 0; // 手描き: 段数と bit 数の選び（0 = そのまま）
+	u32 m_wm_seed = 0;                 // 倍音のランダムの種
+	int m_wm_lofi_bits = 16, m_wm_lofi_hold = 1;         // ローファイ: bit 数と、同じ値を続けるサンプル数
 	float m_wm_bars[32] = { 1.0f };    // 倍音 1-32 の強さ
 	float m_wm_draw[256] = {};         // 手描きの 1 周期（-1〜1）
 	bool m_wm_draw_init = false;

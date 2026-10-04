@@ -1150,6 +1150,87 @@ int main(int argc, char **argv)
 			      "作った波形: 鍵 60 が C3、ノコギリに倍音",
 			      "ノコギリ 261.6Hz " + std::to_string(c3) + "（隣の鍵 " + std::to_string(std::max(b2, cs3)) + "）、2 倍音 " +
 			      std::to_string(saw2 / c3) + " 倍、サインの 2 倍音 " + std::to_string(sine2 / sine1) + " 倍");
+
+			// ファミコンと FM の形。矩形 25% は 2 倍音が基音の 0.707 倍・4 倍音が無い、三角（階段）は奇数の倍音だけで
+			// 階段の角が 31・33 倍音に出る、ノイズは長い周期が 32767 段・短い周期が 93 段でくり返す。
+			// FM は深さ 0 でサイン、比 1:1 で深くすると 2 倍音が出る、比 1:2 は奇数の倍音だけ
+			const wg::spectrum p25 = wg::famicom(wg::famicom_wave::pulse25), tri = wg::famicom(wg::famicom_wave::triangle);
+			const std::vector<s16> nl = wg::famicom_noise(false), ns = wg::famicom_noise(true, 0.9, 4);
+			bool ns_periodic = ns.size() == 372, nl_once = nl.size() == 65534;
+			for (size_t i = 0; i + 8 < ns.size() && ns_periodic; i += 4)
+				ns_periodic = ns[i] == ns[i + 3];                    // 1 段は 4 サンプル
+			int ups = 0;
+			for (s16 v : nl)
+				ups += v > 0;
+			const wg::spectrum fm0 = wg::fm(1, 1, 0.0), fm1 = wg::fm(1, 1, 2.5), fm2 = wg::fm(1, 2, 1.5);
+			check(std::fabs(p25.mag(2) / p25.mag(1) - 0.7071) < 0.01 && p25.mag(4) < 0.01 * p25.mag(1) &&
+			      tri.mag(2) < 0.001 * tri.mag(1) && tri.mag(3) > 0.08 * tri.mag(1) && tri.mag(31) > 2.0 * tri.mag(29) &&
+			      ns_periodic && nl_once && std::abs(ups - 32768) < 400 &&
+			      fm0.mag(2) < 0.001 * fm0.mag(1) && fm1.mag(2) > 0.3 * fm1.mag(1) && fm2.mag(2) < 0.001 * fm2.mag(1) &&
+			      fm2.mag(3) > 0.2 * fm2.mag(1),
+			      "作った波形: ファミコンと FM",
+			      "矩形 25% の 2 倍音 " + std::to_string(p25.mag(2) / p25.mag(1)) + "、三角の 3 倍音 " + std::to_string(tri.mag(3) / tri.mag(1)) +
+			      "・31/29 倍音 " + std::to_string(tri.mag(31) / tri.mag(29)) + "、FM 1:1 の 2 倍音 " + std::to_string(fm1.mag(2) / fm1.mag(1)) +
+			      "、1:2 の 3 倍音 " + std::to_string(fm2.mag(3) / fm2.mag(1)));
+
+			// 倍音にならない成分を含む音。オルガンは 16' が 8' の 1 オクターブ下（ループは 2 倍の長さ）、ユニゾンは
+			// 0.76 秒のループで、どちらも終わりから頭へ段差なしにつながる（隣り合うサンプルの差と同じくらい）
+			auto seam = [](const std::vector<s16> &x) {
+				int step = 0;
+				for (size_t i = 1; i < x.size(); i++)
+					step = std::max(step, std::abs(int(x[i]) - int(x[i - 1])));
+				return std::make_pair(std::abs(int(x[0]) - int(x.back())), step);
+			};
+			auto as_double = [](const std::vector<s16> &x) {
+				std::vector<double> d(x.size());
+				for (size_t i = 0; i < x.size(); i++)
+					d[i] = x[i] / 32768.0;
+				return d;
+			};
+			const int bars16[9] = { 8, 0, 8, 0, 0, 0, 0, 0, 0 };
+			const std::vector<s16> org = wg::render_partials(wg::organ(bars16), wg::ORGAN_MULT);
+			const std::vector<s16> uni = wg::render_partials(wg::unison(wg::basic(wg::shape::saw), 5, 1, 24), wg::UNISON_MULT);
+			const auto org_d = as_double(org), uni_d = as_double(uni);
+			const auto so = seam(org), su = seam(uni);
+			// 声の「あ」は 800Hz の山（3 倍音）が基音より大きい。シンク 1 倍はノコギリ、フォールドは量を増やすと倍音が増える
+			const wg::spectrum va = wg::vowel(0), sy = wg::sync(1.0), f1 = wg::fold(0.5), f6 = wg::fold(6.0);
+			// 段数 32・4bit にすると 31・33 倍音（階段の角）が立つ。ローファイは値の種類が 2^bit までになる
+			float sine256[256];
+			for (int i = 0; i < 256; i++)
+				sine256[i] = float(std::sin(2 * PI * (i + 0.5) / 256));
+			const wg::spectrum chip = wg::from_cycle_stepped(sine256, 256, 32, 4), smooth = wg::from_cycle(sine256, 256);
+			std::vector<s16> lo = wg::render(wg::basic(wg::shape::sine));
+			wg::lofi(lo, 4, 4);
+			std::vector<int> kinds;
+			bool held = true;
+			for (size_t i = 0; i < lo.size(); i++) {
+				if (std::find(kinds.begin(), kinds.end(), int(lo[i])) == kinds.end())
+					kinds.push_back(lo[i]);
+				held = held && lo[i] == lo[i - i % 4];
+			}
+			// ノイズの色: ブラウンは白より低い方に寄る（隣り合うサンプルの差が小さい）
+			auto rough = [](const std::vector<s16> &x) {
+				double d = 0, e = 0;
+				for (size_t i = 1; i < x.size(); i++) {
+					d += std::fabs(double(x[i]) - x[i - 1]);
+					e += std::fabs(double(x[i]));
+				}
+				return d / e;
+			};
+			const double rw = rough(wg::noise(44100, 0.9, 1, 0)), rp = rough(wg::noise(44100, 0.9, 1, 1)), rb = rough(wg::noise(44100, 0.9, 1, 2));
+			check(org.size() == wg::LOOP_FRAMES * 2 && tone(org_d, 130.81) > 0.5 * tone(org_d, 261.63) && tone(org_d, 261.63) > 0.1 &&
+			      tone(org_d, 196.0) < 0.02 * tone(org_d, 261.63) && so.first <= so.second &&
+			      uni.size() == wg::LOOP_FRAMES * 8 && su.first <= su.second && tone(uni_d, 261.63) > 0.01 &&
+			      tone(uni_d, 261.63 * 201 / 200) > 0.3 * tone(uni_d, 261.63) && tone(uni_d, 261.63 * 203 / 200) < 0.1 * tone(uni_d, 261.63) &&
+			      va.mag(3) > va.mag(1) && va.mag(3) > 3 * va.mag(8) && std::fabs(sy.mag(2) / sy.mag(1) - 0.5) < 0.01 &&
+			      f1.mag(3) < 0.02 * f1.mag(1) && f6.mag(5) > 0.2 * f6.mag(1) &&
+			      chip.mag(31) > 20 * smooth.mag(31) && chip.mag(31) > 0.02 * chip.mag(1) &&
+			      kinds.size() <= 16 && held && rb < 0.2 * rw && rp < 0.8 * rw && rp > rb,
+			      "作った波形: オルガン・ユニゾン・声ほか",
+			      "オルガンのつなぎ目 " + std::to_string(so.first) + "（隣どうしの最大 " + std::to_string(so.second) + "）、ユニゾン " +
+			      std::to_string(su.first) + "（" + std::to_string(su.second) + "）、あ の 3 倍音 " + std::to_string(va.mag(3) / va.mag(1)) +
+			      " 倍、ローファイの値 " + std::to_string(kinds.size()) + " 種類、ノイズの荒さ 白 " + std::to_string(rw) + " ピンク " +
+			      std::to_string(rp) + " ブラウン " + std::to_string(rb));
 		}
 
 		// サンプリングの中身まるごとを SysEx にする（sp::memory_sysex）。新しい機械にサンプルを 2 つ（片方はループと
