@@ -976,7 +976,7 @@ bool engine::card_insert(const std::string &path, std::string &err)
 		return false;
 	}
 	card_flush();
-	if (!on_machine([card](mu2000 &m) { m.card() = std::move(*card); })) {
+	if (!on_machine([card](mu2000 &m) { m.card() = std::move(*card); m.card_swapped(); })) {
 		err = "カードを差せなかった（音声スレッドが応じない）";
 		return false;
 	}

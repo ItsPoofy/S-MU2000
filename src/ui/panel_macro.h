@@ -22,7 +22,7 @@ namespace ui {
 class panel_macro
 {
 public:
-	enum class kind { press, until, until_gone, find };
+	enum class kind { press, until, until_gone, find, if_shown };
 	struct step {
 		kind k = kind::press;
 		mu2000::button b = mu2000::button::count;   // press・find で押すボタン
@@ -36,6 +36,9 @@ public:
 	static step until_gone(const std::string &text, int ms) { step s; s.k = kind::until_gone; s.text = text; s.ms = ms; return s; }
 	static step find(const std::string &text, mu2000::button b, int max)
 	{ step s; s.k = kind::find; s.text = text; s.b = b; s.max = max; return s; }
+	// ms のうちに text が出たら b を押す。出なければそのまま次へ（確かめの問いがあるときだけ答える）
+	static step if_shown(const std::string &text, mu2000::button b, int ms)
+	{ step s; s.k = kind::if_shown; s.text = text; s.b = b; s.ms = ms; return s; }
 
 	// SAMPLING → LOAD → ALL+SEQ で name（カードの一番上にある 8.3 の名前）を選んで読み込む押し方。
 	// どの画面にいても EXIT で演奏の画面へ戻ってから入り、読み終えたら演奏の画面へ戻る
@@ -57,6 +60,8 @@ public:
 		s.push_back(until(":/", 5000));
 		s.push_back(find(name, B::select_right, 128));
 		s.push_back(press(B::enter));
+		// サンプルがもうあると「Overwrite ALL?」と聞かれる。置き換わるのは窓の側で確かめてあるので、ENTER で答える
+		s.push_back(if_shown("Overwrite", B::enter, 1500));
 		s.push_back(until_gone("LOADING", 180000));
 		s.push_back(until("<LOAD>", 5000));       // 読み終わると LOAD の画面に戻る
 		for (int i = 0; i < 3; i++)
@@ -65,6 +70,7 @@ public:
 	}
 
 	bool active() const { return m_at < m_steps.size(); }
+	size_t at() const { return m_at; }   // いま何段目か（確かめる用）
 
 	void start(std::vector<step> steps, std::string done)
 	{
@@ -116,6 +122,27 @@ public:
 				m_count++;
 				m_since = now;
 			}
+			break;
+		case kind::if_shown:
+			if (m_count == 0) {
+				if (lcd(mu).find(s.text) != std::string::npos) {
+					m_count = 1;          // 出た。少し待ってから押す
+					m_since = now;
+				} else if (int(ms) > s.ms) {
+					next(now);
+				}
+				break;
+			}
+			// 問いが出た直後に押しても firmware は受け取らない（出てから 20ms で押すと無視された）
+			if (m_count == 1) {
+				if (ms >= 400) {
+					m_count = 2;
+					m_since = now;
+				}
+				break;
+			}
+			if (pressing(mu, s.b, ms))
+				next(now);
 			break;
 		}
 		if (!active()) {

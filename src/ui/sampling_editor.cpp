@@ -1392,6 +1392,8 @@ void sampling_editor::card_refresh(bridge &br)
 {
 	m_card_files.clear();
 	m_card_sel = -1;
+	m_m2a_lo.clear();
+	m_m2a_hi.clear();
 	m_m2a.clear();
 	m_m2a_waves.clear();
 	m_m2a_sel = -1;
@@ -1724,10 +1726,12 @@ void sampling_editor::card_pane(bridge &br)
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", UI_TEXT(smp_card_load_tip, "Presses SAMPLING > LOAD > ALL+SEQ on the front panel for you and picks this file, as you would on the real unit. Only files at the top of the card can be picked this way."));
 	if (m_load_confirm) {
-		ImGui::OpenPopup("load_confirm");
+		ImGui::OpenPopup("###load_confirm");
 		m_load_confirm = false;
 	}
-	if (ImGui::BeginPopupModal("load_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+	// 見出しは訳した文言、ID は ### の後ろで固定
+	const std::string confirm_title = std::string(UI_TEXT(smp_card_load, "Load this M2A into the MU2000")) + "###load_confirm";
+	if (ImGui::BeginPopupModal(confirm_title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 		if (m_card_src == 1 && from_m2a && (m_card_file.empty() || m_card_file != slot))
 			ImGui::TextUnformatted(UI_TEXT(smp_card_m2a_warn, "A new card holding this file is made and inserted (the card in the slot comes out)."));
 		ImGui::TextUnformatted(UI_TEXT(smp_card_load_warn, "Loading replaces the samples and sample voices in the MU2000 now. Go on?"));

@@ -1120,7 +1120,7 @@ void mu2000::reset()
 		//   PA18 (0x04) 忙しい（0 で準備ができている。firmware は 0 になるのを待つ）/ PA19 (0x08) 差し込まれている /
 		//   PA20 (0x10) 書き込みを禁じていない
 		// 読み書きはその場で済むので、忙しい印は立てない
-		if (m_card.inserted()) {
+		if (m_card.inserted() && m_sample_count >= m_card_back_at) {
 			v |= 1u << 19;
 			if (!m_card.write_protected)
 				v |= 1u << 20;

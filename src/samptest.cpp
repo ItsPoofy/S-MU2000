@@ -314,8 +314,8 @@ int main(int argc, char **argv)
 		h.pump(10);
 	// 読み戻すカードは、取り出した M2A を PC の側で新しいカードに書き直したもの（smartmedia::format に
 	// ファイルを渡す。サンプリングの窓で M2A のファイルを直に読み込むときと同じ）。firmware がそれを読めるか
+	smu2000::smartmedia made;
 	{
-		smu2000::smartmedia made;
 		const u32 mb = smu2000::smartmedia::megabytes_for(saved_m2a.size());
 		std::vector<smu2000::smartmedia::root_file> put(1);
 		put[0].name = "FROMPC.M2A";
@@ -329,7 +329,6 @@ int main(int argc, char **argv)
 		std::printf("%s M2A を新しいカードに書く         %u MB、%zu バイト %s\n", same ? "合" : "NG", mb, saved_m2a.size(), err.c_str());
 		if (!same)
 			bad++;
-		h.mu.card() = made;
 
 		// 16MB を超えるファイル（論理ブロックがゾーン 1 へ入る）と、2 つ目のファイルも書いて読み戻せる
 		std::vector<smu2000::smartmedia::root_file> big(2);
@@ -349,21 +348,34 @@ int main(int argc, char **argv)
 		if (!big_ok)
 			bad++;
 	}
-	h.pump(1500);
-	// 読み戻しは、サンプリングの窓の「この M2A を読み込む」と同じボタンの押し方（ui::panel_macro）で
-	{
+	// 読み戻しは、サンプリングの窓の「この M2A を読み込む」と同じボタンの押し方（ui::panel_macro）で。
+	// まず firmware が書いたカードから読み、次にカードを PC で書いたものへ差し替えて（card_swapped）読む。
+	// firmware は前のカードの FAT を覚えているので、差し替えに気づかないと新しいカードのファイルが見つからない
+	auto load_by_macro = [&](const char *name, const char *what) {
 		ui::panel_macro macro;
-		macro.start(ui::panel_macro::load_m2a("FROMPC.M2A"), "done");
+		macro.start(ui::panel_macro::load_m2a(name), "done");
 		std::string msg;
 		bool finished = false;
+		size_t last = ~size_t(0);
 		for (int i = 0; i < 200 * 100 && !finished; i++) {
 			h.pump(10);
 			finished = macro.tick(h.mu, msg);
+			if (g.verbose && macro.at() != last) {
+				last = macro.at();
+				std::printf("    段 %zu [%s]\n", last, h.lcd().c_str());
+			}
 		}
 		const bool ok = finished && msg == "done";
-		std::printf("%s %-28s [%s] %s\n", ok ? "合" : "NG", "ボタンのマクロで LOAD", h.lcd().c_str(), msg.c_str());
+		std::printf("%s %-28s [%s] %s\n", ok ? "合" : "NG", what, h.lcd().c_str(), msg.c_str());
 		if (!ok) bad++;
-	}
+	};
+	h.mu.card() = g.mu.card();
+	h.pump(1500);
+	load_by_macro("ALL_SEQ.M2A", "ボタンのマクロで LOAD");
+	h.mu.card() = made;
+	h.mu.card_swapped();
+	h.pump(1000);
+	load_by_macro("FROMPC.M2A", "差し替えたカードから LOAD");
 	// 録音の最後の 1 語の後ろ半分（サンプルの長さの外）は書き出されないので、そこだけは違ってよい
 	const auto &a = g.mu.sample_ram(), &b = h.mu.sample_ram();
 	size_t differ = 0, used = 0;
