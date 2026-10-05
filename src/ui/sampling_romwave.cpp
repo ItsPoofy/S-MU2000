@@ -468,8 +468,9 @@ void sampling_editor::romwave_pane(bridge &br)
 			const size_t n = m_rw_pcm.size();
 			const float mid = p.y + sz.y * 0.5f, halfh = sz.y * 0.5f - 2.0f;
 			const int cols = std::max(1, int(sz.x));
-			if (n < size_t(cols) * 2 && n > 1) {
-				// 点の数より短い波形は 1 サンプルずつ線で結ぶ
+			const bool lines = n < size_t(cols) * 8;
+			if (lines && n > 1) {
+				// 1 列あたり数サンプルまでの波形は 1 サンプルずつ線で結ぶ
 				ImVec2 prev;
 				for (size_t k = 0; k < n; k++) {
 					const ImVec2 q(p.x + sz.x * float(k) / float(n - 1), mid - halfh * float(m_rw_pcm[k]) / 32768.0f);
@@ -478,10 +479,12 @@ void sampling_editor::romwave_pane(bridge &br)
 					prev = q;
 				}
 			}
-			for (int x = 0; n >= size_t(cols) * 2 && x < cols; x++) {
+			// それより長い波形は、列ごとに最小〜最大の縦線。**前の列の最後のサンプルも範囲に入れる**:
+			// 入れないと、急に上がり下がりする所で隣の列と縦に離れて、波形が千切れて見える
+			for (int x = 0; !lines && x < cols; x++) {
 				const size_t a = size_t(x) * n / size_t(cols), b = std::max(a + 1, size_t(x + 1) * n / size_t(cols));
 				int lo = 32767, hi = -32768;
-				for (size_t k = a; k < b && k < n; k++) {
+				for (size_t k = a ? a - 1 : 0; k < b && k < n; k++) {
 					lo = std::min(lo, int(m_rw_pcm[k]));
 					hi = std::max(hi, int(m_rw_pcm[k]));
 				}
