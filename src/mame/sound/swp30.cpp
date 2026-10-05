@@ -704,6 +704,33 @@ void swp30_device::streaming_block::read_8c(memory_access<25, 2, -2, ENDIANNESS_
 	val3 = m_dpcm_s3;
 }
 
+// S-MU2000: 波形を鳴る順に取り出す。位置を 1 つずつ進めて、補間の前の値（4 つのうち先頭）を並べる。
+// 圧縮の波形は read_8c が前から順に解くので、位置を飛ばさない
+std::vector<s16> swp30_device::decode_wave(u32 start, u32 loop, u32 address, size_t max)
+{
+	std::vector<s16> out;
+	streaming_block b;
+	b.clear();
+	b.m_start = s32(start);
+	b.m_loop = s32(loop);
+	b.m_address = address;
+	b.keyon();
+	const s32 pre = s32(start & 0xffffff), len = s32(loop & 0xffffff);
+	out.reserve(std::min<size_t>(size_t(pre) + size_t(len), max));
+	for(s32 pos = -pre; pos < len && out.size() < max; pos++) {
+		s16 v0 = 0, v1 = 0, v2 = 0, v3 = 0;
+		b.m_pos = pos;
+		switch(address >> 30) {
+		case 0: b.read_16(m_wave_cache, v0, v1, v2, v3); break;
+		case 1: b.read_12(m_wave_cache, v0, v1, v2, v3); break;
+		case 2: b.read_8 (m_wave_cache, v0, v1, v2, v3); break;
+		case 3: b.read_8c(m_wave_cache, v0, v1, v2, v3); break;
+		}
+		out.push_back(v0);
+	}
+	return out;
+}
+
 std::pair<s16, bool> swp30_device::streaming_block::step(memory_access<25, 2, -2, ENDIANNESS_LITTLE>::cache &wave, s32 pitch_lfo, u16 pitch_offset)
 {
 	if(m_done)

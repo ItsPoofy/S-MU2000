@@ -17,6 +17,7 @@
 #include "m2a.h"
 #include "wavegen.h"
 #include "ui/panel_macro.h"
+#include "xg/wave_catalog.h"
 
 #include <cmath>
 #include <cstdio>
@@ -651,6 +652,47 @@ int main(int argc, char **argv)
 			check(with.first && without.first && with.second > 0.003 && without.second < 0.0001,
 			      "内蔵ウェーブを割り当てると鳴る",
 			      "組 16 で rms " + std::to_string(with.second) + "、組無しで " + std::to_string(without.second));
+
+			// 内蔵ウェーブの一覧（xg/wave_catalog.h）と、波形の取り出し（mu2000::rom_wave_pcm）。
+			// 組 0 は 441 サンプルの正弦波（10 周 = 1kHz）、組 12 は MelodTom とキットのタムが使う、
+			// 音色の無い組 6 はドラムのスネアだけが使う
+			{
+				const xg::voice_rom vr(k.mu.program_rom());
+				const auto cat = xg::wave_catalog(vr);
+				int unused = 0, drum_only = 0;
+				for (const auto &w : cat) {
+					if (!w.used())
+						unused++;
+					else if (w.voices.empty())
+						drum_only++;
+				}
+				auto has_voice = [&](int set, const char *name) {
+					for (const auto &u : cat[size_t(set)].voices)
+						if (u.name == name)
+							return true;
+					return false;
+				};
+				auto has_drum = [&](int set, const char *part) {
+					for (const auto &d : cat[size_t(set)].drums)
+						if (d.key_name.find(part) != std::string::npos)
+							return true;
+					return false;
+				};
+				check(cat.size() == 503 && has_voice(12, "MelodTom") && has_drum(12, "Tom") && cat[6].voices.empty() &&
+				      has_drum(6, "Snare") && cat[6].icon == xg::voice_rom::ICON_DRUM && cat[12].icon >= 0,
+				      "内蔵ウェーブの一覧: 使っている音色とドラムの打",
+				      "使われていない組 " + std::to_string(unused) + "、ドラムだけの組 " + std::to_string(drum_only));
+				const xg::wave_zone &z = cat[0].zones.at(0);
+				const std::vector<s16> pcm = k.mu.rom_wave_pcm(z.start, z.loop, z.address);
+				int cross = 0, peak = 0;
+				for (size_t i = 1; i < pcm.size(); i++) {
+					cross += (pcm[i - 1] < 0) != (pcm[i] < 0);
+					peak = std::max(peak, std::abs(int(pcm[i])));
+				}
+				check(pcm.size() == 441 && z.loops() && (cross == 19 || cross == 20) && peak > 32000,
+				      "内蔵ウェーブの取り出し: 組 0 は正弦波 10 周",
+				      std::to_string(pcm.size()) + " サンプル、0 をまたぐ回数 " + std::to_string(cross));
+			}
 
 			// サンプル音色を書く SysEx（機種 0x68）。PGM010 に組 16 と音程・エンベロープを書き、その記録を
 			// SysEx にして PGM021 へ送ると、firmware が同じ記録を作る（要素の [0] は firmware が付ける印なので除く）

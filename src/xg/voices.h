@@ -46,6 +46,45 @@ public:
 	bool ok() const { return m_ok; }
 	// ROM の中身（音色の要素の記録を読むとき。xg/native_voice.h の element）
 	const u8 *data() const { return m_ok ? m_rom->data() : nullptr; }
+	// **キットの番号**（パートの塊の +0x110 に入る値。drum_record に渡す）。バンク 127 はプログラム → 番号の表
+	// （名前の表と同じ番号）。バンク 126 は firmware で 1 つずつ選んで確かめた値（SFXKit 1・2 が 47・48、
+	// TknoKtKS〜ChinaKit が 28〜33）。キットの無いプログラムは -1
+	int kit_number(int msb, int prog) const
+	{
+		if (!m_ok || kit_name(msb, prog).empty())
+			return -1;
+		if (msb == 127)
+			return byte(KIT_MAP + u32(prog & 0x7f));
+		switch (prog) {
+		case 0: return 47;
+		case 1: return 48;
+		case 16: return 28;
+		case 17: return 29;
+		case 18: return 30;
+		case 32: return 31;
+		case 33: return 32;
+		case 34: return 33;
+		}
+		return -1;
+	}
+	// **絵の番号**（プログラムで決まる。効果音のバンク 64 は 57、ドラムは -2）と、その絵
+	static constexpr int ICON_DRUM = -2;
+	int icon_index(int msb, int prog) const
+	{
+		if (!m_ok)
+			return -1;
+		if (msb == 127 || msb == 126)
+			return ICON_DRUM;
+		return msb == 64 ? 57 : int(byte(ICON_OF_PROGRAM + u32(prog & 0x7f)));
+	}
+	bool icon_rows(int index, u16 rows[16]) const
+	{
+		if (!m_ok || (index < 0 && index != ICON_DRUM) || index > 57)
+			return false;
+		for (int y = 0; y < 16; y++)
+			rows[y] = index == ICON_DRUM ? u16(word(DRUM_ICON + u32(y) * 2) & 0xfffe) : word(ICONS + u32(index) * 32 + u32(y) * 2);
+		return true;
+	}
 	// パートの塊（ワーク RAM の写し）から、選んでいる音色の記録の番地。無ければ 0
 	u32 voice_record(const u8 *part_ram) const { return m_ok ? record(part_ram) : 0; }
 
