@@ -241,10 +241,11 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 				gui.key(sdl_key_to_shared(ev.key.key), false);
 				break;
 			case SDL_EVENT_DROP_FILE:
-				if (ev.drop.data) {
+				// SDL3 owns the event's memory: the name must not be freed here
+				// (README-migration: "you should not free the data in
+				// SDL_EVENT_DROP_FILE"). Freeing it crashed on the drop (issue #124)
+				if (ev.drop.data)
 					play_dropped_file(ev.drop.data);
-					SDL_free(const_cast<char *>(ev.drop.data));
-				}
 				break;
 			default:
 				break;
