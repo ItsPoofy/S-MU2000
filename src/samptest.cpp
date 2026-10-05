@@ -1577,6 +1577,54 @@ int main(int argc, char **argv)
 			check(c3 > 0.003 && c3 > 20 * b2, "まるごとの SysEx: 戻した音色が鳴る",
 			      "261.6Hz " + std::to_string(c3) + "、隣の鍵 " + std::to_string(b2));
 
+			// 外の音を MU のエフェクトに通す（mu2000::set_external_audio。プラグインボードの音が入る道）。
+			// 440Hz を 0.1 の大きさで 0.3 秒入れる。dry はそのままの大きさで出て、止めればすぐ消える。
+			// reverb は止めた後に尾が残る。chorus も鳴る。insertion1 は、ディストーションを割り当てると鳴る
+			{
+				m.pump(3000);          // 前の検査の音の尾が消えるのを待つ
+				auto inject = [&](mu2000::ext_bus bus) {
+					m.out.clear();
+					m.collect = true;
+					for (u32 i = 0; i < RATE * 3 / 10; i++) {
+						const float v = 0.1f * float(std::sin(2 * PI * 440.0 * double(i) / RATE));
+						m.mu.set_external_audio(bus, v, v);
+						m.pump(0);
+						s32 l, r;
+						m.mu.run_sample(l, r);
+						m.out.push_back((double(l) + double(r)) * 0.5 / mu2000::DAC_FULL_SCALE);
+					}
+					m.mu.clear_external_audio();
+					m.pump(500);
+					m.collect = false;
+					m.pump(1500);
+					return m.out;
+				};
+				auto level = [](const std::vector<double> &x, size_t from, size_t n) {
+					double s = 0;
+					for (size_t i = from; i < from + n && i < x.size(); i++)
+						s += x[i] * x[i];
+					return std::sqrt(s / double(n));
+				};
+				const size_t on = RATE / 10, len = RATE / 5, off = RATE * 3 / 10 + RATE / 20, tail = RATE / 10;
+				const std::vector<double> dry = inject(mu2000::ext_bus::dry), rev = inject(mu2000::ext_bus::reverb),
+				                          cho = inject(mu2000::ext_bus::chorus), ins_off = inject(mu2000::ext_bus::insertion1);
+				// インサーション 1 をディストーションにしてパート 1 へ（XG 03 00 00 = 49 00、03 00 0C = 00）
+				for (u8 b : { u8(0xf0), u8(0x43), u8(0x10), u8(0x4c), u8(0x03), u8(0x00), u8(0x00), u8(0x49), u8(0x00), u8(0xf7),
+				              u8(0xf0), u8(0x43), u8(0x10), u8(0x4c), u8(0x03), u8(0x00), u8(0x0c), u8(0x00), u8(0xf7) })
+					m.mu.midi_in(b, 0);
+				m.pump(500);
+				const std::vector<double> ins_on = inject(mu2000::ext_bus::insertion1);
+				const double in_rms = 0.1 / std::sqrt(2.0);
+				check(std::fabs(level(dry, on, len) / in_rms - 1.0) < 0.03 && level(dry, off, tail) < 0.005 * in_rms &&
+				      level(rev, on, len) > 0.1 * in_rms && level(rev, off, tail) > 0.05 * in_rms &&
+				      level(cho, on, len) > 0.3 * in_rms && level(ins_off, on, len) < 0.005 * in_rms && level(ins_on, on, len) > 0.05 * in_rms,
+				      "外の音をエフェクトに通す",
+				      "dry " + std::to_string(level(dry, on, len) / in_rms) + " 倍、reverb " + std::to_string(level(rev, on, len) / in_rms) +
+				      " 倍（止めた後 " + std::to_string(level(rev, off, tail) / in_rms) + "）、chorus " + std::to_string(level(cho, on, len) / in_rms) +
+				      " 倍、insertion1 " + std::to_string(level(ins_on, on, len) / in_rms) + " 倍（割り当て前 " +
+				      std::to_string(level(ins_off, on, len) / in_rms) + "）、dry を止めた後 " + std::to_string(level(dry, off, tail) / in_rms));
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])

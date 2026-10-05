@@ -135,6 +135,11 @@ public:
 	// S-MU2000: 鳴らさない声（bit n = 声 n）。その声の出力を、ミックスと送りに入る前に 0 にする。
 	// firmware が MIDI を受けないとき（デモ曲の再生中）でもパートを消せるように（mu2000::set_part_mute）
 	std::atomic<u64> m_voice_mute{0};
+	// S-MU2000: 外から来た音を、MEG の入口（m20-m2f。ミキサの出力 8-15 の左右）に足す。
+	// プラグインボードの音がエフェクトへ入る道の代わり（mu2000::set_external_audio）。0 なら何もしない。
+	// 考え方は OnjLouis さんの mu2026-smu-engine（S-MU2000 のフォーク、BSD-3）の external fx buses から
+	std::array<s32, 16> m_ext_bus = {};
+	bool m_ext_on = false;
 	// S-MU2000: MEG の m20-m2f を 1 サンプルごとに渡す口。in は MEG を回す前（ミキサからの送り = エフェクトの入口）、
 	// out は回した直後（エフェクトの出口。次のサンプルでミキサの入力 0x40-0x4f になる）。firmware の組む MEG は
 	// どのエフェクトも出口を入口と同じ番地に書き戻す。音色の窓のエフェクトのスペクトラムに使う。音には触らない
