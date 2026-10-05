@@ -26,6 +26,7 @@
 // The mouse wheel drives the dial. The real machine has a rotary encoder in
 // that spot too, and it does the same job as the VALUE -/+ buttons.
 
+#include "compat/cli_text.h"
 #include "compat/console.h"
 #include "mu2000.h"
 
@@ -37,6 +38,7 @@
 int main(int argc, char **argv)
 {
 	smu2000::init_console_utf8();
+	smu2000::cli::init(argc, argv);       // -jp で、コンソールの言葉を日本語に
 
 	ui::tool_args a;
 	a.latency = 30;        // per-backend default; the shared parser keeps it
@@ -46,6 +48,9 @@ int main(int argc, char **argv)
 
 	// The flags are shared (ui/tool_args.h); only latency above stays per side
 	const int parsed = ui::parse_tool_args(argc, argv, a, eng_opts, out_opts, win_opts);
+	// コンソールの言葉は、画面の言葉が日本語なら日本語（-jp や SMU2000_LANG でも）
+	if (ui::get_lang() == ui::lang::ja)
+		smu2000::cli::set_japanese(true);
 	// The language resolves here, from the parsed --lang (then editor.ini,
 	// then the locale), before any texts() use below
 	ui::init_lang(a.lang.c_str());

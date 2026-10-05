@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "compat/cli_text.h"
 #include "sampling.h"
 #include "smartmedia.h"
 #include "state.h"
@@ -450,7 +451,7 @@ public:
 	const std::string &error() const { return m_error; }
 
 	void print_swp_widths() const
-	{ std::printf("SWP30 アクセス: 書き byte %llu / word %llu / dword %llu、読み byte %llu\n",
+	{ std::printf(CLI_T("SWP30 access: writes byte %llu / word %llu / dword %llu, reads byte %llu\n", "SWP30 アクセス: 書き byte %llu / word %llu / dword %llu、読み byte %llu\n"),
 	              (unsigned long long)m_swp_w8, (unsigned long long)m_swp_w16,
 	              (unsigned long long)m_swp_w32, (unsigned long long)m_swp_r8); }
 

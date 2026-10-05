@@ -2,6 +2,7 @@
 //
 // MU2000 一台ぶんの組み立て。配置は MAME の ymmu2000.cpp と同じ。
 
+#include "compat/cli_text.h"
 #include "mu2000.h"
 #include "lcdfont.h"
 #include "roms_dir.h"
@@ -378,7 +379,7 @@ bool mu2000::load_program(const std::string &path)
 {
 	std::vector<u8> raw;
 	if (!read_file(path, raw, 0x400000)) {
-		m_error = "プログラム ROM を読めない（4MB でないか、見つからない）: " + path;
+		m_error = CLI_T("Cannot read the program ROM (not 4MB, or not found): ", "プログラム ROM を読めない（4MB でないか、見つからない）: ") + path;
 		return false;
 	}
 	return load_program_data(raw.data(), raw.size());
@@ -387,7 +388,7 @@ bool mu2000::load_program(const std::string &path)
 bool mu2000::load_program_data(const u8 *data, size_t size)
 {
 	if (!data || size != 0x400000) {
-		m_error = "プログラム ROM の大きさが 4MB でない";
+		m_error = CLI_T("The program ROM is not 4MB", "プログラム ROM の大きさが 4MB でない");
 		return false;
 	}
 	set_program_rom(std::make_shared<std::vector<u8>>(data, data + size));
@@ -432,7 +433,7 @@ bool mu2000::load_wave(const std::string &dir)
 	for (int i = 0; i < 4; i++) {
 		const std::string path = dir + "/" + WAVE_ROM_NAMES[i];
 		if (!read_file(path, parts[i], 0x800000)) {
-			m_error = "波形 ROM を読めない（8MB でないか、見つからない）: " + path;
+			m_error = CLI_T("Cannot read the wave ROM (not 8MB, or not found): ", "波形 ROM を読めない（8MB でないか、見つからない）: ") + path;
 			return false;
 		}
 	}
@@ -449,7 +450,7 @@ bool mu2000::load_wave_data(const u8 *const part[4], const size_t size[4])
 	//   ic53 / ic54 -> 0x1000000 語目から同じ形で
 	for (int i = 0; i < 4; i++)
 		if (!part[i] || size[i] != 0x800000) {
-			m_error = std::string("波形 ROM の大きさが 8MB でない: ") + WAVE_ROM_NAMES[i];
+			m_error = std::string(CLI_T("The wave ROM is not 8MB: ", "波形 ROM の大きさが 8MB でない: ")) + WAVE_ROM_NAMES[i];
 			return false;
 		}
 	auto rom = std::make_shared<std::vector<u8>>(0x2000000, 0);   // 32MB
@@ -472,7 +473,7 @@ bool mu2000::load_sintab(const std::string &path)
 {
 	std::vector<u8> raw;
 	if (!read_file(path, raw, 0x10000)) {
-		m_error = "sin 表を読めない（64KB でないか、見つからない）: " + path;
+		m_error = CLI_T("Cannot read the sine table (not 64KB, or not found): ", "sin 表を読めない（64KB でないか、見つからない）: ") + path;
 		return false;
 	}
 	return load_sintab_data(raw.data(), raw.size());
@@ -481,7 +482,7 @@ bool mu2000::load_sintab(const std::string &path)
 bool mu2000::load_sintab_data(const u8 *data, size_t size)
 {
 	if (!data || size != 0x10000) {
-		m_error = "sin 表の大きさが 64KB でない";
+		m_error = CLI_T("The sine table is not 64KB", "sin 表の大きさが 64KB でない");
 		return false;
 	}
 	auto rom = std::make_shared<std::vector<u16>>(size / 2);
@@ -604,7 +605,7 @@ bool mu2000::load_lcd_font(const std::string &path)
 {
 	auto rom = std::make_shared<std::vector<u8>>();
 	if (!read_file(path, *rom, 0x1000)) {
-		m_error = "LCD の字を読めない（4KB でないか、見つからない）: " + path;
+		m_error = CLI_T("Cannot read the LCD font (not 4KB, or not found): ", "LCD の字を読めない（4KB でないか、見つからない）: ") + path;
 		return false;
 	}
 	set_lcd_font(std::move(rom));
@@ -3687,11 +3688,11 @@ bool mu2000::load_state(const u8 *p, size_t n, std::string &err)
 	s.v(magic);
 	s.v(ver);
 	if (!s.ok() || magic != STATE_MAGIC) {
-		err = "これは S-MU2000 の状態ではない";
+		err = CLI_T("This is not an S-MU2000 state", "これは S-MU2000 の状態ではない");
 		return false;
 	}
 	if (ver < STATE_VERSION_OLDEST || ver > STATE_VERSION) {
-		err = "状態の形が違う（この版では読めない）";
+		err = CLI_T("The state has a different layout (this version cannot read it)", "状態の形が違う（この版では読めない）");
 		return false;
 	}
 	s.set_version(ver);

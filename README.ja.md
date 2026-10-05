@@ -127,6 +127,10 @@ build/render.exe <rom ディレクトリ> <MIDI> <出力 wav> [秒数]  ファ�
                  [--usb]                            USB の口で起動し、曲の口 1-4 を A-D へ渡す
                  [--fast-midi]                      firmware が読める速さで MIDI を渡す
                  [--card 絵.img] [--adc-in 入力.wav]  SmartMedia を差す／A/D INPUT に流す
+                 [--sample-rate Hz] [--bit-depth 8|16|24|32]  出力の形（既定は 44100Hz・16bit。32 は浮動小数）
+                 [--gain x] [--normalize]           音量を何倍かにする／満杯までそろえる
+                                                    引数なしで起動すると、引数の一覧が出る。
+                                                    コマンドラインの表示は英語が既定で、-jp を付けると日本語
 build/panel.exe  <rom ディレクトリ> [--keys "play,edit"] [--list]  パネルを文字だけで動かす
 build/boot.exe   <rom ディレクトリ> [サイクル数]       起動の確認
 build/statetest.exe <rom ディレクトリ> [MIDI]          状態の保存と復元が正しいかを確かめる
