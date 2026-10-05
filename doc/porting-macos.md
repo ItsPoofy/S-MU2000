@@ -101,10 +101,10 @@ branch caught up, and three things the merge left as Windows-only are here now.
   back every two seconds, remembers the card in `gui.ini` and puts it back on the
   next start. It is the same `src/smartmedia.h` the Windows side uses.
 * **A/D INPUT capture on macOS** (`src/ui/audio_in_mac.cpp`). `ui/audio_in.h` now
-  splits by platform the way `audio_out.h` does: a HAL input AudioUnit, whose
-  input callback runs on CoreAudio's real-time thread, feeds the ring that
-  `pop()` reads. The device's own rate is converted to 44100Hz with the same
-  `ui::resampler` the Windows side uses. The device is chosen from the port menu
+  splits by platform the way `audio_out.h` does: the engine's input node, tapped
+  on its real-time thread, feeds the ring that `pop()` reads — the same code iOS
+  runs, in `src/ui/audio_apple.mm`. The device's own rate is converted to 44100Hz
+  with the same `ui::resampler` the Windows side uses. The device is chosen from the port menu
   (`ui::audio_in::list()`), remembered by name in `gui.ini`, and `gui --list`
   prints the list.
 
@@ -355,7 +355,7 @@ Shared logic stays in one place; only the OS edge is split.
 
 | Concern | Windows | macOS |
 |---|---|---|
-| Audio output | `src/ui/audio_out.cpp` (WASAPI) | `src/ui/audio_out_mac.cpp` (CoreAudio) |
+| Audio output | `src/ui/audio_out.cpp` (WASAPI) | `src/ui/audio_apple.mm` (shared with iOS) + `audio_out_mac.cpp` (CoreAudio questions) |
 | MIDI input | `src/ui/midi_in.cpp` (WinMM) | `src/ui/midi_in_mac.cpp` (CoreMIDI) |
 | MIDI output | `src/ui/midi_out.cpp` (WinMM) | `src/ui/midi_out_mac.cpp` (CoreMIDI) |
 | GDI subset | `compat/gdi.h` → `<windows.h>` | `compat/gdi.h` + `compat/gdi_mac.cpp` (CoreGraphics) |

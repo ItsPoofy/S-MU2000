@@ -74,8 +74,8 @@ Two facts shape the design:
 
   | concern | macOS | Linux |
   |---|---|---|
-  | audio out | `src/ui/audio_out_mac.cpp` (582) | WASAPI version |
-  | audio in | `src/ui/audio_in_mac.cpp` (469) | — |
+  | audio out | `src/ui/audio_apple.mm` (shared) + `audio_out_mac.cpp` (HAL only) | WASAPI version |
+  | audio in | `src/ui/audio_apple.mm` (shared) + `audio_in_mac.cpp` (HAL only) | — |
   | MIDI in | `src/ui/midi_in_mac.cpp` (160) | `src/ui/midi_in_linux.cpp` |
   | MIDI out | `src/ui/midi_out_mac.cpp` (256) | `src/ui/midi_out_linux.cpp` |
   | window | `src/ui/window_mac.mm` (637) | `gui_linux.cpp` |
@@ -84,8 +84,13 @@ Two facts shape the design:
 
   - `midi_in_ios.cpp` / `midi_out_ios.cpp` — **CoreMIDI is the same API on iOS**, so these
     should be close to copies of the macOS ones.
-  - `audio_out_ios.cpp` / `audio_in_ios.cpp` — `AVAudioSession` + RemoteIO in place of the
-    CoreAudio HAL. This is the only genuinely rewritten audio code.
+  - `audio_ios.mm` — the `AVAudioSession` and the answers to what the engine cannot ask.
+    **What this study got wrong:** the audio was expected to be the one genuinely rewritten
+    part, and it isn't. `AVAudioEngine`'s input and output nodes hand out the very `AudioUnit`
+    a hand-written backend owns, so device, buffer size, stream format and workgroup are the
+    same properties on both systems. The render path therefore became
+    `src/ui/audio_apple.mm`, shared with macOS, and what stays per platform is the short list
+    in `src/ui/audio_apple.h`: the session (iOS), device enumeration and hog mode (macOS).
   - `window_ios.mm` — UIKit + the same `CAMetalLayer`/Metal/ImGui stack.
 
 #### A design decision worth making deliberately
@@ -98,7 +103,9 @@ The standalone can either **host the AUv3** or **run the engine directly** the w
   makes the "could become the future macOS app too" story true — the same rendering code
   everywhere.
 - *Running the engine directly* reuses more of the existing standalone scaffolding
-  (`gui.cpp`'s device abstraction) but means **two audio paths** to keep correct on iOS.
+  (`gui.cpp`'s device abstraction) but means **two audio paths** to keep correct on iOS — one
+  for the standalone and one for the extension (which, as an AUv3, takes the host's audio and
+  has none of its own).
 
 Recommended: **host the AUv3**, and take only the MIDI wiring pattern from `gui.cpp`. The
 device-layer files above are then needed only for the host app's own I/O, not for the engine.

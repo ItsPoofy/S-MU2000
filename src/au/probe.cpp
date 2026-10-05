@@ -21,6 +21,7 @@
 
 #include "compat/console.h"
 #include "smf.h"
+#include "ui/wav.h"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -92,17 +93,7 @@ void write_wav(const std::string &path, const std::vector<int16_t> &pcm, uint32_
 		std::fprintf(stderr, "書けない: %s\n", path.c_str());
 		return;
 	}
-	const uint32_t data = uint32_t(pcm.size() * 2);
-	const uint32_t riff = 36 + data;
-	const uint16_t ch = 2, bits = 16;
-	const uint32_t byte_rate = rate * ch * bits / 8;
-	const uint16_t align = uint16_t(ch * bits / 8);
-	auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
-	auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
-	std::fwrite("RIFF", 1, 4, f); u32(riff);
-	std::fwrite("WAVEfmt ", 1, 8, f); u32(16); u16(1); u16(ch);
-	u32(rate); u32(byte_rate); u16(align); u16(bits);
-	std::fwrite("data", 1, 4, f); u32(data);
+	ui::write_wav_header(f, uint32_t(pcm.size() / 2), rate);
 	if (!pcm.empty())
 		std::fwrite(pcm.data(), 2, pcm.size(), f);
 	std::fclose(f);

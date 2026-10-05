@@ -169,8 +169,17 @@ ifeq ($(PLATFORM),windows)
 AUDIO_OUTPUT_TEST_SRC := src/ui/audio_out.cpp
 AUDIO_OUTPUT_TEST_LIBS := -lole32 -lavrt
 else ifeq ($(PLATFORM),macos)
-AUDIO_OUTPUT_TEST_SRC := src/ui/audio_out_mac.cpp
-AUDIO_OUTPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
+# The macOS backend is the shared render path plus the HAL questions it asks, so
+# the test links audio_apple.mm as well - and compiles it as Objective-C++ with
+# ARC, the way the mac %.mm rule does.
+# audio_in_mac.cpp comes along because audio_apple.mm holds both halves and the
+# recording one asks its own questions of the platform (same reason live links
+# it: MAC_IO_OBJS). The test never calls it.
+AUDIO_OUTPUT_TEST_SRC := src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
+                        src/ui/audio_apple.mm
+AUDIO_OUTPUT_TEST_FLAGS := -fobjc-arc
+AUDIO_OUTPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation \
+                         -framework AVFAudio -framework Foundation
 else
 AUDIO_OUTPUT_TEST_SRC := src/ui/audio_out_linux.cpp
 AUDIO_OUTPUT_TEST_LIBS := -lasound
@@ -180,11 +189,38 @@ $(BUILD)/audio_output_test$(EXE): tools/test_audio_output.cpp $(AUDIO_OUTPUT_TES
                                src/ui/audio_output_switch.h src/ui/audio_out.h \
                                src/ui/menu.h src/ui/texts.h src/ui/texts_en.h src/ui/texts_ja.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ tools/test_audio_output.cpp $(AUDIO_OUTPUT_TEST_SRC) $(LDFLAGS) $(AUDIO_OUTPUT_TEST_LIBS)
+	$(CXX) $(CXXFLAGS) $(AUDIO_OUTPUT_TEST_FLAGS) -o $@ tools/test_audio_output.cpp \
+	    $(AUDIO_OUTPUT_TEST_SRC) $(LDFLAGS) $(AUDIO_OUTPUT_TEST_LIBS)
 
 .PHONY: check-audio-output
 check-audio-output: $(BUILD)/audio_output_test$(EXE)
 	$(WINE) $(BUILD)/audio_output_test$(EXE) $(if $(AUDIO_DEVICES),--devices)
+
+# The recording half, same shape. The listing is the part every run can check;
+# --devices opens a real device where one may be opened (AUDIO_DEVICES=1).
+ifeq ($(PLATFORM),windows)
+AUDIO_INPUT_TEST_SRC := src/ui/audio_in.cpp
+AUDIO_INPUT_TEST_LIBS := -lole32 -lavrt -lwinmm
+else ifeq ($(PLATFORM),macos)
+AUDIO_INPUT_TEST_SRC := src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
+                        src/ui/audio_apple.mm
+AUDIO_INPUT_TEST_FLAGS := -fobjc-arc
+AUDIO_INPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation \
+                        -framework AVFAudio -framework Foundation
+else
+AUDIO_INPUT_TEST_SRC := src/ui/audio_in_linux.cpp
+AUDIO_INPUT_TEST_LIBS := -lasound
+endif
+
+$(BUILD)/audio_input_test$(EXE): tools/test_audio_input.cpp $(AUDIO_INPUT_TEST_SRC) \
+                                src/ui/audio_in.h src/ui/audio_out.h src/ui/lang.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(AUDIO_INPUT_TEST_FLAGS) -o $@ tools/test_audio_input.cpp \
+	    $(AUDIO_INPUT_TEST_SRC) $(LDFLAGS) $(AUDIO_INPUT_TEST_LIBS)
+
+.PHONY: check-audio-input
+check-audio-input: $(BUILD)/audio_input_test$(EXE)
+	$(WINE) $(BUILD)/audio_input_test$(EXE) $(if $(AUDIO_DEVICES),--devices)
 
 # The per-user data directory -- the same place compat/paths.h's config_dir()
 # points at, where roms/, nvram/ and the .ini files already live. The panel art
@@ -766,13 +802,17 @@ else # macOS
 export MACOSX_DEPLOYMENT_TARGET := 11.0
 
 MAC_FRAMEWORKS := -framework CoreAudio -framework AudioToolbox \
+                  -framework AVFAudio -framework Foundation \
                   -framework CoreMIDI -framework AudioUnit \
                   -framework CoreFoundation -framework CoreGraphics \
                   -framework CoreText -framework Cocoa \
                   -framework UniformTypeIdentifiers \
                   -framework QuartzCore
 
-MAC_IO_OBJS := $(BUILD)/src/ui/audio_out_mac.o $(BUILD)/src/ui/midi_in_mac.o
+# audio_apple.o is the render path audio_out_mac.cpp shares with iOS; live links
+# it directly, gui through MAC_GUI_SRCS below.
+MAC_IO_OBJS := $(BUILD)/src/ui/audio_out_mac.o $(BUILD)/src/ui/audio_apple.o \
+               $(BUILD)/src/ui/audio_in_mac.o $(BUILD)/src/ui/midi_in_mac.o
 
 $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/live.o
 	@mkdir -p $(dir $@)
@@ -788,7 +828,7 @@ $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/l
 # window_mac.mm is compiled as Objective-C++, and so is src/ui/shot_mac.mm.
 MAC_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
-                src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
+                src/ui/audio_out_mac.cpp src/ui/audio_apple.mm src/ui/audio_in_mac.cpp \
                 src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp \
                 src/xg/model.cpp \
                 src/ui/window_mac.mm src/ui/app_mac.cpp src/ui/shot_mac.mm \
@@ -1657,9 +1697,11 @@ IOS_STANDALONE := $(IOS_APP)/Standalone       # the real front end, step 1
 #                and the main
 #   *_PC_SRCS    the five PC editors, which are the same files as everywhere
 #
-# The deliberate difference from the macOS list: no *_mac equivalents for audio or
-# MIDI yet. audio_out_mac.cpp and friends are near-copies waiting for this step to
-# finish, and listing them now would only fail the link on missing symbols.
+# The deliberate difference from the macOS list: no *_mac equivalents for MIDI, and
+# none for audio either - audio is shared instead (src/ui/audio_apple.mm is in
+# IOS_AUDIO_SRCS and answers the questions audio_ios.mm cannot). midi_in_mac.cpp
+# and friends are the near-copies still waiting for this step to finish, and
+# listing them now would only fail the link on missing symbols.
 #
 # src/ios/smoke.mm is not in here. It has its own main() and answers a different
 # question ("does the extension register?"), so it is a separate executable.
@@ -1688,7 +1730,9 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
 # render block calls the stored fill_fn, ui::resampler when the device rate is not
 # 44100. Audio in stays a stub (RemoteIO next); only the symbols app.h needs.
 IOS_APPLE_PORT_SRCS := src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp
-IOS_AUDIO_SRCS := src/ui/audio_ios.mm
+# audio_apple.mm is the render path both platforms share; audio_ios.mm is
+# what only iOS has (the session, its observers, its answers).
+IOS_AUDIO_SRCS := src/ui/audio_ios.mm src/ui/audio_apple.mm
 
 IOS_GUI_OBJS := $(IOS_GUI_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_GUI_OBJS := $(IOS_GUI_OBJS:%.mm=$(IOS_BUILD)/%.o)
