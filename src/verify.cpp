@@ -5,7 +5,9 @@
 #include "compat/a64asm.h"
 #include "ui/bend_thinner.h"
 #include "smf.h"
+#include "ui/font_check.h"
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -136,6 +138,67 @@ static void check_smf_player()
 	std::printf("頭（0 秒）へ: %zu 個\n", smf::chase(ev, 0.0).size());
 }
 
+// 文字ファイルを読めるかの確かめ（ui/font_check.h、issue #135）。表の並びだけの小さな書体を作って試す:
+// glyf の書体・CFF の書体は通り、CFF2 だけの書体（可変フォント）・cmap に Unicode の表が無い書体・
+// 束（TTC）の無い番号・ごみは通らない
+static void check_font_parses()
+{
+	auto be16 = [](std::vector<u8> &v, u32 x) { v.push_back(u8(x >> 8)); v.push_back(u8(x)); };
+	auto be32 = [](std::vector<u8> &v, u32 x) { v.push_back(u8(x >> 24)); v.push_back(u8(x >> 16)); v.push_back(u8(x >> 8)); v.push_back(u8(x)); };
+	// 表の名前の並びと、cmap の（platform, encoding）から書体を作る
+	auto make = [&](const char *magic, std::initializer_list<const char *> names, u32 platform, u32 encoding) {
+		std::vector<u8> f(magic, magic + 4);
+		be16(f, u32(names.size()));
+		be16(f, 0); be16(f, 0); be16(f, 0);
+		const u32 data = 12 + u32(names.size()) * 16;
+		u32 at = data;
+		for (const char *nm : names) {
+			f.insert(f.end(), nm, nm + 4);
+			be32(f, 0);
+			be32(f, at);
+			be32(f, 16);
+			at += 16;
+		}
+		for (const char *nm : names) {
+			std::vector<u8> t(16, 0);
+			if (!std::strncmp(nm, "cmap", 4)) {
+				t = { 0, 0, 0, 1, u8(platform >> 8), u8(platform), u8(encoding >> 8), u8(encoding), 0, 0, 0, 12, 0, 0, 0, 0 };
+			}
+			f.insert(f.end(), t.begin(), t.end());
+		}
+		return f;
+	};
+	const char ttf[4] = { 0, 1, 0, 0 };
+	const std::vector<u8> glyf = make(ttf, { "cmap", "glyf", "head", "hhea", "hmtx", "loca" }, 3, 1);
+	const std::vector<u8> cff = make("OTTO", { "CFF ", "cmap", "head", "hhea", "hmtx" }, 3, 10);
+	const std::vector<u8> cff2 = make("OTTO", { "CFF2", "cmap", "head", "hhea", "hmtx" }, 3, 1);
+	const std::vector<u8> symbol = make(ttf, { "cmap", "glyf", "head", "hhea", "hmtx", "loca" }, 3, 0);
+	const std::vector<u8> noloca = make(ttf, { "cmap", "glyf", "head", "hhea", "hmtx" }, 0, 3);
+	// 束: 2 つ目に glyf の書体を入れる（1 つ目は CFF2）。番地は束の頭から
+	std::vector<u8> ttc = { 't', 't', 'c', 'f', 0, 1, 0, 0, 0, 0, 0, 2 };
+	be32(ttc, 20);
+	be32(ttc, 20 + u32(cff2.size()));
+	auto append = [&](const std::vector<u8> &font) {
+		const u32 base = u32(ttc.size());
+		std::vector<u8> g = font;
+		const u32 tables = u32(g[4]) << 8 | g[5];
+		for (u32 i = 0; i < tables; i++) {
+			const u32 e = 12 + i * 16 + 8;
+			const u32 off = (u32(g[e]) << 24 | u32(g[e + 1]) << 16 | u32(g[e + 2]) << 8 | g[e + 3]) + base;
+			g[e] = u8(off >> 24); g[e + 1] = u8(off >> 16); g[e + 2] = u8(off >> 8); g[e + 3] = u8(off);
+		}
+		ttc.insert(ttc.end(), g.begin(), g.end());
+	};
+	append(cff2);
+	append(glyf);
+	const std::vector<u8> junk(64, 0x55);
+	std::printf("文字ファイルを読めるか: glyf %d・CFF %d・CFF2 だけ %d・Unicode の表なし %d・loca なし %d・束の 1 つ目 %d・2 つ目 %d・無い番号 %d・ごみ %d・途中で切れた %d\n",
+	            ui::font_parses(glyf.data(), glyf.size()), ui::font_parses(cff.data(), cff.size()), ui::font_parses(cff2.data(), cff2.size()),
+	            ui::font_parses(symbol.data(), symbol.size()), ui::font_parses(noloca.data(), noloca.size()),
+	            ui::font_parses(ttc.data(), ttc.size(), 0), ui::font_parses(ttc.data(), ttc.size(), 1), ui::font_parses(ttc.data(), ttc.size(), 2),
+	            ui::font_parses(junk.data(), junk.size()), ui::font_parses(glyf.data(), 40));
+}
+
 int main()
 {
 	std::vector<u8>  wave(64 * 1024 * 1024, 0);   // 波形 ROM 相当のダミー
@@ -173,6 +236,7 @@ int main()
 
 	check_bend_thinner();
 	check_smf_player();
+	check_font_parses();
 
 	// Roland の液晶のデータ（F0 41 10 45 12）だけを抜き、GS リセット（F0 41 10 42 12）と XG（F0 43）は通す
 	{
