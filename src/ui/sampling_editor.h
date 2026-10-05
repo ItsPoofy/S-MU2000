@@ -24,6 +24,7 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -61,6 +62,10 @@ private:
 	void romwave_pane(bridge &br);
 	void romwave_build();
 	std::string romwave_label(int w);
+	// 内蔵音色のタブ（sampling_presets.cpp）
+	void preset_pane(bridge &br);
+	void preset_restore(bridge &br);          // 借りたサンプル音色の枠を元に戻す
+	void preset_open(int msb, int lsb, int prog);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
 	void load_sysex(const std::vector<u8> &bytes, bridge &br);
 	void apply_sysex(bridge &br);
@@ -220,7 +225,16 @@ private:
 	double m_rw_play_at = 0;
 	bool m_rw_drawn = false;           // この描画で内蔵ウェーブのタブを出したか（ほかのタブへ移ったら試聴を止める）
 	bool m_hidden_stopped = false;     // 窓を閉じたときの「止める」を出し済み（閉じている間、何度も出さない）
-	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ）
+	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ、3 = 内蔵音色）
+	// 内蔵音色のタブ。一覧、選んでいる音色、鳴らす要素、試聴の鍵と強さ、借りた枠の元の中身
+	std::vector<xg::preset_voice> m_pv_list;
+	bool m_pv_built = false;
+	int m_pv_sel = 0;
+	char m_pv_find[32] = {};
+	bool m_pv_on[4] = { true, true, true, true };
+	int m_pv_key = 60, m_pv_vel = 100, m_pv_held = -1;
+	bool m_pv_scroll = false, m_pv_drawn = false, m_pv_borrowed = false;
+	std::shared_ptr<std::vector<u8>> m_pv_keep;
 	char m_wave_find[32] = {};         // 組の絞り込み
 	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列
 	struct sx_job {

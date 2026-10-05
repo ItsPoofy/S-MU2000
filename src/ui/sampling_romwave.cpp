@@ -287,7 +287,12 @@ void sampling_editor::romwave_pane(bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(rw_none, "(none)"));
 	for (const xg::wave_voice_use &u : info.voices) {
 		if (u.msb >= 0) {
-			ImGui::TextUnformatted(u.name.c_str());
+			ImGui::PushID(&u);
+			if (ImGui::Selectable(u.name.c_str(), false, 0, ImVec2(fs * 6.5f, 0)))
+				preset_open(u.msb, u.lsb, u.prog);        // 内蔵音色のタブで、この音色の要素を見る
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(rw_voice_tip, "Click to see this voice's elements in the Built-in voices tab"));
+			ImGui::PopID();
 			ImGui::SameLine(fs * 7.0f);
 			ImGui::TextDisabled("MSB %d  LSB %d  #%d", u.msb, u.lsb, u.prog + 1);
 		} else {
