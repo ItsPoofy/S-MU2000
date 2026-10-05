@@ -17,6 +17,8 @@
 #include "ui/lang.h"      // get_lang(), so an English UI skips the merge below
 
 #include <cstddef>
+#include "font_check.h"
+
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -36,6 +38,7 @@ struct face_bytes {
 struct face_offer {
 	std::string                 path;
 	std::function<face_bytes()> fetch;
+	bool                        japanese = true;   // false: a Latin-only last resort (Linux)
 };
 
 // The families, most wanted first. The first five ship with every macOS since
@@ -410,24 +413,38 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 // answers with DejaVu, and every fullwidth bracket and kanji outside 0x00FF
 // comes out as a tofu box. An empty list is the honest answer.
 
-// The file for one family name, or nothing when the machine has no such family.
-// One family per call, so the walk takes the first that answers. The set comes
-// back ranked, so asking for the wanted weight and taking the first face is
-// enough; a family that keeps its weights in separate files resolves each to
-// its own, and one that does not answers the same face for both.
-static std::string cjk_fontconfig_match(const char *family, bool bold)
+// The files for one family name (none when the machine has no such family),
+// the wanted weight first.
+static void cjk_add_file(std::vector<std::string> &out, const FcPattern *font)
+{
+	FcChar8 *file = nullptr;
+	if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch || !file)
+		return;
+	std::string path = reinterpret_cast<const char *>(file);
+	if (std::find(out.begin(), out.end(), path) == out.end())
+		out.push_back(std::move(path));
+}
+
+// **Every** file is returned, in the order fontconfig ranks them, not just the
+// first: the first may be one the rasteriser cannot read. openSUSE Tumbleweed
+// ships Noto Sans CJK as a variable font (CFF2 outlines), which stb_truetype
+// rejects, and Dear ImGui asserts on a font it cannot parse (issue #135). The
+// walk in cjk_face_data() tries each in turn and keeps the first that parses.
+static std::vector<std::string> cjk_fontconfig_match(const char *family, bool bold)
 {
 	// A font's own family list holds its regional and weight names too, so
 	// "Noto Sans CJK" finds the "Noto Sans CJK JP" face without any prefix
 	// handling here: one family with regional files, not several families.
 	//
 	// Weight is an exact test, not a threshold, so a family with no bold comes
-	// back empty on the first pass and is taken as it is on the second.
-	std::string path;
-	for (int pass = 0; pass < 2 && path.empty(); pass++) {
+	// back empty on the first pass and is taken as it is on the second. The
+	// second pass always runs now, after the first: a family whose file at the
+	// wanted weight cannot be read may have another that can.
+	std::vector<std::string> paths;
+	for (int pass = 0; pass < 2; pass++) {
 		FcPattern *pat = FcPatternCreate();
 		if (!pat)
-			return {};
+			return paths;
 		FcPatternAddString(pat, FC_FAMILY,
 		                   reinterpret_cast<const FcChar8 *>(family));
 		if (!pass)
@@ -435,26 +452,23 @@ static std::string cjk_fontconfig_match(const char *family, bool bold)
 			                    bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
 		FcFontSet *set = FcFontList(nullptr, pat, nullptr);
 		if (set) {
-			for (int i = 0; i < set->nfont && path.empty(); i++) {
-				FcChar8 *file = nullptr;
-				if (FcPatternGetString(set->fonts[i], FC_FILE, 0, &file)
-				    == FcResultMatch && file)
-					path = reinterpret_cast<const char *>(file);
-			}
+			for (int i = 0; i < set->nfont; i++)
+				cjk_add_file(paths, set->fonts[i]);
 			FcFontSetDestroy(set);
 		}
 		FcPatternDestroy(pat);
 	}
-	return path;
+	return paths;
 }
 
-// The file for the first face fontconfig offers for these languages, or nothing
-// when it offers none.
-static std::string cjk_fontconfig_scan(std::initializer_list<const char *> langs)
+// The files of the faces fontconfig offers for these languages (none when it
+// offers none).
+static std::vector<std::string> cjk_fontconfig_scan(std::initializer_list<const char *> langs)
 {
+	std::vector<std::string> found;
 	FcPattern *pat = FcPatternCreate();
 	if (!pat)
-		return {};
+		return found;
 	FcLangSet *set = FcLangSetCreate();
 	for (const char *tag : langs)
 		FcLangSetAdd(set, reinterpret_cast<const FcChar8 *>(tag));
@@ -463,51 +477,47 @@ static std::string cjk_fontconfig_scan(std::initializer_list<const char *> langs
 	FcFontSet *faces = FcFontList(nullptr, pat, nullptr);
 	FcPatternDestroy(pat);
 	if (!faces)
-		return {};
-	std::string found;
-	for (int i = 0; i < faces->nfont && found.empty(); i++) {
-		FcChar8 *file = nullptr;
-		if (FcPatternGetString(faces->fonts[i], FC_FILE, 0, &file) == FcResultMatch
-		    && file)
-			found = reinterpret_cast<const char *>(file);
-	}
+		return found;
+	for (int i = 0; i < faces->nfont; i++)
+		cjk_add_file(found, faces->fonts[i]);
 	FcFontSetDestroy(faces);
 	return found;
 }
 
 // The program's one font, so it wants Latin as well as Japanese.
-static std::string cjk_fontconfig_any()
+static std::vector<std::string> cjk_fontconfig_any()
 {
 	return cjk_fontconfig_scan({ "ja", "en" });
 }
 
 // Japanese alone, for the merge source, so a CJK-only face will do.
-static std::string cjk_fontconfig_japanese()
+static std::vector<std::string> cjk_fontconfig_japanese()
 {
 	return cjk_fontconfig_scan({ "ja" });
 }
 
-// The system's own sans, for a machine with no Japanese face installed.
-static std::string cjk_fontconfig_sans()
+// The system's own sans, for a machine with no Japanese face installed: the
+// best match first, then what fontconfig would fall back to (FcFontSort), so
+// there is a next one to try when the best cannot be read.
+static std::vector<std::string> cjk_fontconfig_sans()
 {
+	std::vector<std::string> paths;
 	FcPattern *pat = FcPatternCreate();
 	if (!pat)
-		return {};
+		return paths;
 	FcPatternAddString(pat, FC_FAMILY,
 	                   reinterpret_cast<const FcChar8 *>("sans-serif"));
 	FcPatternAddDouble(pat, FC_SIZE, 16.0);
 	FcConfigSubstitute(nullptr, pat, FcMatchPattern);
 	FcDefaultSubstitute(pat);
 	FcResult res = FcResultNoMatch;
-	std::string path;
-	if (FcPattern *m = FcFontMatch(nullptr, pat, &res)) {
-		FcChar8 *file = nullptr;
-		if (FcPatternGetString(m, FC_FILE, 0, &file) == FcResultMatch && file)
-			path = reinterpret_cast<const char *>(file);
-		FcPatternDestroy(m);
+	if (FcFontSet *sorted = FcFontSort(nullptr, pat, FcTrue, nullptr, &res)) {
+		for (int i = 0; i < sorted->nfont && paths.size() < 24; i++)
+			cjk_add_file(paths, sorted->fonts[i]);
+		FcFontSetDestroy(sorted);
 	}
 	FcPatternDestroy(pat);
-	return path;
+	return paths;
 }
 
 // Whether the face the walk settles on draws Japanese. Every named family is a
@@ -529,22 +539,19 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 	cjk_primary_covers_japanese = true;
 #endif
 	for (const char *family : cjk_families)
-		if (std::string path = cjk_fontconfig_match(family, bold); !path.empty())
-			out.push_back({ std::move(path), {} });
-	// Nothing from the list: this machine simply has none of those families.
-	// A face that draws Japanese is still the right answer, so look for one by
-	// what it can render.
-	if (out.empty())
-		if (std::string path = cjk_fontconfig_any(); !path.empty())
-			out.push_back({ std::move(path), {} });
-	// And if it has no Japanese at all, a real Latin font beats the embedded
+		for (std::string &path : cjk_fontconfig_match(family, bold))
+			out.push_back({ std::move(path), {}, true });
+	// Not on the list (or none of those could be read): a face that draws
+	// Japanese is still the right answer, so look for one by what it can
+	// render.
+	for (std::string &path : cjk_fontconfig_any())
+		out.push_back({ std::move(path), {}, true });
+	// And if there is no Japanese at all, a real Latin font beats the embedded
 	// default. Japanese text will be tofu either way, but the rest of the UI
-	// stops looking like a 1996 demo.
-	if (out.empty())
-		if (std::string path = cjk_fontconfig_sans(); !path.empty()) {
-			cjk_primary_covers_japanese = false;
-			out.push_back({ std::move(path), {} });
-		}
+	// stops looking like a 1996 demo. These come last and are marked, so the
+	// walk knows to merge a Japanese face in (add_cjk_ui_font).
+	for (std::string &path : cjk_fontconfig_sans())
+		out.push_back({ std::move(path), {}, false });
 }
 
 #endif
@@ -563,6 +570,19 @@ static bool cjk_read_file(const std::string &path, std::vector<unsigned char> &d
 		data.insert(data.end(), buf, buf + n);
 	std::fclose(f);
 	return !data.empty();
+}
+
+// Whether the rasteriser can read this face. Asked on Linux only, where the
+// files come from whatever the distro installed; Windows and macOS hand over
+// system faces that have always parsed, and are left exactly as they were.
+static bool cjk_readable(const face_bytes &got)
+{
+#if !defined(_WIN32) && !defined(__APPLE__)
+	return ui::font_parses(got.data.data(), got.data.size(), got.face);
+#else
+	(void)got;
+	return true;
+#endif
 }
 
 static bool cjk_offer_bytes(const face_offer &offer, face_bytes &out)
@@ -589,7 +609,13 @@ inline const void *cjk_face_data(bool bold, size_t &bytes, int &face, float &em)
 		cjk_offers(bold, offers);
 		for (face_offer &offer : offers) {
 			face_bytes got;
-			if (cjk_offer_bytes(offer, got)) {
+			// Only a face the rasteriser can read: handing ImGui one it cannot
+			// parse is an assert, not an error return (font_check.h)
+			if (cjk_offer_bytes(offer, got) && cjk_readable(got)) {
+#if !defined(_WIN32) && !defined(__APPLE__)
+				if (!bold)
+					cjk_primary_covers_japanese = offer.japanese;
+#endif
 				kept[slot] = std::move(got);
 				break;
 			}
@@ -634,12 +660,14 @@ inline const void *cjk_japanese_only_data(size_t &bytes, int &face, float &em)
 	static face_bytes kept;
 	if (!walked) {
 		walked = true;
-		if (std::string path = cjk_fontconfig_japanese(); !path.empty()) {
+		for (const std::string &path : cjk_fontconfig_japanese()) {
 			face_offer o;
 			o.path = path;
 			face_bytes got;
-			if (cjk_offer_bytes(o, got))
+			if (cjk_offer_bytes(o, got) && cjk_readable(got)) {
 				kept = std::move(got);
+				break;
+			}
 		}
 	}
 	bytes = kept.data.size();
