@@ -259,7 +259,21 @@ public:
 	// 値は MAME 内部と同じ目盛りで、全振幅が DAC_FULL_SCALE。
 	// 16bit にするときは >> 2（MAME の put_int_clamp(..., 1<<17) と同じ）
 	static constexpr s32 DAC_FULL_SCALE = 1 << 17;
+	// set_external_audio の ±1.0 を、MEG の入口の目盛りにする倍率（測って決める。samptest が確かめる）
+	static constexpr s32 EXT_BUS_SCALE = 741455;      // 2^19.5。既定のマスター音量で、dry の 1.0 が出口の 1.0 になる
 	void run_sample(s32 &left, s32 &right);
+
+	// ---- 外の音を MU のエフェクトに通す（プラグインボードの音が入る道）
+	// bus へ、次の run_sample 1 サンプルぶんの左右を入れる（±1.0 が DAC の全振幅。入れ直すまで同じ値が続くので、
+	// 鳴らし終えたら clear_external_audio で 0 に戻すこと）。
+	//   dry        そのまま出口へ（マスターの音量と EQ は通る）
+	//   reverb / chorus / variation   システムのエフェクトへの送り。戻りは MU の設定どおり
+	//   insertion1-4   インサーションの入口
+	// 入れる先は SWP30 の MEG の入口（マスターの m20/21・m24/25・m26/27・m2c/2d・m28/29、スレーブの m28-m2d）。
+	// 音を作る糸（run_sample と同じ糸）から呼ぶこと
+	enum class ext_bus { dry, reverb, chorus, variation, insertion1, insertion2, insertion3, insertion4, count };
+	void set_external_audio(ext_bus bus, float left, float right);
+	void clear_external_audio();
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、

@@ -3214,6 +3214,35 @@ void mu2000::native_fx_update()
 	}
 }
 
+void mu2000::set_external_audio(ext_bus bus, float left, float right)
+{
+	// どの SWP30 の、MEG のどの入口か（左。右はその次）
+	struct where { bool slave; int slot; };
+	static constexpr where WHERE[int(ext_bus::count)] = {
+		{ false, 0x0 }, { false, 0x4 }, { false, 0x6 }, { false, 0xc }, { false, 0x8 },
+		{ true, 0x8 }, { true, 0xa }, { true, 0xc },
+	};
+	if (int(bus) < 0 || bus >= ext_bus::count)
+		return;
+	const where w = WHERE[int(bus)];
+	swp30_device &d = w.slave ? m_swps : m_swpm;
+	// 外の音は 1.0 を超えることがある（エフェクトの手前なので、少しの余裕は持たせる）
+	auto conv = [](float v) {
+		return std::isfinite(v) ? s32(std::lround(std::clamp(v, -8.0f, 8.0f) * float(EXT_BUS_SCALE))) : 0;
+	};
+	d.m_ext_bus[size_t(w.slot)] = conv(left);
+	d.m_ext_bus[size_t(w.slot) + 1] = conv(right);
+	d.m_ext_on = true;
+}
+
+void mu2000::clear_external_audio()
+{
+	for (swp30_device *d : { &m_swpm, &m_swps }) {
+		d->m_ext_bus.fill(0);
+		d->m_ext_on = false;
+	}
+}
+
 void mu2000::run_sample(s32 &left, s32 &right)
 {
 	// S-MU2000: 軽量モードでは、XG の設定をときどき読み直す
