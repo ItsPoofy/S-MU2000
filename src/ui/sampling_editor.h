@@ -46,6 +46,8 @@ public:
 	int default_width() const override  { return 1280; }
 	int default_height() const override { return 800; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
+	// 窓を閉じた・しまった: 試聴（波形だけを鳴らしているもの）を止める
+	void hidden(bridge &br) override;
 
 private:
 	void input_pane(bridge &br);
@@ -216,6 +218,8 @@ private:
 	bool m_rw_auto = true;             // 選んだら鳴らす
 	bool m_rw_start = false, m_rw_play_wanted = false, m_rw_play_again = false, m_rw_playing = false, m_rw_scroll = false;
 	double m_rw_play_at = 0;
+	bool m_rw_drawn = false;           // この描画で内蔵ウェーブのタブを出したか（ほかのタブへ移ったら試聴を止める）
+	bool m_hidden_stopped = false;     // 窓を閉じたときの「止める」を出し済み（閉じている間、何度も出さない）
 	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ）
 	char m_wave_find[32] = {};         // 組の絞り込み
 	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列

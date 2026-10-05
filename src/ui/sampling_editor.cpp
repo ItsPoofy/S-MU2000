@@ -163,8 +163,21 @@ s32 trigger_level(int trigger_db)
 
 } // namespace
 
+void sampling_editor::hidden(bridge &br)
+{
+	if (m_hidden_stopped)
+		return;
+	m_hidden_stopped = true;
+	m_rw_playing = m_rw_start = m_rw_play_wanted = false;
+	br.post([](mu2000 &mu) {
+		mu.preview_stop();
+		return std::string();
+	});
+}
+
 void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 {
+	m_hidden_stopped = false;
 	(void)m;
 	(void)ram;
 	br.get_sampling(m_view);
@@ -213,6 +226,7 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	ImGui::SameLine();
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
 		const int go = m_goto_tab;
+		m_rw_drawn = false;
 		m_goto_tab = 0;
 		if (ImGui::BeginTabBar("right_tabs")) {
 			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_prepare, "Get a sound"))) {
@@ -278,6 +292,15 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
+		}
+		// 内蔵ウェーブのタブから離れたら、そこで鳴らしていた波形を止める（ループする波形が鳴りっぱなしにならないように）
+		if (!m_rw_drawn && (m_rw_playing || m_rw_start || m_rw_play_wanted)) {
+			if (m_rw_playing)
+				br.post([](mu2000 &mu) {
+					mu.preview_stop();
+					return std::string();
+				});
+			m_rw_playing = m_rw_start = m_rw_play_wanted = false;
 		}
 	}
 	ImGui::EndChild();

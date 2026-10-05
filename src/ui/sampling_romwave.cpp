@@ -100,6 +100,7 @@ void sampling_editor::romwave_build()
 
 void sampling_editor::romwave_pane(bridge &br)
 {
+	m_rw_drawn = true;
 	romwave_build();
 	const xg::voice_rom *vr = xgui::voices();
 	if (!m_rw_built || !vr) {
