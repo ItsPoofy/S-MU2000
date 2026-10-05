@@ -43,19 +43,23 @@ enum bar_window {
 	BAR_SHAPES = 3, // パートの音色
 	BAR_MASTER = 4, // マスター
 	BAR_SAMPLING = 5, // サンプリング
+	BAR_PLAYER = 6, // MIDI プレイヤー（gui だけ。プラグインの帯には出さない）
 };
 
 // The strip every window shows, in the same order with the same ids.
 // Labels come from the texts table (bar_list and friends), so --lang
 // reaches the strip too.
-inline std::vector<tool_item> window_bar_items()
+inline std::vector<tool_item> window_bar_items(bool with_player = false)
 {
-	return { { UI_TEXT(bar_list, "List"), BAR_LIST },
+	std::vector<tool_item> items = { { UI_TEXT(bar_list, "List"), BAR_LIST },
 	         { UI_TEXT(bar_editor, "Editor"), BAR_EDITOR },
 	         { UI_TEXT(bar_shapes, "Voices"), BAR_SHAPES },
 	         { UI_TEXT(bar_fx, "Effects"), BAR_FX },
 	         { UI_TEXT(bar_master, "Master"), BAR_MASTER },
 	         { UI_TEXT(bar_sampling, "Sampling"), BAR_SAMPLING } };
+	if (with_player)
+		items.push_back({ UI_TEXT(bar_player, "Player"), BAR_PLAYER });
+	return items;
 }
 
 class pc_window;   // ui/pc_window.h (one class, two hosts)

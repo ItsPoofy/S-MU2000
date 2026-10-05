@@ -51,6 +51,7 @@
 #include "ui/pc_window.h"
 #endif
 #include "ui/player.h"
+#include "ui/player_view.h"
 #include "ui/tool_args.h"
 #include "ui/settings.h"
 #include "ui/shot.h"
@@ -97,6 +98,8 @@ public:
 	pc_window shapes{ std::make_unique<part_shapes>() };
 	pc_window master{ std::make_unique<master_editor>() };
 	pc_window sampling{ std::make_unique<sampling_editor>() };
+	// MIDI プレイヤーの窓。gui だけが持つ（上の 6 つはプラグインにもある）
+	pc_window player_win{ std::make_unique<player_view>(play) };
 
 	struct engine *eng = nullptr;    // set once the ROMs are loaded
 	std::atomic<int> *state = nullptr; // the engine's, so menus can grey out
@@ -155,6 +158,12 @@ public:
 		serve_ain_requests();
 		pc_frame_all(list, pc, fx, shapes, master, sampling, panel.xg(), panel.ram(), br,
 		             [this](pc_window &w) { open_pc_window(w); });
+		// プレイヤーの窓も同じ刻みで。自分の ImGui の文脈に切り替えるので、パネルの文脈へ戻す（pc_host.h と同じ理由）
+		{
+			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
+			player_win.frame(panel.xg(), panel.ram(), br);
+			ImGui::SetCurrentContext(panel_ctx);
+		}
 	}
 
 	// A full frame: timer work, status middle, panel paint through the
@@ -409,6 +418,10 @@ public:
 	// Open a PC window by BAR_* id (F2/F3, the strip, the menus)
 	void open_window_by_kind(int kind)
 	{
+		if (kind == BAR_PLAYER) {
+			open_pc_window(player_win);
+			return;
+		}
 		open_pc_window(*window_for_kind(kind, list, pc, fx, shapes, master, sampling));
 	}
 
@@ -1070,7 +1083,7 @@ public:
 		wire_send_out();
 		panel.set_lcd_only(lcd_only);
 		if (!lcd_only) {
-			bar.set_items(window_bar_items());
+			bar.set_items(window_bar_items(true));
 			panel.set_top_inset(toolbar::HEIGHT);
 		}
 		panel.resize(a.win_w, a.win_h);
@@ -1170,6 +1183,8 @@ public:
 			open_window_by_kind(BAR_MASTER);
 		if (w.open_sampling && !w.lcd_only)
 			open_window_by_kind(BAR_SAMPLING);
+		if (w.open_player && !w.lcd_only)
+			open_window_by_kind(BAR_PLAYER);
 	}
 
 	// Starts the audio device. False parks the engine on the failure and
@@ -1239,6 +1254,11 @@ public:
 	void shutdown()
 	{
 		pc_shutdown_all(list, pc, fx, shapes, master, sampling, br);
+		{
+			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
+			player_win.shutdown(br);
+			ImGui::SetCurrentContext(panel_ctx);
+		}
 		if (m_ain_lister.joinable())
 			m_ain_lister.join();
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));

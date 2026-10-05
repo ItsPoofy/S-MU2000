@@ -88,6 +88,7 @@ inline const ui_texts &ja_texts()
 		              "        [--shapes-window] パートの音色の窓も開く（一覧で VIB などの絵をダブルクリック）\n"
 		              "        [--master-window] マスターの窓も開く（一覧でマスターの行をダブルクリック）\n"
 		              "        [--sampling-window] サンプリングの窓も開く\n"
+		              "        [--player-window] MIDI プレイヤーの窓も開く\n"
 		              "        [--lang ja|en] 言葉（無ければ editor.ini の lang=、さらに無ければロケール: 日本語なら日本語、ほかは英語）\n"
 		              "        [--help]      この説明を出す\n"
 		              "        gui --dump-layout panel.txt   いまの配置を書き出す\n"
@@ -448,6 +449,27 @@ inline const ui_texts &ja_texts()
 		.cap_insertion_fmt = "%s（INSERTION → %s）",
 		.ov_silent = "（鳴っていない）",
 		.bar_sampling = "サンプリング",
+		.bar_player = "プレイヤー",
+		.ply_idle = "鳴らしていません",
+		.ply_prev = "前",
+		.ply_play = "再生",
+		.ply_pause = "一時停止",
+		.ply_stop = "停止",
+		.ply_next = "次",
+		.ply_loop_none = "くり返さない",
+		.ply_loop_all = "一覧をくり返す",
+		.ply_loop_one = "1 曲をくり返す",
+		.ply_loop_shuffle = "シャッフル",
+		.ply_loop_tip = "くり返さない: 一覧を 1 度鳴らして止まる。一覧をくり返す: 終わったら頭から。1 曲をくり返す: いまの曲をくり返す。シャッフル: 順番を混ぜて鳴らし、一回りするたびに混ぜ直す",
+		.ply_beat_fmt = "小節 %d  拍 %d   テンポ %.1f",
+		.ply_chasing = "設定を追いかけています…",
+		.ply_paused = "一時停止中",
+		.ply_col_song = "曲",
+		.ply_col_len = "長さ",
+		.ply_add = "ファイルを足す…",
+		.ply_clear = "一覧を消す",
+		.ply_path = "MIDI ファイルの場所",
+		.ply_add_path = "足す",
 		.dlg_wav_desc = "WAV の音か SysEx",
 		.smp_not_ready = "MU2000 の起動を待っています…",
 		.smp_input = "入力",

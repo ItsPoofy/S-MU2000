@@ -88,6 +88,7 @@ inline const ui_texts &en_texts()
 		              "        [--shapes-window] also open the part voice window (double-click a VIB picture etc. in the list)\n"
 		              "        [--master-window] also open the master window (double-click the master row)\n"
 		              "        [--sampling-window] also open the sampling window\n"
+		              "        [--player-window] also open the MIDI player window\n"
 		              "        [--lang ja|en] language (else lang= in editor.ini, else the locale: Japanese iff it says ja)\n"
 		              "        [--help]      show this help\n"
 		              "        gui --dump-layout panel.txt   write out the current layout\n"
@@ -448,6 +449,27 @@ inline const ui_texts &en_texts()
 		.cap_insertion_fmt = "%s (INSERTION -> %s)",
 		.ov_silent = "(silent)",
 		.bar_sampling = "Sampling",
+		.bar_player = "Player",
+		.ply_idle = "Nothing is playing",
+		.ply_prev = "Prev",
+		.ply_play = "Play",
+		.ply_pause = "Pause",
+		.ply_stop = "Stop",
+		.ply_next = "Next",
+		.ply_loop_none = "No loop",
+		.ply_loop_all = "Loop the list",
+		.ply_loop_one = "Loop one song",
+		.ply_loop_shuffle = "Shuffle",
+		.ply_loop_tip = "No loop: play the list once and stop. Loop the list: start again from the top. Loop one song: repeat the current song. Shuffle: play the list in a random order, shuffled again each time round.",
+		.ply_beat_fmt = "Bar %d  Beat %d   Tempo %.1f",
+		.ply_chasing = "catching up the settings...",
+		.ply_paused = "paused",
+		.ply_col_song = "Song",
+		.ply_col_len = "Length",
+		.ply_add = "Add files...",
+		.ply_clear = "Clear the list",
+		.ply_path = "Path of a MIDI file",
+		.ply_add_path = "Add",
 		.dlg_wav_desc = "WAV audio or SysEx",
 		.smp_not_ready = "Waiting for the MU2000 to start...",
 		.smp_input = "Input",

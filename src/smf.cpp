@@ -5,6 +5,8 @@
 #include "compat/cli_text.h"
 #include "smf.h"
 
+#include <cmath>
+
 #include <algorithm>
 #include <cstdio>
 #include <cctype>
@@ -64,10 +66,132 @@ int port_from_track_name(const std::string &raw)
 namespace {
 u32 be32(const u8 *p) { return (u32(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
 u16 be16(const u8 *p) { return u16((p[0] << 8) | p[1]); }
+
+// 曲名を UTF-8 に。UTF-8 として読めればそのまま。読めなければ Windows は Shift_JIS（日本の曲に多い）から直し、
+// ほかは空にする（画面は UTF-8 しか出せない。空ならファイル名を出す）
+std::string title_text(const std::string &raw)
+{
+	bool utf8 = true;
+	for (size_t i = 0; i < raw.size() && utf8;) {
+		const u8 c = u8(raw[i]);
+		const int more = c < 0x80 ? 0 : (c & 0xe0) == 0xc0 ? 1 : (c & 0xf0) == 0xe0 ? 2 : (c & 0xf8) == 0xf0 ? 3 : -1;
+		if (more < 0 || (more == 0 && c < 0x20) || i + size_t(more) + 1 > raw.size()) {
+			utf8 = false;
+			break;
+		}
+		for (int k = 1; k <= more; k++)
+			if ((u8(raw[i + size_t(k)]) & 0xc0) != 0x80)
+				utf8 = false;
+		i += size_t(more) + 1;
+	}
+	if (utf8)
+		return raw;
+#ifdef _WIN32
+	const int wn = MultiByteToWideChar(932, MB_ERR_INVALID_CHARS, raw.data(), int(raw.size()), nullptr, 0);
+	if (wn > 0) {
+		std::wstring w(size_t(wn), L'\0');
+		MultiByteToWideChar(932, 0, raw.data(), int(raw.size()), w.data(), wn);
+		const int un = WideCharToMultiByte(CP_UTF8, 0, w.data(), wn, nullptr, 0, nullptr, nullptr);
+		if (un > 0) {
+			std::string u(size_t(un), '\0');
+			WideCharToMultiByte(CP_UTF8, 0, w.data(), wn, u.data(), un, nullptr, nullptr);
+			return u;
+		}
+	}
+#endif
+	return std::string();
+}
 } // namespace
 
+void song_meta::bar_beat(double sec, int &bar, int &beat, double &bpm) const
+{
+	bar = beat = 1;
+	bpm = 120.0;
+	if (tempo.empty() || ppq <= 0)
+		return;
+	size_t k = 0;
+	while (k + 1 < tempo.size() && tempo[k + 1].time <= sec)
+		k++;
+	bpm = tempo[k].bpm;
+	const double tick = double(tempo[k].tick) + std::max(0.0, sec - tempo[k].time) * bpm / 60.0 * ppq;
+	// 拍子の区間ごとに小節を数える
+	double at = 0;
+	int num = 4, den = 4, bars = 0;
+	for (size_t i = 0; i <= sig.size(); i++) {
+		const double until = i < sig.size() ? std::min(double(sig[i].tick), tick) : tick;
+		const double per_beat = double(ppq) * 4.0 / den, per_bar = per_beat * num;
+		if (until > at) {
+			const double span = until - at;
+			if (i == sig.size() || double(sig[i].tick) > tick) {
+				const int whole = int(span / per_bar);
+				bar = bars + whole + 1;
+				beat = int((span - whole * per_bar) / per_beat) + 1;
+				return;
+			}
+			bars += int(std::ceil(span / per_bar - 1e-9));
+			at = until;
+		}
+		if (i < sig.size()) {
+			if (double(sig[i].tick) > tick)
+				break;
+			num = sig[i].num;
+			den = sig[i].den;
+			at = double(sig[i].tick);
+		}
+	}
+	bar = bars + 1;
+}
+
+std::vector<event> chase(const std::vector<event> &events, double at)
+{
+	std::vector<event> out;
+	// 最後の値だけ送るもの。口 × チャンネル × （CC 0-127、128 = チャンネルプレッシャー、129 = ピッチベンド）
+	struct last { bool set = false; u8 a = 0, b = 0; };
+	std::vector<last> state(size_t(256) * 16 * 130);
+	auto slot = [&](u8 port, int ch, int what) -> last & { return state[(size_t(port) * 16 + size_t(ch)) * 130 + size_t(what)]; };
+	std::vector<u8> ports;
+	for (const event &e : events) {
+		if (e.time >= at)
+			break;
+		if (e.bytes.empty())
+			continue;
+		const u8 st = e.bytes[0];
+		const int kind = st & 0xf0, ch = st & 0x0f;
+		if (std::find(ports.begin(), ports.end(), e.port) == ports.end())
+			ports.push_back(e.port);
+		if (st >= 0xf0 || kind == 0xc0) {                 // SysEx・プログラムチェンジ: 順番どおり
+			out.push_back({ 0.0, e.bytes, e.port });
+		} else if (kind == 0xb0 && e.bytes.size() >= 3) {
+			const u8 cc = e.bytes[1];
+			// バンクセレクト・データエントリー・RPN/NRPN は順番に意味がある
+			if (cc == 0 || cc == 32 || cc == 6 || cc == 38 || (cc >= 96 && cc <= 101))
+				out.push_back({ 0.0, e.bytes, e.port });
+			else if (cc < 120)                               // チャンネルモード（120-127）は送らない
+				slot(e.port, ch, cc) = { true, e.bytes[2], 0 };
+		} else if (kind == 0xd0 && e.bytes.size() >= 2) {
+			slot(e.port, ch, 128) = { true, e.bytes[1], 0 };
+		} else if (kind == 0xe0 && e.bytes.size() >= 3) {
+			slot(e.port, ch, 129) = { true, e.bytes[1], e.bytes[2] };
+		}
+	}
+	for (u8 port : ports)
+		for (int ch = 0; ch < 16; ch++)
+			for (int what = 0; what < 130; what++) {
+				const last &l = slot(port, ch, what);
+				if (!l.set)
+					continue;
+				if (what < 128)
+					out.push_back({ 0.0, { u8(0xb0 | ch), u8(what), l.a }, port });
+				else if (what == 128)
+					out.push_back({ 0.0, { u8(0xd0 | ch), l.a }, port });
+				else
+					out.push_back({ 0.0, { u8(0xe0 | ch), l.a, l.b }, port });
+			}
+	return out;
+}
+
 // SMF を (秒, バイト列) の並びに開く。format 0/1 の両方に対応する
-bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std::string &err)
+bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std::string &err, song_meta *meta)
 {
 	const u8 *d = data;
 	const size_t n = size;
@@ -79,6 +203,10 @@ bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std:
 	const u16 div  = be16(&d[12]);
 	if (div & 0x8000) { err = CLI_T("MIDI files in SMPTE time are not supported", "SMPTE 単位の MIDI には未対応"); return false; }
 
+	if (meta) {
+		*meta = song_meta{};
+		meta->ppq = div ? div : 480;
+	}
 	// まずは全トラックを (tick, バイト列) で集める
 	struct raw { u64 tick; std::vector<u8> bytes; bool tempo; u32 usec; u8 port; };
 	std::vector<raw> all;
@@ -118,6 +246,16 @@ bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std:
 				if (type == 0x51 && l == 3)
 					all.push_back({ tick, {}, true,
 					                (u32(d[p]) << 16) | (d[p+1] << 8) | d[p+2], 0 });
+				// 拍子（`FF 58 04 nn dd ..`。dd は 2 の何乗か）と曲名（最初のトラックの最初のトラック名）
+				if (meta && type == 0x58 && l >= 2 && p + 2 <= end && d[p] && d[p + 1] < 8)
+					meta->sig.push_back({ tick, int(d[p]), 1 << d[p + 1] });
+				if (meta && type == 0x03 && t == 0 && meta->title.empty() && l >= 1 && l <= 128) {
+					std::string name(d + p, d + std::min(p + size_t(l), end));
+					while (!name.empty() && (name.back() == ' ' || name.back() == 0))
+						name.pop_back();
+					if (!name.empty() && port_from_track_name(name) < 0)
+						meta->title = title_text(name);
+				}
 				if (type == 0x21 && l == 1) {
 					port = d[p];
 					explicit_port = true;
@@ -174,17 +312,28 @@ bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std:
 	// テンポを追いながら秒に直す
 	double sec = 0.0, us_per_beat = 500000.0;   // 既定は 120 BPM
 	u64 last = 0;
+	if (meta)
+		meta->tempo.push_back({ 0.0, 0, 120.0 });
 	for (const raw &e : all) {
 		sec += double(e.tick - last) * us_per_beat / (div * 1e6);
 		last = e.tick;
-		if (e.tempo) { us_per_beat = e.usec; continue; }
+		if (e.tempo) {
+			us_per_beat = e.usec;
+			if (meta && e.usec) {
+				if (meta->tempo.back().tick == e.tick)
+					meta->tempo.back() = { sec, e.tick, 6e7 / double(e.usec) };
+				else
+					meta->tempo.push_back({ sec, e.tick, 6e7 / double(e.usec) });
+			}
+			continue;
+		}
 		out.push_back({ sec, e.bytes, e.port });
 	}
 	return true;
 }
 
 // ファイルから読んで load_from_memory に渡す（既存の呼び出し側用）
-bool load(const std::string &path, std::vector<event> &out, std::string &err)
+bool load(const std::string &path, std::vector<event> &out, std::string &err, song_meta *meta)
 {
 #ifdef _WIN32
 	std::FILE *f = nullptr;
@@ -210,7 +359,7 @@ bool load(const std::string &path, std::vector<event> &out, std::string &err)
 		std::fclose(f); err = CLI_T("Cannot read the MIDI file", "MIDI ファイルを読めない"); return false;
 	}
 	std::fclose(f);
-	return load_from_memory(d.data(), d.size(), out, err);
+	return load_from_memory(d.data(), d.size(), out, err, meta);
 }
 
 

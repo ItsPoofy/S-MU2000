@@ -180,6 +180,11 @@ Details: [README, Latency](../README.md#latency).
 **Drop a MIDI file on a window**, or start with `--play song.mid`. Stop it from the menu of the card slot
 ("止める"). Songs with four ports are routed to A-D according to each track's port meta event (`FF 21`).
 
+`Player` on the bar at the top of the window opens the **MIDI player window**: a playlist (add any number of files,
+drag to reorder), pause, previous/next, loop modes (none, list, one song, shuffle), a position slider for seeking,
+and a bar/beat/tempo display. Seeking first sends the settings up to that point (SysEx, programs, controllers)
+and then plays on ([gui.en.md](gui.en.md)).
+
 ### Settings persist
 
 MU2000 settings (utility settings, master volume, ...) survive restarts, like the battery-backed RAM of

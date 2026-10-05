@@ -44,12 +44,32 @@ inline int mu_port(u8 port, bool fold, bool usb = false)
 // 「A」1 文字だけのものや「B3 Organ」は曲名・楽器名と紛れるので読まない
 int port_from_track_name(const std::string &name);
 
-// format 0/1 に対応。テンポ変化は追う。SMPTE 単位には未対応
-bool load(const std::string &path, std::vector<event> &out, std::string &err);
+// 曲の見出しと、時間の目盛り（プレイヤーの表示と頭出し用）
+struct tempo_point { double time; u64 tick; double bpm; };   // この時刻・tick から、この速さ
+struct sig_point { u64 tick; int num, den; };                // この tick から、この拍子
+struct song_meta {
+	// 曲名。format 0 は最初のトラック、format 1 は最初のトラック（指揮のトラック）の最初のトラック名（`FF 03`）。
+	// 口の名前（「PartA」など）や空のものは曲名にしない。UTF-8 でなければ空（Windows は Shift_JIS から直す）
+	std::string title;
+	int ppq = 480;
+	std::vector<tempo_point> tempo;   // 時刻の順。頭に必ず 1 つある（無指定なら 120）
+	std::vector<sig_point> sig;       // 拍子の順。空なら 4/4
+	// その時刻の小節（1 から）・拍（1 から）・テンポ
+	void bar_beat(double sec, int &bar, int &beat, double &bpm) const;
+};
+
+// format 0/1 に対応。テンポ変化は追う。SMPTE 単位には未対応。meta を渡せば曲名と目盛りも返す
+bool load(const std::string &path, std::vector<event> &out, std::string &err, song_meta *meta = nullptr);
+
+// 頭出し: 時刻 at へ飛ぶときに、そこまでの設定を追いかけるために送るもの。
+// 音符（ノートオン・オフ）は送らない。SysEx・バンクセレクト・プログラムチェンジ・RPN/NRPN とデータエントリーは
+// 順番に意味があるので全部を元の順に、ほかのコントロールチェンジ・ピッチベンド・アフタータッチは最後の値だけを
+// その後ろに並べる（同じつまみを何千回も送り直さない）。time は使わない（0）
+std::vector<event> chase(const std::vector<event> &events, double at);
 
 // メモリ上の SMF を開く（wasm 用。load(path) と同じものを返す）。
 // data/size はファイルの中身そのまま。
-bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std::string &err);
+bool load_from_memory(const u8 *data, size_t size, std::vector<event> &out, std::string &err, song_meta *meta = nullptr);
 
 } // namespace smf
 

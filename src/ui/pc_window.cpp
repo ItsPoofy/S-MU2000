@@ -36,6 +36,33 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 		wcscpy_s(path, L"S-MU2000.syx");
 	const bool wav = ask == xgui::file_ask::open && xgui::file_ask_is_wav();
 	const bool card = ask == xgui::file_ask::open && xgui::file_ask_is_card();
+	// MIDI ファイル（プレイヤーの窓）。何個でも選べるので、道の入れ物を大きく取って別に開く
+	if (ask == xgui::file_ask::open && xgui::file_ask_is_midi()) {
+		std::vector<wchar_t> many(32768, 0);
+		const std::wstring mf = dlg_filter(UI_TEXT(dlg_midi_desc, "MIDI files"), "*.mid;*.midi;*.smf",
+		                                   UI_TEXT(dlg_all_files, "All files"), "*.*");
+		OPENFILENAMEW m{};
+		m.lStructSize = sizeof(m);
+		m.hwndOwner   = owner;
+		m.lpstrFilter = mf.c_str();
+		m.lpstrFile   = many.data();
+		m.nMaxFile    = DWORD(many.size());
+		m.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+		if (!GetOpenFileNameW(&m))
+			return;
+		// 1 個なら道そのもの。何個かなら「フォルダー\0 名前\0 名前\0\0」
+		std::vector<std::string> paths;
+		const std::wstring first = many.data();
+		const wchar_t *p = many.data() + first.size() + 1;
+		if (!*p) {
+			paths.push_back(to_utf8(first.c_str()));
+		} else {
+			for (; *p; p += wcslen(p) + 1)
+				paths.push_back(to_utf8((first + L"\\" + p).c_str()));
+		}
+		xgui::give_opened_midi(std::move(paths));
+		return;
+	}
 	// Bound here: the dialog reads the filter while it runs.
 	const std::wstring filter = card ? dlg_filter(UI_TEXT(dlg_card_or_m2a_desc, "SmartMedia image or M2A file"), "*.img;*.sm;*.m2a",
 	                                              UI_TEXT(dlg_all_files, "All files"), "*.*")
@@ -119,6 +146,7 @@ bool pc_window::show(HINSTANCE inst, std::string &err)
 bool pc_window::create(HINSTANCE inst, std::string &err)
 {
 	xgui::set_file_dialogs(true);
+	xgui::set_midi_dialog(true);
 	WNDCLASSEXW wc{};
 	wc.cbSize        = sizeof(wc);
 	wc.style         = CS_CLASSDC;

@@ -482,6 +482,27 @@ struct ui_texts {
 	const char *ov_silent;
 	// Sampling window (sampling_editor.cpp) and its toolbar button.
 	const char *bar_sampling;
+	const char *bar_player;
+	const char *ply_idle;
+	const char *ply_prev;
+	const char *ply_play;
+	const char *ply_pause;
+	const char *ply_stop;
+	const char *ply_next;
+	const char *ply_loop_none;
+	const char *ply_loop_all;
+	const char *ply_loop_one;
+	const char *ply_loop_shuffle;
+	const char *ply_loop_tip;
+	const char *ply_beat_fmt;
+	const char *ply_chasing;
+	const char *ply_paused;
+	const char *ply_col_song;
+	const char *ply_col_len;
+	const char *ply_add;
+	const char *ply_clear;
+	const char *ply_path;
+	const char *ply_add_path;
 	const char *dlg_wav_desc;
 	const char *smp_not_ready;
 	const char *smp_input;
