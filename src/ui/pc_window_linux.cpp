@@ -211,9 +211,9 @@ bool pc_window::route_event(const SDL_Event &ev)
 		std::lock_guard<std::mutex> hold(registry_mutex());
 		for (pc_window *w : registry()) {
 			if (w && w->m_id == id) {
+				// The name belongs to SDL3 (not freed here; see window_sdl.cpp)
 				if (drop_handler())
 					drop_handler()(ev.drop.data);
-				SDL_free(const_cast<char *>(ev.drop.data));
 				return true;
 			}
 		}
