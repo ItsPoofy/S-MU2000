@@ -854,6 +854,60 @@ bool mu2000::sampling_voice(int slot, sp::voice &out) const
 	return true;
 }
 
+bool mu2000::sampling_voice_raw(int slot, std::vector<u8> &out) const
+{
+	if (slot < 0 || slot >= sp::MAX_VOICES)
+		return false;
+	const u32 o = voice_rec(slot);
+	out.assign(m_dram.begin() + o, m_dram.begin() + o + sp::VOICE_SIZE);
+	return true;
+}
+
+bool mu2000::sampling_set_voice_raw(int slot, const std::vector<u8> &rec)
+{
+	if (slot < 0 || slot >= sp::MAX_VOICES || rec.size() != sp::VOICE_SIZE)
+		return false;
+	std::copy(rec.begin(), rec.end(), m_dram.begin() + voice_rec(slot));
+	return true;
+}
+
+bool mu2000::sampling_copy_preset(int slot, u32 rom_rec, int mask, std::string &err)
+{
+	if (slot < 0 || slot >= sp::MAX_VOICES) {
+		err = "no such voice";
+		return false;
+	}
+	// ROM の記録: [0] 要素の印（1/3/7/15）、[2..11] 名前 10 文字、[12..] 要素 84 バイト × 数、後ろに 2 バイト
+	const std::vector<u8> &rom = *m_prog;
+	if (!m_prog || rom_rec < 0x200000 || size_t(rom_rec) + sp::VOICE_SIZE > rom.size() || !(rom[rom_rec] & 15)) {
+		err = "no such preset";
+		return false;
+	}
+	int n = 0;
+	for (int i = 0; i < 4; i++)
+		n += (rom[rom_rec] >> i) & 1;
+	const u32 o = voice_rec(slot);
+	const u8 all = u8((1 << n) - 1);
+	m_dram[o] = mask < 0 ? all : u8(mask) & all;
+	m_dram[o + 1] = rom[rom_rec + 1];
+	// 名前はサンプル音色では 8 文字（+10・+11 は別の欄）
+	std::copy(rom.begin() + rom_rec + 2, rom.begin() + rom_rec + 10, m_dram.begin() + o + 2);
+	m_dram[o + 10] = m_dram[o + 11] = 0;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const u32 b = o + 12 + 84 * u32(e);
+		if (e < n) {
+			std::copy(rom.begin() + rom_rec + 12 + 84 * u32(e), rom.begin() + rom_rec + 12 + 84 * u32(e + 1), m_dram.begin() + b);
+			m_dram[b] = 0x00;            // サンプルを割り当てたときだけ 01 になる欄
+		} else {
+			m_dram[b] = 0x00;
+			m_dram[b + 2] = 0x3f;        // 波形なし
+			m_dram[b + 3] = 0x7f;
+		}
+	}
+	std::copy(rom.begin() + rom_rec + 12 + 84 * u32(n), rom.begin() + rom_rec + 14 + 84 * u32(n), m_dram.begin() + o + 12 + 84 * 4);
+	return true;
+}
+
 bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 {
 	if (slot < 0 || slot >= sp::MAX_VOICES) {

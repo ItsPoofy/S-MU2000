@@ -168,6 +168,7 @@ void sampling_editor::hidden(bridge &br)
 	if (m_hidden_stopped)
 		return;
 	m_hidden_stopped = true;
+	preset_restore(br);
 	m_rw_playing = m_rw_start = m_rw_play_wanted = false;
 	br.post([](mu2000 &mu) {
 		mu.preview_stop();
@@ -227,6 +228,7 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	if (ImGui::BeginChild("right", ImVec2(0, 0))) {
 		const int go = m_goto_tab;
 		m_rw_drawn = false;
+		m_pv_drawn = false;
 		m_goto_tab = 0;
 		if (ImGui::BeginTabBar("right_tabs")) {
 			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_prepare, "Get a sound"))) {
@@ -291,8 +293,18 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 				ImGui::EndChild();
 				ImGui::EndTabItem();
 			}
+			// 内蔵音色: 内蔵の音色がどの波形をどう重ねているかを見て、要素を選んで鳴らす
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_presets, "Built-in voices"), nullptr, go == 3 ? ImGuiTabItemFlags_SetSelected : 0)) {
+				if (ImGui::BeginChild("presets", ImVec2(0, 0), ImGuiChildFlags_Borders))
+					preset_pane(br);
+				ImGui::EndChild();
+				ImGui::EndTabItem();
+			}
 			ImGui::EndTabBar();
 		}
+		// 内蔵音色のタブから離れたら、試聴に借りたサンプル音色の枠を元に戻す
+		if (!m_pv_drawn)
+			preset_restore(br);
 		// 内蔵ウェーブのタブから離れたら、そこで鳴らしていた波形を止める（ループする波形が鳴りっぱなしにならないように）
 		if (!m_rw_drawn && (m_rw_playing || m_rw_start || m_rw_play_wanted)) {
 			if (m_rw_playing)

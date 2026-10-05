@@ -225,6 +225,57 @@ inline std::vector<wave_set_info> wave_catalog(const voice_rom &vr)
 	return out;
 }
 
+// 内蔵の音色 1 つ（ROM の音色の記録）。サンプリングの窓の「内蔵音色」用
+struct preset_voice {
+	u32 rec = 0;                       // 記録の番地（voice_rom::lookup の戻り値。mu2000::sampling_copy_preset に渡せる）
+	std::string name;
+	int msb = -1, lsb = 0, prog = 0;   // 選び方（XG）。msb が -1 はバンクから引けない記録
+	int elements = 1;
+	int icon = -1;
+};
+
+// 内蔵の音色の一覧。XG のバンクから引けるものを、番号 → MSB → LSB の順に（同じ番号の変種が並ぶ。効果音のバンク 64 は後ろ）。
+// 同じ記録を指すバンクがいくつもあるときは、最初に見つかった選び方 1 つだけ。バンクから引けない記録はその後ろ
+inline std::vector<preset_voice> preset_voices(const voice_rom &vr)
+{
+	std::vector<preset_voice> out;
+	const u8 *rom = vr.data();
+	if (!rom)
+		return out;
+	std::map<u32, size_t> seen;
+	auto add = [&](u32 rec, int msb, int lsb, int prog) {
+		if (!rec || seen.count(rec))
+			return;
+		preset_voice v;
+		v.rec = rec;
+		v.name = vr.record_name(rec);
+		v.msb = msb;
+		v.lsb = lsb;
+		v.prog = prog;
+		v.elements = nv::element_count(rom, rec);
+		v.icon = msb >= 0 ? vr.icon_index(msb, prog) : -1;
+		seen.emplace(rec, out.size());
+		out.push_back(std::move(v));
+	};
+	for (int pass = 0; pass < 2; pass++)
+		for (int prog = 0; prog < 128; prog++)
+			for (int msb = 0; msb < 126; msb++) {
+				if ((msb == 64) != (pass == 1))
+					continue;
+				for (int lsb = 0; lsb < 128; lsb++)
+					if (vr.lsb_ok(1, 0, msb, lsb))
+						add(vr.lookup(1, 0, msb, lsb, prog), msb, lsb, prog);
+			}
+	for (u32 a = nv::SFX_VOICES; a + 14 <= nv::SFX_VOICES_END;) {
+		const int n = nv::element_count(rom, a);
+		if (!n)
+			break;
+		add(a, -1, 0, 0);
+		a += 14 + 84 * u32(n);
+	}
+	return out;
+}
+
 } // namespace xg
 
 #endif // S_MU2000_XG_WAVE_CATALOG_H

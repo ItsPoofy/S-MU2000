@@ -703,6 +703,89 @@ int main(int argc, char **argv)
 				      std::to_string(pcm.size()) + " サンプル、0 をまたぐ回数 " + std::to_string(cross));
 			}
 
+			// 内蔵の音色をサンプル音色の枠に写す（sampling_copy_preset）。要素が 2 つの音色を XG のバンクから鳴らしたものと、
+			// PGM030 に写して鳴らしたものが同じ大きさ。要素を 1 つずつにすると、どちらも鳴って、どちらも全部よりは小さくない程度に違う
+			{
+				const xg::voice_rom vr(k.mu.program_rom());
+				int msb = 0, lsb = 0, prog = 0;
+				u32 rec = 0;
+				for (int p = 0; p < 128 && !rec; p++) {
+					const u32 r = vr.lookup(1, 0, 0, 0, p);
+					if (r && xg::nv::element_count(vr.data(), r) == 2) {
+						rec = r;
+						prog = p;
+					}
+				}
+				auto rms_now = [&](std::initializer_list<int> select) {
+					for (int b : select)
+						k.mu.midi_in(u8(b), 0);
+					k.pump(300);
+					k.out.clear();
+					k.collect = true;
+					for (u8 b : on)
+						k.mu.midi_in(b, 0);
+					k.pump(500);
+					k.collect = false;
+					for (u8 b : off)
+						k.mu.midi_in(b, 0);
+					k.pump(1500);
+					double sum = 0;
+					for (double v : k.out)
+						sum += v * v;
+					return std::sqrt(sum / std::max<size_t>(1, k.out.size()));
+				};
+				const double preset = rms_now({ 0xb0, 0x00, msb, 0xb0, 0x20, lsb, 0xc0, prog });
+				std::vector<u8> keep;
+				k.mu.sampling_voice_raw(29, keep);
+				std::string e;
+				const bool ok = k.mu.sampling_copy_preset(29, rec, -1, e);
+				const double copy = rms_now({ 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 29 });
+				k.mu.sampling_copy_preset(29, rec, 1, e);
+				const double el1 = rms_now({});
+				k.mu.sampling_copy_preset(29, rec, 2, e);
+				const double el2 = rms_now({});
+				k.mu.sampling_copy_preset(29, rec, 0, e);
+				const double none = rms_now({});
+				// 4 要素の音色（4 Way EP。強さ 106 以上は要素 3）。2 要素の音色のあとに写すだけだと要素 3 が鳴らず、
+				// 選び直すと鳴る（firmware は選んだときに要素の数を覚える）。窓は音色が替わったら選び直す
+				double ep_stale = 0, ep_fresh = 0;
+				if (const u32 ep = vr.lookup(1, 0, 0, 78, 4)) {
+					auto loud = [&](std::initializer_list<int> select) {
+						for (int b : select)
+							k.mu.midi_in(u8(b), 0);
+						k.pump(300);
+						k.out.clear();
+						k.collect = true;
+						for (int b : { 0x90, 0x3c, 0x7c })
+							k.mu.midi_in(u8(b), 0);
+						k.pump(400);
+						k.collect = false;
+						for (u8 b : off)
+							k.mu.midi_in(b, 0);
+						k.pump(1500);
+						double sum = 0;
+						for (double v : k.out)
+							sum += v * v;
+						return std::sqrt(sum / std::max<size_t>(1, k.out.size()));
+					};
+					k.mu.sampling_copy_preset(29, rec, -1, e);
+					loud({ 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 29 });
+					k.mu.sampling_copy_preset(29, ep, 4, e);
+					ep_stale = loud({});
+					ep_fresh = loud({ 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 29 });
+				}
+				check(ep_fresh > 0.003 && ep_stale < ep_fresh * 0.1, "内蔵の音色を写したら選び直す（4 Way EP の要素 3）",
+				      "選び直さない " + std::to_string(ep_stale) + "、選び直す " + std::to_string(ep_fresh));
+				k.mu.sampling_set_voice_raw(29, keep);
+				std::vector<u8> after;
+				k.mu.sampling_voice_raw(29, after);
+				const double db = 20 * std::log10(std::max(copy, 1e-9) / std::max(preset, 1e-9));
+				check(ok && rec && preset > 0.003 && std::fabs(db) < 1.0 && el1 > 0.001 && el2 > 0.0001 && none < 0.00005 && after == keep,
+				      "内蔵の音色をサンプル音色に写すと同じに鳴る・要素を 1 つずつ鳴らせる",
+				      vr.record_name(rec) + ": 元 " + std::to_string(preset) + "、写し " + std::to_string(copy) + "（" + std::to_string(db) +
+				      " dB）、要素 1 " + std::to_string(el1) + "、要素 2 " + std::to_string(el2) + "、無し " + std::to_string(none));
+			}
+
 			// サンプル音色を書く SysEx（機種 0x68）。PGM010 に組 16 と音程・エンベロープを書き、その記録を
 			// SysEx にして PGM021 へ送ると、firmware が同じ記録を作る（要素の [0] は firmware が付ける印なので除く）
 			sp::voice w;

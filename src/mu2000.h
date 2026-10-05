@@ -356,6 +356,13 @@ public:
 	// サンプル音色（slot 0-255。Bank# 0 の PGM001 が 0）
 	bool sampling_voice(int slot, smu2000::sampling::voice &out) const;
 	bool sampling_set_voice(int slot, const smu2000::sampling::voice &v, std::string &err);
+	// 音色の記録（350 バイト）をそのまま読む・書き戻す（下の sampling_copy_preset で借りた枠を元に戻すとき）
+	bool sampling_voice_raw(int slot, std::vector<u8> &out) const;
+	bool sampling_set_voice_raw(int slot, const std::vector<u8> &rec);
+	// **内蔵の音色をサンプル音色の枠に写す**。rom_rec は ROM の音色の記録の番地（xg::voice_rom::lookup）。
+	// ROM の音色の要素とサンプル音色の要素は同じ 84 バイトの並びなので、そのまま写せば同じ音が鳴る。
+	// mask は鳴らす要素（bit0 = 要素 1）。負なら記録のまま（全部）。要素を 1 つずつ聞くのに使う
+	bool sampling_copy_preset(int slot, u32 rom_rec, int mask, std::string &err);
 	// 録音。A/D INPUT（set_audio_input に入る値）を、選んだ入力から 16bit で集める。
 	// trigger は 0 なら押してすぐ、ほかはその大きさ（16bit の絶対値）を超えたら録り始める
 	void rec_start(smu2000::sampling::source src, int trigger, u32 max_frames);

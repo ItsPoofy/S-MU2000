@@ -155,7 +155,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       src/ui/app_linux.cpp
       src/ui/pc_window_linux.cpp
       src/ui/pc_editor.cpp src/ui/overview.cpp src/ui/fx_editor.cpp
-      src/ui/part_shapes.cpp src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/sampling_romwave.cpp
+      src/ui/part_shapes.cpp src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp
       ${IMGUI_CORE}
       third_party/imgui/backends/imgui_impl_sdl3.cpp
       third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp
