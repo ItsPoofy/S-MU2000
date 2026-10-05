@@ -606,7 +606,7 @@ inline const ui_texts &en_texts()
 		.rw_auto_tip = "Plays each wave as you pick it. With the list focused, the up and down arrow keys step through the waves.",
 		.rw_use_fmt = "Use in element %d",
 		.rw_use_tip = "Sets this wave on the element being edited in the Voice tab and goes there. There, pitch, filter, envelope and LFO apply to it like a sample.",
-		.rw_zone_fmt = "keys %d-%d  root %d  %.2f s  %s  %s",
+		.rw_zone_fmt = "keys %d-%d  root %d  %s  %s  %s",
 		.rw_loading = "Reading the wave...",
 		.rw_zoom_loop_fmt = "from the loop start, %d samples",
 		.rw_zoom_head_fmt = "the first %d samples",

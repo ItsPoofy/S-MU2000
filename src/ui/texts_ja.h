@@ -606,7 +606,7 @@ inline const ui_texts &ja_texts()
 		.rw_auto_tip = "選ぶたびに鳴らす。一覧を押してから上下の矢印キーで、前後の波形へ順に移れる",
 		.rw_use_fmt = "要素 %d に使う",
 		.rw_use_tip = "「音色」のタブで編集している要素にこの波形を入れて、そのタブへ移る。そこでは音程・フィルター・エンベロープ・LFO がサンプルと同じに効く",
-		.rw_zone_fmt = "鍵 %d-%d  もとの鍵 %d  %.2f 秒  %s  %s",
+		.rw_zone_fmt = "鍵 %d-%d  もとの鍵 %d  %s  %s  %s",
 		.rw_loading = "波形を読んでいます…",
 		.rw_zoom_loop_fmt = "ループの頭から %d サンプル",
 		.rw_zoom_head_fmt = "頭の %d サンプル",
