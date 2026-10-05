@@ -250,6 +250,24 @@ inline void drop_retired_textures()
 inline void drop_user_textures()
 {
 	drop_retired_textures();
+	// **差し替え待ちのものも、ここで全部手放す**。上の drop_retired_textures は「バックエンドが使い終えたもの」しか
+	// 片付けないので、差し替えた直後（数フレーム以内）に窓が閉じると、消える文脈を指したままの待ち札が残る。
+	// 次の窓の最初の描画（panel::paint の drop_retired_textures）がそれを消えた文脈から外そうとして落ちる
+	// （プラグインの画面を外してすぐ付け直したとき。issue #131）。文脈ごと無くなるので、描画命令が指している心配は無い
+	{
+		ImGuiContext *const dying = ImGui::GetCurrentContext();
+		std::vector<retired_tex> &r = retired_textures();
+		for (size_t i = 0; i < r.size();) {
+			if (r[i].ctx != dying) {
+				i++;
+				continue;
+			}
+			r[i].data->SetStatus(ImTextureStatus_WantDestroy);
+			ImGui::UnregisterUserTexture(r[i].data);
+			IM_DELETE(r[i].data);
+			r.erase(r.begin() + long(i));
+		}
+	}
 	std::vector<user_tex> &all = user_textures();
 	for (const user_tex &u : all) {
 		ImGuiContext *prev = ImGui::GetCurrentContext();
