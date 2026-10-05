@@ -46,27 +46,40 @@ public:
 	bool ok() const { return m_ok; }
 	// ROM の中身（音色の要素の記録を読むとき。xg/native_voice.h の element）
 	const u8 *data() const { return m_ok ? m_rom->data() : nullptr; }
-	// **キットの番号**（パートの塊の +0x110 に入る値。drum_record に渡す）。バンク 127 はプログラム → 番号の表
-	// （名前の表と同じ番号）。バンク 126 は firmware で 1 つずつ選んで確かめた値（SFXKit 1・2 が 47・48、
-	// TknoKtKS〜ChinaKit が 28〜33）。キットの無いプログラムは -1
+	// **キットの番号**（パートの塊の +0x110 に入る値。drum_record に渡す）。firmware でキットを 1 つずつ選んで
+	// 読んだ値。**名前の表の番号（KIT_MAP）とは別の並び**で、たとえば Ntrl Kit は名前が 31 番、キットが 34 番
+	// （名前の番号で引くと別のキットの打を読んでしまう）。キットの無いプログラムは -1
 	int kit_number(int msb, int prog) const
 	{
 		if (!m_ok || kit_name(msb, prog).empty())
 			return -1;
-		if (msb == 127)
-			return byte(KIT_MAP + u32(prog & 0x7f));
-		switch (prog) {
-		case 0: return 47;
-		case 1: return 48;
-		case 16: return 28;
-		case 17: return 29;
-		case 18: return 30;
-		case 32: return 31;
-		case 33: return 32;
-		case 34: return 33;
+		struct pk { u8 prog, kit; };
+		static constexpr pk XG127[] = {
+			{ 0, 36 }, { 1, 1 }, { 2, 9 }, { 3, 14 }, { 4, 18 }, { 5, 19 }, { 6, 23 }, { 7, 24 }, { 8, 2 }, { 9, 15 },
+			{ 16, 3 }, { 17, 16 }, { 24, 4 }, { 25, 5 }, { 26, 11 }, { 27, 13 }, { 28, 12 }, { 29, 10 }, { 30, 25 },
+			{ 31, 26 }, { 32, 6 }, { 33, 17 }, { 40, 7 }, { 41, 27 }, { 48, 8 }, { 56, 34 }, { 57, 35 }, { 64, 20 },
+			{ 65, 21 }, { 66, 22 }, { 126, 36 }, { 127, 0 },
+		};
+		static constexpr pk XG126[] = {
+			{ 0, 47 }, { 1, 48 }, { 16, 28 }, { 17, 29 }, { 18, 30 }, { 32, 31 }, { 33, 32 }, { 34, 33 },
+		};
+		if (msb == 127) {
+			for (const pk &x : XG127)
+				if (x.prog == prog)
+					return x.kit;
+		} else {
+			for (const pk &x : XG126)
+				if (x.prog == prog)
+					return x.kit;
 		}
 		return -1;
 	}
+	// **TG300B（GS）モードのキット**。これも firmware で選んで読んだ値（名前は液晶に出たもの）
+	struct tg_kit { int prog, kit; const char *name; };
+	static constexpr tg_kit TG300B_KITS[] = {
+		{ 0, 37, "StandKit" }, { 8, 38, "Room Kit" }, { 16, 39, "PowerKit" }, { 24, 40, "ElctrKit" }, { 25, 41, "AnalgKit" },
+		{ 32, 42, "Jazz Kit" }, { 40, 43, "BrushKit" }, { 48, 44, "OrcheKit" }, { 56, 46, "SFX Set" }, { 127, 45, "C/M Kit" },
+	};
 	// **絵の番号**（プログラムで決まる。効果音のバンク 64 は 57、ドラムは -2）と、その絵
 	static constexpr int ICON_DRUM = -2;
 	int icon_index(int msb, int prog) const

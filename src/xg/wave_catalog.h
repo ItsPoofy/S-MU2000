@@ -37,8 +37,15 @@ struct wave_zone {
 	u32 frames() const { return (start & 0xffffff) + (loop & 0xffffff); }
 	u32 loop_at() const { return start & 0xffffff; }
 	// くり返すか。逆向き（loop の bit31）と「くり返さない」の印（start の bit30）は 1 度きり。
-	// 最後の値を持ち続けるだけの短いループ（打楽器の終わり）も 1 度きりに数える
-	bool loops() const { return !(loop & 0x80000000) && !(start & 0x40000000) && (loop & 0xffffff) > 8; }
+	// 長い頭のあとの、ごく短いループ（打楽器の終わりで最後の値を持ち続けるだけ。Ntrl Kit のキックは 25765 サンプルのあとに 16）も
+	// 1 度きりに数える。頭の無い短いループ（1 周期の波形）はくり返す
+	bool loops() const
+	{
+		const u32 pre = start & 0xffffff, len = loop & 0xffffff;
+		if ((loop & 0x80000000) || (start & 0x40000000) || len <= 8)
+			return false;
+		return !(len <= 64 && pre > 1000);
+	}
 	bool backwards() const { return (loop & 0x80000000) != 0; }
 	int format() const { return int(address >> 30); }   // 0 = 16bit、1 = 12bit、2 = 8bit、3 = 圧縮
 };
@@ -50,7 +57,7 @@ struct wave_voice_use {
 
 struct wave_drum_use {
 	std::string kit, key_name;
-	int msb = 127, prog = 0, key = 0;
+	int msb = 127, prog = 0, key = 0;   // msb -1 = TG300B（GS）モードのキット
 	int more_kits = 0;                 // 同じ名前の打で、ほかにも使っているキットの数
 };
 
@@ -166,37 +173,44 @@ inline std::vector<wave_set_info> wave_catalog(const voice_rom &vr)
 			}
 		out[size_t(set)].drums.push_back(d);
 	};
+	// 1 つのキットの全部の鍵。msb は 127・126（XG）か -1（TG300B）
+	auto add_kit = [&](int kit, const std::string &kit_name, int msb, int prog) {
+		for (int key = 0; key < 128; key++) {
+			const u8 *rec = nv::drum_record(rom, kit, key);
+			if (!rec)
+				continue;
+			wave_drum_use d;
+			d.kit = kit_name;
+			if (msb >= 0)
+				d.key_name = vr.drum_key_name(msb, prog, key);
+			if (d.key_name.empty())
+				d.key_name = kit_name + " key " + std::to_string(key);
+			d.msb = msb;
+			d.prog = prog;
+			d.key = key;
+			if (nv::drum_rec_has_wave(rec)) {
+				const u32 addr = nv::rd32(rec, 26 + 12) & 0x1ffffff;
+				const auto range = by_addr.equal_range(addr);
+				for (auto it = range.first; it != range.second; ++it)
+					add_drum(it->second, d);
+			} else if (const u32 vrec = nv::sfx_voice_record(rom, rec)) {
+				const int n = nv::element_count(rom, vrec);
+				for (int e = 0; e < n; e++)
+					add_drum(nv::wave_set(rom + vrec + 12 + u32(e) * 84), d);
+			}
+		}
+	};
 	for (int msb : { 127, 126 })
 		for (int prog = 0; prog < 128; prog++) {
 			if (msb == 127 && prog == 126)
 				continue;                    // プログラム 1 と同じキット
 			const int kit = vr.kit_number(msb, prog);
-			if (kit < 0)
-				continue;
-			for (int key = 0; key < 128; key++) {
-				const u8 *rec = nv::drum_record(rom, kit, key);
-				if (!rec)
-					continue;
-				wave_drum_use d;
-				d.kit = vr.kit_name(msb, prog);
-				d.key_name = vr.drum_key_name(msb, prog, key);
-				if (d.key_name.empty())
-					d.key_name = "key " + std::to_string(key);
-				d.msb = msb;
-				d.prog = prog;
-				d.key = key;
-				if (nv::drum_rec_has_wave(rec)) {
-					const u32 addr = nv::rd32(rec, 26 + 12) & 0x1ffffff;
-					const auto range = by_addr.equal_range(addr);
-					for (auto it = range.first; it != range.second; ++it)
-						add_drum(it->second, d);
-				} else if (const u32 vrec = nv::sfx_voice_record(rom, rec)) {
-					const int n = nv::element_count(rom, vrec);
-					for (int e = 0; e < n; e++)
-						add_drum(nv::wave_set(rom + vrec + 12 + u32(e) * 84), d);
-				}
-			}
+			if (kit >= 0)
+				add_kit(kit, vr.kit_name(msb, prog), msb, prog);
 		}
+	// TG300B（GS）モードのキット。XG のキットと同じ波形を使う打が多いが、こちらだけが使う組もある
+	for (const voice_rom::tg_kit &k : voice_rom::TG300B_KITS)
+		add_kit(k.kit, std::string("TG300B ") + k.name, -1, k.prog);
 
 	// ---- 絵。バンクから引ける最初の音色のもの。音色が無くてドラムだけならドラムの絵
 	for (wave_set_info &w : out) {

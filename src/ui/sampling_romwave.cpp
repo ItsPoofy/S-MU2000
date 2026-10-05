@@ -48,6 +48,20 @@ const char *format_name(int f)
 	return UI_TEXT(rw_fmt_packed, "8 bit packed");
 }
 
+// 長さ。1 周期だけの波形（数十サンプル）から数秒のものまであるので、サンプル数と、短いものはミリ秒・長いものは秒で
+std::string length_text(u32 frames)
+{
+	char b[64];
+	const double sec = double(frames) / 44100.0;
+	if (sec < 0.1)
+		std::snprintf(b, sizeof(b), "%u smp (%.2f ms)", frames, sec * 1000.0);
+	else if (sec < 1.0)
+		std::snprintf(b, sizeof(b), "%u smp (%.0f ms)", frames, sec * 1000.0);
+	else
+		std::snprintf(b, sizeof(b), "%u smp (%.2f s)", frames, sec);
+	return b;
+}
+
 } // namespace
 
 // 組の名前代わり（番号と、使っている音色。音色が無ければドラムの打）
@@ -86,6 +100,7 @@ void sampling_editor::romwave_build()
 
 void sampling_editor::romwave_pane(bridge &br)
 {
+	m_rw_drawn = true;
 	romwave_build();
 	const xg::voice_rom *vr = xgui::voices();
 	if (!m_rw_built || !vr) {
@@ -328,7 +343,7 @@ void sampling_editor::romwave_pane(bridge &br)
 				ImGui::TableNextColumn();
 				ImGui::Text("%d", zn.base_key);
 				ImGui::TableNextColumn();
-				ImGui::Text("%.2f s", double(zn.frames()) / 44100.0);
+				ImGui::TextUnformatted(length_text(zn.frames()).c_str());
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(zn.backwards() ? UI_TEXT(rw_loop_back, "backwards")
 				                       : zn.loops() ? UI_TEXT(rw_loop_yes, "loops") : UI_TEXT(rw_loop_no, "one shot"));
@@ -412,8 +427,8 @@ void sampling_editor::romwave_pane(bridge &br)
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", UI_TEXT(rw_use_tip, "Sets this wave on the element being edited in the Voice tab and goes there. There, pitch, filter, envelope and LFO apply to it like a sample."));
 	if (zone) {
-		ImGui::TextDisabled(UI_TEXT(rw_zone_fmt, "keys %d-%d  root %d  %.2f s  %s  %s"), zone->key_lo, zone->key_hi, zone->base_key,
-		                    double(zone->frames()) / 44100.0,
+		ImGui::TextDisabled(UI_TEXT(rw_zone_fmt, "keys %d-%d  root %d  %s  %s  %s"), zone->key_lo, zone->key_hi, zone->base_key,
+		                    length_text(zone->frames()).c_str(),
 		                    zone->backwards() ? UI_TEXT(rw_loop_back, "backwards")
 		                    : zone->loops() ? UI_TEXT(rw_loop_yes, "loops") : UI_TEXT(rw_loop_no, "one shot"),
 		                    format_name(zone->format()));
