@@ -373,6 +373,11 @@ public:
 	// 44.1kHz・16bit・モノラルで渡す。鳴らしている間 preview_number() は -1
 	void preview_pcm(std::vector<s16> pcm, u32 loop_at = ~0u, bool keep_pos = false);
 	void preview_stop() { m_prev_on = false; }
+	// 内蔵の波形（波形の記録の 3 つの値。xg/wave_catalog.h の wave_zone）を、鳴る順の 16bit で取り出す
+	std::vector<s16> rom_wave_pcm(u32 start, u32 loop, u32 address, size_t max = 1500000)
+	{
+		return m_swpm.decode_wave(start, loop, address, max);
+	}
 	int preview_number() const { return m_prev_on ? m_prev_number : 0; }
 	u32 preview_pos() const { return m_prev_pos; }
 	// A/D INPUT のピーク（16bit の絶対値。ゆっくり下がる）。レベルメーター用

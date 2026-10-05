@@ -53,6 +53,9 @@ public:
 	// S-MU2000: サンプリング RAM（SWP30 から見て 0x1000000 語目から。2 チップで同じ物を共有する）
 	void set_sample_ram(u8 *base, size_t bytes) { m_wave_cache.set_overlay(base, 0x1000000, bytes >> 2); }
 	void set_sintab(const u16 *base, size_t count);
+	// S-MU2000: 波形の記録（レジスタ 0x12/13・0x14/15・0x16/17 に書く値）のサンプルを、声と同じ読み方で
+	// 鳴る順に取り出す（内蔵ウェーブを見る窓用）。ループの終わりまで。max を超える分は切る
+	std::vector<s16> decode_wave(u32 start, u32 loop, u32 address, size_t max);
 
 	void reset();
 

@@ -19,6 +19,7 @@
 #include "card_fs.h"
 #include "m2a.h"
 #include "wavegen.h"
+#include "xg/wave_catalog.h"
 
 #include <array>
 #include <atomic>
@@ -54,6 +55,10 @@ private:
 	void wave_pane(bridge &br);
 	void assign_pane(bridge &br);
 	void card_pane(bridge &br);
+	// 内蔵ウェーブのタブ（sampling_romwave.cpp）
+	void romwave_pane(bridge &br);
+	void romwave_build();
+	std::string romwave_label(int w);
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
 	void load_sysex(const std::vector<u8> &bytes, bridge &br);
 	void apply_sysex(bridge &br);
@@ -194,7 +199,24 @@ private:
 	bool m_dirty = false;              // 編集欄を触った
 	int m_sample = 0;                  // 0 = 無し
 	int m_rom_wave = -1;               // サンプルでなく内蔵の波形の組を鳴らすとき（0-502）
-	std::vector<std::string> m_wave_labels;   // 組ごとの名前代わり（使っている XG の音色）
+	std::vector<std::string> m_wave_labels;   // 組ごとの名前代わり（使っている音色・ドラムの打）
+	// 内蔵ウェーブのタブ。一覧（ROM を読めたら 1 度だけ作る）、選んでいる組と鍵の区切り、取り出した波形
+	std::vector<xg::wave_set_info> m_rw_cat;
+	bool m_rw_built = false;
+	int m_rw_sel = 0, m_rw_zone = 0, m_rw_kind = 0;
+	char m_rw_find[32] = {};
+	struct rw_job {
+		std::atomic<bool> done{ false };
+		int set = 0, zone = 0;
+		std::vector<s16> pcm;
+	};
+	std::shared_ptr<rw_job> m_rw_job;
+	std::vector<s16> m_rw_pcm;
+	int m_rw_pcm_set = -1, m_rw_pcm_zone = -1;
+	bool m_rw_auto = true;             // 選んだら鳴らす
+	bool m_rw_start = false, m_rw_play_wanted = false, m_rw_play_again = false, m_rw_playing = false, m_rw_scroll = false;
+	double m_rw_play_at = 0;
+	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ）
 	char m_wave_find[32] = {};         // 組の絞り込み
 	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列
 	struct sx_job {
