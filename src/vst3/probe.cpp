@@ -643,6 +643,44 @@ int run_fl(IPluginFactory *fac, const TUID cid, double rate, int block, bool (*e
 	std::printf("\n---- FL Studio のまね ----\n");
 	int bad = 0;
 
+	// 0. 画面を出して、外して、**同じ画面をすぐ出し直す**（FL Studio がエフェクトとして読むとき・ilbridge の中でやる順。
+	//    issue #131 の log.txt: view attached → view removed → view attached）。出し直した 1 枚目の描画で落ちていた:
+	//    描画の文脈（ImGui）を作り直しても同じ番地に載ることがあり、パネルが「同じ文脈・同じ大きさ」と見て、
+	//    消えた文脈の文字を使い回していた
+	{
+		instance in;
+		if (!make_instance(fac, cid, in)) { std::printf("NG: 作れない\n"); return 1; }
+		start_instance(in, rate, block);
+		run_blocks(in, rate, block, 0.3, nullptr);
+		IPlugView *view = in.ctrl->createView(ViewType::kEditor);
+		std::unique_ptr<probe_host> host(probe_host_create());
+		ViewRect vr{};
+		if (view)
+			view->getSize(&vr);
+		bool ok = view && host->create(vr.getWidth(), vr.getHeight());
+		for (int round = 0; ok && round < 3; round++) {
+			ok = host->attach(view);
+			if (!ok)
+				break;
+			host->show();
+			host->pump(1);              // 何枚か描かせる
+			view->removed();
+		}
+		host->destroy();
+		in.proc->setProcessing(false);
+		in.comp->setActive(false);
+		in.comp->terminate();
+		in.ctrl->terminate();
+		if (view)
+			view->release();
+		in.proc->release();
+		in.ctrl->release();
+		in.comp->release();
+		std::printf("%s: 画面を外してすぐ出し直す（3 回）\n", ok ? "OK" : "NG");
+		if (!ok)
+			bad++;
+	}
+
 	// 1. 挿して画面を出し、外す。親の窓を先に壊し、terminate の後で受け口を片付けてから手放す
 	{
 		instance in;

@@ -422,8 +422,18 @@ void panel::build_fonts() const
 	m_font_ctx = ctx;
 }
 
+// 描画の文脈ができた直後に呼ばれる（窓を作ったとき。プラグインは画面を付けるたび）。
+// **前の文字は必ず忘れてから作る**: 覚えているのは「どの文脈に・どの大きさで足したか」で、文脈は番地で
+// 見分けている。プラグインの画面を外してすぐ付け直すと、作り直した文脈が**同じ番地**に載ることがあり、
+// そのままだと「同じ文脈・同じ大きさ」と見て、消えた文脈の文字を使い回す（FL Studio がエフェクトとして
+// 読むときの attached → removed → attached で、最初の描画が落ちていた。issue #131）。
+// ここへ来るときの文脈は新しく、前の 6 つは入っていないので、外す（drop_fonts）のではなく忘れるだけ
 void panel::fonts_ready()
 {
+	m_fonts = im::fonts{};
+	for (int &px : m_font_px)
+		px = 0;
+	m_font_ctx = nullptr;
 	build_fonts();
 }
 

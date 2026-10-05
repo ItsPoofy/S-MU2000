@@ -32,6 +32,7 @@
 #endif
 #include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_win32.h"
+#include "dxgi_stay.h"
 #include <d3d11.h>
 #include <windows.h>
 #elif defined(__APPLE__)
@@ -143,6 +144,7 @@ inline bool dx11_start(dx11_state &st, HWND hwnd)
 			return false;
 	}
 
+	ui::dxgi_stay(st.swap, hwnd);
 	st.imgui = new_context();
 	st.fonts = panel_fonts();
 	if (hwnd)

@@ -5,6 +5,7 @@
 #include "ui/texts.h"
 #include "ui/lang.h"
 #include "ui/font_file.h"
+#include "ui/dxgi_stay.h"
 
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
@@ -224,6 +225,7 @@ bool pc_window::create_device(std::string &err)
 		err = buf;
 		return false;
 	}
+	dxgi_stay(m_swap, m_hwnd);
 	make_target();
 	return true;
 }
