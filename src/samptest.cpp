@@ -746,6 +746,36 @@ int main(int argc, char **argv)
 				const double el2 = rms_now({});
 				k.mu.sampling_copy_preset(29, rec, 0, e);
 				const double none = rms_now({});
+				// 4 要素の音色（4 Way EP。強さ 106 以上は要素 3）。2 要素の音色のあとに写すだけだと要素 3 が鳴らず、
+				// 選び直すと鳴る（firmware は選んだときに要素の数を覚える）。窓は音色が替わったら選び直す
+				double ep_stale = 0, ep_fresh = 0;
+				if (const u32 ep = vr.lookup(1, 0, 0, 78, 4)) {
+					auto loud = [&](std::initializer_list<int> select) {
+						for (int b : select)
+							k.mu.midi_in(u8(b), 0);
+						k.pump(300);
+						k.out.clear();
+						k.collect = true;
+						for (int b : { 0x90, 0x3c, 0x7c })
+							k.mu.midi_in(u8(b), 0);
+						k.pump(400);
+						k.collect = false;
+						for (u8 b : off)
+							k.mu.midi_in(b, 0);
+						k.pump(1500);
+						double sum = 0;
+						for (double v : k.out)
+							sum += v * v;
+						return std::sqrt(sum / std::max<size_t>(1, k.out.size()));
+					};
+					k.mu.sampling_copy_preset(29, rec, -1, e);
+					loud({ 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 29 });
+					k.mu.sampling_copy_preset(29, ep, 4, e);
+					ep_stale = loud({});
+					ep_fresh = loud({ 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, 29 });
+				}
+				check(ep_fresh > 0.003 && ep_stale < ep_fresh * 0.1, "内蔵の音色を写したら選び直す（4 Way EP の要素 3）",
+				      "選び直さない " + std::to_string(ep_stale) + "、選び直す " + std::to_string(ep_fresh));
 				k.mu.sampling_set_voice_raw(29, keep);
 				std::vector<u8> after;
 				k.mu.sampling_voice_raw(29, after);

@@ -319,7 +319,9 @@ void sampling_editor::preset_pane(bridge &br)
 			mask |= 1 << e;
 
 	// 鳴らす・止める。音色を借りた枠へ写し（鳴らす要素の印つき）、パート 1 でその枠を選んで鍵を押す。
-	// 枠を選ぶのは最初の 1 度だけ（選び直すと前の音の余韻が切れる。印は写すだけで次の音から効く）
+	// 枠を選び直すのは、音色か鳴らす要素が替わったときだけ（毎回選び直すと前の音の余韻が切れる）。
+	// **替わったら必ず選び直す**: firmware は選んだときに要素の数などを覚えるので、写しただけだと、前の音色に
+	// 無かった要素が鳴らない（2 要素の音色のあとの 4 Way EP で、要素 3 が鳴らなかった）
 	auto note_off = [&] {
 		if (m_pv_held < 0)
 			return;
@@ -342,9 +344,11 @@ void sampling_editor::preset_pane(bridge &br)
 			return err;
 		});
 		std::vector<u8> msg;
-		if (!m_pv_selected)
+		if (!m_pv_selected || m_pv_sel_rec != rec || m_pv_sel_mask != mask)
 			msg = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x01, 0xc0, 0x7f };
 		m_pv_selected = true;
+		m_pv_sel_rec = rec;
+		m_pv_sel_mask = mask;
 		m_pv_held = key;
 		msg.insert(msg.end(), { 0x90, u8(key), u8(vel) });
 		br.send(msg);
