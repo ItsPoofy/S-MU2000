@@ -1437,6 +1437,30 @@ int main(int argc, char **argv)
 				      "パート 1 を消すと " + std::to_string(mute1 / plain_rms) + " 倍、パート 2 だけ消すと " + std::to_string(mute2 / plain_rms) +
 				      " 倍、外すと " + std::to_string(mute0 / plain_rms) + " 倍");
 
+				// 鳴らさない要素（印を外した要素）に選んだサンプルと値は、書いても残る。音には入らない
+				// （前は書かれず、試聴のあとに窓が読み直すと選択が消えた）
+				{
+					sp::voice v_off = base, got;
+					v_off.el[1].on = false;
+					v_off.el[1].assigned = true;
+					v_off.el[1].sample = n1;
+					v_off.el[1].coarse = 12;
+					v_off.el[1].level = 99;
+					const std::vector<double> o_off = sound(v_off);
+					k.mu.sampling_voice(14, got);
+					const double same_level = rms(o_off, RATE / 2, RATE / 2) / rms(plain, RATE / 2, RATE / 2);
+					const auto off_mid = part(o_off, RATE / 2, RATE / 2);
+					check(!got.el[1].on && got.el[1].assigned && got.el[1].sample == n1 && got.el[1].coarse == 12 && got.el[1].level == 99 &&
+					      got.el[0].on && std::fabs(same_level - 1.0) < 0.02 && tone(off_mid, 523.25) < 0.6 * tone(off_mid, 261.63),
+					      "鳴らさない要素の選択が残る",
+					      "要素 2: サンプル " + std::to_string(got.el[1].sample) + "、音程 " + std::to_string(got.el[1].coarse) +
+					      "、大きさは要素 1 だけのときの " + std::to_string(same_level) + " 倍");
+					// 後の検査のために、要素 2 を空に戻す
+					v_off.el[1] = sp::element{};
+					std::string e2;
+					k.mu.sampling_set_voice(14, v_off, e2);
+				}
+
 				// 読み戻し
 				sp::voice wr = base, rd;
 				wr.el[0].lfo_wave = 2;

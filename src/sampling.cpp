@@ -869,7 +869,10 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 	// 名前は 8 文字で、余りは空白（0 で埋めると LCD が CGRAM の 0 番の字を出す）。+10・+11 は別の欄
 	if (!v.name.empty())
 		put_text(m_dram, o + 2, 8, v.name, ' ');
-	// 使う要素の印（ビットごと）。使わない要素の中身は触らない
+	// 使う要素の印（ビットごと）。鳴らすかどうかはこの印だけで決まる。**鳴らさない要素も中身は書く**:
+	// 窓で「この要素を鳴らす」を外したまま選んだサンプルや値が、書いたとたんに消えないように
+	// （前は触らなかったので、試聴のあとに読み直すと選んだものが消えていた）。
+	// 鳴らさない要素に、もう無いサンプルが入っていたら「無し」にする
 	u8 mask = 0;
 	for (int e = 0; e < sp::VOICE_ELEMENTS; e++)
 		if (v.el[size_t(e)].on)
@@ -877,27 +880,27 @@ bool mu2000::sampling_set_voice(int slot, const sp::voice &v, std::string &err)
 	m_dram[o] = mask;
 	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
 		const sp::element &x = v.el[size_t(e)];
-		if (!x.on)
-			continue;
 		const u32 b = o + 12 + 84 * u32(e);
-		if (x.assigned) {
+		const bool has_sample = x.assigned && x.sample >= 1 && x.sample <= sp::MAX_SAMPLES &&
+		                        (m_dram[sample_rec(x.sample) + 2] & 0x40);
+		if (has_sample) {
 			m_dram[b] = 0x01;
-			m_dram[b + 1] = 0x7f;
 			const u16 sv = u16(0x4000 | (x.sample - 1));
 			m_dram[b + 2] = u8(sv >> 8);
 			m_dram[b + 3] = u8(sv);
-		} else if (x.rom_wave >= 0 && x.rom_wave < sp::ROM_WAVE_SETS) {
+		} else if (!x.assigned && x.rom_wave >= 0 && x.rom_wave < sp::ROM_WAVE_SETS) {
 			// 内蔵の波形の組。[0] は firmware がサンプルのときだけ 01 にする欄で、鳴るかどうかは変えない
 			m_dram[b] = 0x00;
-			m_dram[b + 1] = 0x7f;
 			m_dram[b + 2] = u8(x.rom_wave >> 7);
 			m_dram[b + 3] = u8(x.rom_wave & 0x7f);
 		} else {
 			m_dram[b] = 0x00;
-			m_dram[b + 1] = 0x7f;
 			m_dram[b + 2] = 0x3f;
 			m_dram[b + 3] = 0x7f;
 		}
+		// [1] は、鳴らす要素だけ 7f にする（鳴らさない要素は firmware の入れた値のまま。SysEx でも送らない欄）
+		if (x.on)
+			m_dram[b + 1] = 0x7f;
 		const int klo = std::clamp(x.key_lo, 0, 127), khi = std::clamp(x.key_hi, 0, 127);
 		const int vlo = std::clamp(x.vel_lo, 1, 127), vhi = std::clamp(x.vel_hi, 1, 127);
 		m_dram[b + 4] = u8(std::min(klo, khi));
