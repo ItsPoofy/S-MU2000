@@ -678,6 +678,15 @@ int main(int argc, char **argv)
 							return true;
 					return false;
 				};
+				// キットの番号は名前の表の番号とは別（Ntrl Kit は 34）。取り違えると 475 以降が「使われていない」になる
+				auto has_kit = [&](int set, const char *kit) {
+					for (const auto &d : cat[size_t(set)].drums)
+						if (d.kit == kit)
+							return true;
+					return false;
+				};
+				check(has_kit(475, "Ntrl Kit") && has_kit(502, "Ntrl Kit") && unused < 15,
+				      "内蔵ウェーブの一覧: Ntrl Kit の波形（475 以降）", "使われていない組 " + std::to_string(unused));
 				check(cat.size() == 503 && has_voice(12, "MelodTom") && has_drum(12, "Tom") && cat[6].voices.empty() &&
 				      has_drum(6, "Snare") && cat[6].icon == xg::voice_rom::ICON_DRUM && cat[12].icon >= 0,
 				      "内蔵ウェーブの一覧: 使っている音色とドラムの打",
