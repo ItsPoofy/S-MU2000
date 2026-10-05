@@ -180,6 +180,13 @@ bool take_opened_file(std::vector<u8> &bytes);      // 頼んだ側が受け取�
 bool take_opened_wav(std::vector<u8> &bytes);       // WAV を頼んだ側が受け取る
 // SmartMedia の画像（サンプリングの窓の「カード」）。中身は読まず、選ばれた場所（UTF-8）だけを返す
 void ask_open_card();
+// MIDI ファイル（何曲でも）。プレイヤーの窓が頼み、道の並びを受け取る。窓を出せる持ち主だけ midi_dialog が真
+void ask_open_midi();
+bool file_ask_is_midi();
+void give_opened_midi(std::vector<std::string> paths);
+bool take_midi_paths(std::vector<std::string> &paths);
+void set_midi_dialog(bool on);
+bool midi_dialog();
 bool file_ask_is_card();                            // 持ち主が、今の頼みがカードかを見る（take_file_ask の前に）
 void give_opened_card(const std::string &path);     // 持ち主が、選ばれた場所を返す
 bool take_opened_card(std::string &path);           // 頼んだ側が受け取る（1 回だけ）

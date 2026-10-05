@@ -112,6 +112,30 @@ it is in the same position as an external sequencer plugged into the real
 unit with a MIDI cable. The tone generator advances, as ever, only as far as
 the audio device asks.
 
+### The MIDI player window
+
+Open it with `Player` on the bar at the top of the window (or `--player-window`). It keeps a playlist and can pause,
+seek, step between songs and loop (issue #124). `Play MIDI file...` in the menu, files dropped on a window and `--play`
+all add to this list before playing, so whichever way a song starts it can be controlled here.
+
+* **The list**: `Add files...` picks any number of files (or type a path in the box below and press `Add`).
+  Double-click a row to play it from the top, drag a row to reorder, `x` removes it, `Clear the list` removes all.
+  The song's own name is shown when the file has one (the first track-name event `FF 03` of the first track; port
+  names such as `PartA` are not taken as a title; Shift_JIS titles are converted). Otherwise the file name
+* `Prev` / `Next`: the previous or next song. `Prev` returns to the top of the current song when it is more than
+  two seconds in
+* `Pause` / `Play`: pausing silences what is sounding and waits in place
+* **Loop**: `No loop` (play the list once and stop), `Loop the list`, `Loop one song`, `Shuffle` (random order,
+  shuffled again each time round). There is a one-second gap between songs
+* **The position slider**: drag and release to jump there. A jump first sends **only the settings** up to that point
+  (SysEx, bank and program changes, RPN/NRPN and data entry all in order; other controllers, pitch bend and channel
+  pressure only as their last value; no notes), then waits until the tone generator has read them (counted at
+  10,000 bytes a second for the USB port and 3,125 for DIN) before playing on. Songs with a lot of SysEx take a
+  moment; `catching up the settings...` is shown meanwhile
+* **Bar, beat and tempo** are counted from the song's time signatures (`FF 58`) and tempo changes (`FF 51`)
+
+The plugins (VST3 and so on) do not have this window; there the DAW plays the song.
+
 ## Choosing MIDI ports
 
 **They can be chosen from the display while running.** Left-click the

@@ -275,7 +275,7 @@ all: $(BUILD)/verify$(EXE) $(BUILD)/boot$(EXE) $(BUILD)/render$(EXE) \
      au $(BUILD)/aubprobe$(EXE)
 endif
 
-$(BUILD)/verify$(EXE): $(OBJS) $(BUILD)/src/verify.o
+$(BUILD)/verify$(EXE): $(OBJS) $(BUILD)/src/smf.o $(BUILD)/src/verify.o
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 

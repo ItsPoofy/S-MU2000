@@ -772,7 +772,23 @@ std::string g_card_path;
 std::string g_file_note;
 }
 
-void ask_open_card() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = true; }
+bool g_file_ask_midi = false, g_midi_paths_ready = false, g_midi_dialog = false;
+std::vector<std::string> g_midi_paths;
+void ask_open_card() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = true; g_file_ask_midi = false; }
+void ask_open_midi() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = true; }
+bool file_ask_is_midi() { return g_file_ask_midi; }
+void give_opened_midi(std::vector<std::string> paths) { g_midi_paths = std::move(paths); g_midi_paths_ready = true; }
+bool take_midi_paths(std::vector<std::string> &paths)
+{
+	if (!g_midi_paths_ready)
+		return false;
+	paths = std::move(g_midi_paths);
+	g_midi_paths.clear();
+	g_midi_paths_ready = false;
+	return true;
+}
+void set_midi_dialog(bool on) { g_midi_dialog = on; }
+bool midi_dialog() { return g_midi_dialog; }
 bool file_ask_is_card() { return g_file_ask_card; }
 void give_opened_card(const std::string &path) { g_card_path = path; g_card_path_ready = true; }
 bool take_opened_card(std::string &path)
@@ -787,8 +803,8 @@ bool take_opened_card(std::string &path)
 void set_file_dialogs(bool on) { g_file_dialogs = on; }
 bool file_dialogs() { return g_file_dialogs; }
 void ask_save_file(std::vector<u8> bytes) { g_file_out = std::move(bytes); g_file_ask = file_ask::save; }
-void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; }
-void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; g_file_ask_card = false; }
+void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = false; }
+void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; g_file_ask_card = false; g_file_ask_midi = false; }
 bool file_ask_is_wav() { return g_file_ask_wav; }
 file_ask take_file_ask(std::vector<u8> &bytes)
 {

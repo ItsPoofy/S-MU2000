@@ -85,6 +85,7 @@ struct window_options {
 	bool open_shapes = false;
 	bool open_master = false;
 	bool open_sampling = false;
+	bool open_player = false;     // MIDI プレイヤーの窓（gui だけ）
 	bool lcd_only = false;   // the LCD on its own
 };
 
@@ -97,6 +98,7 @@ inline bool consume_window_option(const char *arg, window_options &o)
 	if (!std::strcmp(arg, "--shapes-window")) { o.open_shapes = true; return true; }
 	if (!std::strcmp(arg, "--master-window")) { o.open_master = true; return true; }
 	if (!std::strcmp(arg, "--sampling-window")) { o.open_sampling = true; return true; }
+	if (!std::strcmp(arg, "--player-window")) { o.open_player = true; return true; }
 	if (!std::strcmp(arg, "--lcd")) { o.lcd_only = true; return true; }
 	return false;
 }
