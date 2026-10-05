@@ -234,6 +234,7 @@ private:
 	bool m_pv_on[4] = { true, true, true, true };
 	int m_pv_key = 60, m_pv_vel = 100, m_pv_held = -1;
 	bool m_pv_scroll = false, m_pv_drawn = false, m_pv_borrowed = false;
+	bool m_pv_selected = false;        // パート 1 で借りた枠を選び済み（タブを離れると選び直す）
 	std::shared_ptr<std::vector<u8>> m_pv_keep;
 	char m_wave_find[32] = {};         // 組の絞り込み
 	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列

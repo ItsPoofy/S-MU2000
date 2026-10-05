@@ -601,6 +601,8 @@ inline const ui_texts &en_texts()
 		.pv_play_tip = "Plays the checked elements through the real tone generator while held. It borrows the last sample voice (Bank# 1, number 128) and part 1: the voice is copied there with only the checked elements switched on. What that slot held is put back when you leave this tab or close the window.",
 		.pv_vel = "Velocity",
 		.pv_silent = "No checked element plays at this key and velocity (see the Keys and Velocity rows).",
+		.pv_map_tip_fmt = "key %d (%s%d)  velocity %d\nClick to play here; drag to slide across keys",
+		.pv_map_note = "Across = key (low on the left), up = velocity. Coloured frames show where each element plays. Click anywhere to hear that key and velocity.",
 		.pv_copy_fmt = "Copy to sample voice Bank# %d number %d",
 		.pv_copy_tip = "Copies this whole voice (every element, with all its settings) into the sample voice chosen in the Voice tab, replacing what is there, and goes to that tab. From there it can be edited like any sample voice and its waves swapped for your own samples.",
 		.smp_tab_romwave = "Built-in waves",

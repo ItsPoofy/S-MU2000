@@ -634,6 +634,8 @@ struct ui_texts {
 	const char *pv_play_tip;
 	const char *pv_vel;
 	const char *pv_silent;
+	const char *pv_map_tip_fmt;
+	const char *pv_map_note;
 	const char *pv_copy_fmt;
 	const char *pv_copy_tip;
 	const char *smp_tab_romwave;

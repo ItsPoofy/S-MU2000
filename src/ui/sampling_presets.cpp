@@ -39,6 +39,13 @@ std::string lower(std::string s)
 	return s;
 }
 
+// 要素 1〜4 の色（表の印と、鍵 × 強さの図の枠で同じ色）
+ImU32 el_color(int e, int alpha)
+{
+	static const int RGB[4][3] = { { 90, 190, 255 }, { 255, 170, 80 }, { 140, 230, 130 }, { 240, 130, 220 } };
+	return IM_COL32(RGB[e & 3][0], RGB[e & 3][1], RGB[e & 3][2], alpha);
+}
+
 std::string pan_text(int p)
 {
 	if (p == 15)
@@ -65,6 +72,7 @@ void sampling_editor::preset_restore(bridge &br)
 	if (!m_pv_borrowed)
 		return;
 	m_pv_borrowed = false;
+	m_pv_selected = false;
 	auto keep = m_pv_keep;
 	br.post([keep](mu2000 &mu) {
 		if (keep && !keep->empty()) {
@@ -243,7 +251,15 @@ void sampling_editor::preset_pane(bridge &br)
 				ImGui::PopID();
 			}
 		};
-		row(UI_TEXT(pv_row_play, "Play"), [&](int e) { ImGui::Checkbox("##on", &m_pv_on[e]); });
+		row(UI_TEXT(pv_row_play, "Play"), [&](int e) {
+			ImGui::Checkbox("##on", &m_pv_on[e]);
+			// 図の枠と同じ色の印
+			ImGui::SameLine();
+			const ImVec2 q = ImGui::GetCursorScreenPos();
+			const float h = ImGui::GetFrameHeight();
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(q.x, q.y + h * 0.25f), ImVec2(q.x + h * 1.2f, q.y + h * 0.75f), el_color(e, 255), 2.0f);
+			ImGui::Dummy(ImVec2(h * 1.2f, h));
+		});
 		row(UI_TEXT(pv_row_wave, "Wave"), [&](int e) {
 			const int set = xg::nv::wave_set(el[e]);
 			char b[24];
@@ -302,6 +318,100 @@ void sampling_editor::preset_pane(bridge &br)
 		if (m_pv_on[e])
 			mask |= 1 << e;
 
+	// 鳴らす・止める。音色を借りた枠へ写し（鳴らす要素の印つき）、パート 1 でその枠を選んで鍵を押す。
+	// 枠を選ぶのは最初の 1 度だけ（選び直すと前の音の余韻が切れる。印は写すだけで次の音から効く）
+	auto note_off = [&] {
+		if (m_pv_held < 0)
+			return;
+		const std::vector<u8> msg = { 0x80, u8(m_pv_held), 0x40 };
+		br.send(msg);
+		m_pv_held = -1;
+	};
+	auto note_on = [&](int key, int vel) {
+		note_off();
+		const u32 rec = v.rec;
+		if (!m_pv_keep)
+			m_pv_keep = std::make_shared<std::vector<u8>>();
+		auto keep = m_pv_keep;
+		m_pv_borrowed = true;
+		br.post([keep, rec, mask](mu2000 &mu) {
+			if (keep->empty())
+				mu.sampling_voice_raw(BORROW_SLOT, *keep);     // 借りる前の中身
+			std::string err;
+			mu.sampling_copy_preset(BORROW_SLOT, rec, mask, err);
+			return err;
+		});
+		std::vector<u8> msg;
+		if (!m_pv_selected)
+			msg = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x01, 0xc0, 0x7f };
+		m_pv_selected = true;
+		m_pv_held = key;
+		msg.insert(msg.end(), { 0x90, u8(key), u8(vel) });
+		br.send(msg);
+	};
+
+	// ---- 鍵 × 強さの図。横 = 鍵（左が低い）、縦 = 強さ（上が強い）。色の枠 = 各要素が鳴る範囲。
+	// 押した所の鍵と強さで鳴らす。押したまま動かすと、鍵が替わるたびに鳴らし直す
+	{
+		const ImVec2 p = ImGui::GetCursorScreenPos();
+		const ImVec2 sz(ImGui::GetContentRegionAvail().x, std::max(fs * 9.0f, std::min(fs * 16.0f, ImGui::GetContentRegionAvail().y - fs * 7.0f)));
+		ImGui::InvisibleButton("pv_map", sz);
+		const bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
+		auto key_x = [&](float k) { return p.x + sz.x * k / 128.0f; };
+		auto vel_y = [&](float vv) { return p.y + sz.y * (128.0f - vv) / 127.0f; };   // 強さ 1 が下の端、127 の上の辺が上の端
+		dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(16, 20, 26, 255), 4.0f);
+		// 黒鍵の列をうっすら、オクターブの線と名前（60 = C3）
+		for (int k = 0; k < 128; k++) {
+			const int pc = k % 12;
+			if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10)
+				dl->AddRectFilled(ImVec2(key_x(float(k)), p.y), ImVec2(key_x(float(k + 1)), p.y + sz.y), IM_COL32(255, 255, 255, 7));
+			if (pc == 0) {
+				dl->AddLine(ImVec2(key_x(float(k)), p.y), ImVec2(key_x(float(k)), p.y + sz.y), IM_COL32(90, 100, 120, k == 60 ? 255 : 120));
+				char name[8];
+				std::snprintf(name, sizeof(name), "C%d", k / 12 - 2);
+				dl->AddText(ImVec2(key_x(float(k)) + 3, p.y + sz.y - fs - 2), IM_COL32(130, 140, 160, 255), name);
+			}
+		}
+		for (int vv : { 32, 64, 96 })
+			dl->AddLine(ImVec2(p.x, vel_y(float(vv))), ImVec2(p.x + sz.x, vel_y(float(vv))), IM_COL32(90, 100, 120, 70));
+		// 要素の枠。鳴らさない要素は薄く
+		for (int e = 0; e < n; e++) {
+			const float inset = 2.0f + float(e) * 2.5f;      // 同じ範囲の枠が重なっても見分けられるように少しずつ内へ
+			const ImVec2 a(key_x(float(el[e][4])) + inset, vel_y(float(el[e][7]) + 1.0f) + inset);
+			const ImVec2 b(key_x(float(el[e][5]) + 1.0f) - inset, vel_y(float(el[e][6])) - inset);
+			if (b.x <= a.x || b.y <= a.y)
+				continue;
+			dl->AddRectFilled(a, b, el_color(e, m_pv_on[e] ? 38 : 10), 3.0f);
+			dl->AddRect(a, b, el_color(e, m_pv_on[e] ? 220 : 70), 3.0f, 0, m_pv_on[e] ? 1.5f : 1.0f);
+			char num[4];
+			std::snprintf(num, sizeof(num), "%d", e + 1);
+			dl->AddText(ImVec2(a.x + 4 + float(e) * fs * 0.8f, a.y + 2), el_color(e, m_pv_on[e] ? 255 : 110), num);
+		}
+		dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + sz.x + 1, p.y + sz.y + 1), IM_COL32(110, 125, 150, 255), 4.0f, 0, 1.5f);
+		if (active || hovered) {
+			const ImVec2 m = ImGui::GetIO().MousePos;
+			const int key = std::clamp(int((m.x - p.x) / sz.x * 128.0f), 0, 127);
+			const int vel = std::clamp(int(128.0f - (m.y - p.y) / sz.y * 127.0f), 1, 127);
+			if (active) {
+				m_pv_key = key;
+				m_pv_vel = vel;
+				if (ImGui::IsItemActivated() || key != m_pv_held)
+					note_on(key, vel);
+			} else {
+				static const char *const NOTE[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+				ImGui::SetTooltip(UI_TEXT(pv_map_tip_fmt, "key %d (%s%d)  velocity %d\nClick to play here; drag to slide across keys"), key, NOTE[key % 12], key / 12 - 2, vel);
+			}
+		}
+		if (ImGui::IsItemDeactivated())
+			note_off();
+		// いまの鍵と強さ
+		const ImVec2 c(key_x(float(m_pv_key) + 0.5f), vel_y(float(m_pv_vel) + 0.5f));
+		dl->AddLine(ImVec2(c.x, p.y), ImVec2(c.x, p.y + sz.y), IM_COL32(255, 255, 255, 50));
+		dl->AddLine(ImVec2(p.x, c.y), ImVec2(p.x + sz.x, c.y), IM_COL32(255, 255, 255, 50));
+		dl->AddCircleFilled(c, m_pv_held >= 0 ? 5.0f : 3.5f, m_pv_held >= 0 ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 210, 230, 200));
+		ImGui::TextDisabled("%s", UI_TEXT(pv_map_note, "Across = key (low on the left), up = velocity. Coloured frames show where each element plays. Click anywhere to hear that key and velocity."));
+	}
+
 	ImGui::Button(UI_TEXT(smp_audition, "Hold to play"), ImVec2(fs * 9, 0));
 	const bool hold_on = ImGui::IsItemActivated(), hold_off = ImGui::IsItemDeactivated();
 	if (ImGui::IsItemHovered())
@@ -331,28 +441,10 @@ void sampling_editor::preset_pane(bridge &br)
 		if (!any)
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "%s", UI_TEXT(pv_silent, "No checked element plays at this key and velocity (see the Keys and Velocity rows)."));
 	}
-	if (hold_on) {
-		const u32 rec = v.rec;
-		if (!m_pv_keep)
-			m_pv_keep = std::make_shared<std::vector<u8>>();
-		auto keep = m_pv_keep;
-		m_pv_borrowed = true;
-		br.post([keep, rec, mask](mu2000 &mu) {
-			if (keep->empty())
-				mu.sampling_voice_raw(BORROW_SLOT, *keep);     // 借りる前の中身
-			std::string err;
-			mu.sampling_copy_preset(BORROW_SLOT, rec, mask, err);
-			return err;
-		});
-		m_pv_held = m_pv_key;
-		const std::vector<u8> msg = { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x01, 0xc0, 0x7f, 0x90, u8(m_pv_held), u8(m_pv_vel) };
-		br.send(msg);
-	}
-	if (hold_off && m_pv_held >= 0) {
-		const std::vector<u8> msg = { 0x80, u8(m_pv_held), 0x40 };
-		br.send(msg);
-		m_pv_held = -1;
-	}
+	if (hold_on)
+		note_on(m_pv_key, m_pv_vel);
+	if (hold_off)
+		note_off();
 
 	// ---- サンプル音色へ写す
 	ImGui::Spacing();
