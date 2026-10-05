@@ -215,6 +215,9 @@ void player::play(int index, bridge &br)
 		std::lock_guard<std::mutex> lock(m_lock);
 		if (index < 0 || index >= int(m_list.size()))
 			return;
+		// 長さと口の数は、流す糸が曲を開く前でも聞かれる（「再生: …（N 秒）」の表示）。一覧に控えたものを先に入れておく
+		m_len.store(m_list[size_t(index)].length, std::memory_order_relaxed);
+		m_ports_used.store(m_list[size_t(index)].ports, std::memory_order_relaxed);
 	}
 	m_paused.store(false, std::memory_order_relaxed);
 	if (m_playing.load(std::memory_order_acquire) && m_thread.joinable()) {
