@@ -22,8 +22,11 @@
 
 #include "compat/paths.h"
 #include "mu2000.h"
+#include "rom_search.h"
 #include "ui/app_ios.h"
 #include "ui/engine.h"
+#include "ios/midi_setup.h"
+#include "ios/rom_import.h"
 #include "ui/layout.h"
 #include "ui/options.h"
 #include "ui/tool_args.h"
@@ -36,31 +39,85 @@
 
 namespace {
 
-// The ROMs, found beside the binary.
+// The ROM directory, through the shared search (src/rom_search.h) rather than
+// one hardcoded path: an installed set in the container (the "Install ROM
+// files..." menu entry, src/ios/rom_import.mm) has to win over a bundle copy,
+// and that ordering is exactly what the desktop already does. The bundle's
+// roms/ stays the last candidate, so `make ios-standalone IOS_ROMS=roms` still
+// works for local builds.
 //
-// This is the one thing the portability study could not answer from the source,
-// so it is worth being explicit about what is assumed. The ROMs are baked into
-// the app bundle by `make ios-app-roms`, which puts them in Resources/roms. The
-// engine resolves them from module_dir() + "/../Resources/roms", and on iOS the
-// bundle is flat (the binary sits at the root, not in Contents/MacOS as on macOS),
-// so "one level up from the binary" is the bundle root and the path is correct
-// for both layouts. module_dir() itself is Mach-O header walking and has not been
-// verified on iOS - if the panel comes up empty, this is the first thing to check.
+// Deliberately NOT ../Resources/roms among the image_dir candidates' worth of
+// assumptions: on the flat iOS bundle that resolves to a sibling of the .app,
+// and any subdirectory under the app's Resources/ breaks ad-hoc codesign anyway
+// (see the Makefile's IOS_PANEL_DIR comment for the bisection that proved it).
 std::string rom_dir()
 {
+	std::string tried;
 	const std::string here = smu2000::module_dir(reinterpret_cast<const void *>(&rom_dir));
-	if (here.empty())
-		return {};
-	// Beside the binary (S-MU2000.app/roms/), which is engine candidate 3b
-	// (module_dir + "roms" in src/vst3/engine.cpp) - so no search is needed, only
-	// this one path. Deliberately NOT ../Resources/roms: on the flat iOS bundle that
-	// resolves to a sibling of the .app, and any subdirectory under the app's
-	// Resources/ breaks ad-hoc codesign anyway (see the Makefile's IOS_PANEL_DIR
-	// comment for the bisection that proved it).
-	return here + "/roms";
+	const std::string dir = smu2000::find_roms(here, false, tried);
+	if (!tried.empty())
+		std::fprintf(stderr, "[ios] ROM search:\n%s", tried.c_str());
+	return dir;
 }
 
 } // namespace
+
+// Whether the machine is up. A synth that dims its own screen mid-play is a
+// bug, and it is not enough to ask from the scene method: boot_machine() also
+// runs from the install callback, so the flag has to live next to the code that
+// decides it.
+static bool s_machine_up = false;
+
+// The screen sleeps only while we are foreground *and* silent. UIKit clears
+// the flag for us when the app leaves the foreground, which is why that half is
+// re-asked on the way back rather than remembered.
+static void keep_screen_awake()
+{
+	UIApplication.sharedApplication.idleTimerDisabled = s_machine_up;
+}
+
+static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &a);
+
+// boot_machine_once() plus the one thing that follows from its answer: a
+// running machine keeps the screen awake.
+static bool boot_machine(ui::gui_app &gui, ui::engine &eng, ui::tool_args &a)
+{
+	const bool up = boot_machine_once(gui, eng, a);
+	s_machine_up = up;
+	keep_screen_awake();
+	return up;
+}
+
+// Load the ROMs, boot the firmware, open the audio device. In one place
+// because it runs twice when the app starts with no ROMs: once now (nothing to
+// load), and once more the moment the user finishes installing them, so the
+// machine comes up without a relaunch. Returns whether the machine is running.
+static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &a)
+{
+	if (!gui.load_machine(eng, a)) {
+		std::fprintf(stderr, "[ios] no ROMs: the panel comes up empty\n");
+		return false;
+	}
+	if (!eng.boot()) {
+		std::fprintf(stderr, "[ios] boot failed: %s\n", eng.message.c_str());
+		return false;
+	}
+	eng.state.store(1);
+	// What run()'s boot thread does after boot: open the audio device now that
+	// the firmware is up. a.latency is the shared default (30 ms); exclusive
+	// would ask for hog mode, which does not exist on iOS. On failure the shared
+	// code parks the engine (state 2) and says why - silence with a reason beats
+	// silence without one.
+	if (gui.start_audio(a.latency, false)) {
+		gui.say_audio_opened(false);
+		gui.say_audio_running();
+	} else {
+		std::fprintf(stderr, "[ios] audio start failed; panel runs silent\n");
+	}
+	gui.audio_ready.store(true);
+	std::fprintf(stderr, "[ios] booted\n");
+	return true;
+}
 
 @interface SMUAppDelegate : UIResponder <UIWindowSceneDelegate>
 @property (nonatomic, strong) UIWindow *window;
@@ -108,6 +165,9 @@ std::string rom_dir()
 	static ui::gui_app gui(br, midi_ports, mout, mout_b, mout_mu);
 	ui::g_gui = &gui;
 	gui.eng = nullptr;
+	// Network MIDI endpoints only exist while the session is enabled, so apply
+	// the stored switch before anything enumerates ports.
+	apply_stored_midi_setup();
 	// Creates the audio objects now (needs no firmware); opening them waits for
 	// boot below. Without this out stays null and start_audio refuses - which is
 	// exactly the silence with no log line, since nothing ever tried.
@@ -138,17 +198,10 @@ std::string rom_dir()
 		a.layout_path = ui::layout::find_default();
 	std::fprintf(stderr, "[ios] layout: %s\n",
 	             a.layout_path.empty() ? "(built-in defaults)" : a.layout_path.c_str());
-	if (dir.empty() || !gui.load_machine(eng, a)) {
-		std::fprintf(stderr, "[ios] no ROMs: the panel will come up empty\n");
-	} else {
-		// Boot the firmware so the panel shows the real machine rather than a blank
-		// LCD. boot() runs the SH2 until it settles on its own display.
-		if (eng.boot())
-			std::fprintf(stderr, "[ios] booted\n");
-		else
-			std::fprintf(stderr, "[ios] boot failed: %s\n", eng.message.c_str());
-		eng.state.store(1);
-	}
+	// Boot now, and again later if this launch had nothing to boot: the picker
+	// opens at the end of this method and boot_machine() runs once the install
+	// lands, so the machine comes up without a relaunch.
+	const bool booted = boot_machine(gui, eng, a);
 	gui.wire_engine(eng, eng_opts);
 
 	// What ui::app::run() does for every desktop main before showing the window:
@@ -162,20 +215,6 @@ std::string rom_dir()
 	// so it is safe this early.
 	ui::window_options win_opts;
 	gui.setup_for_window(a, win_opts, false);
-
-	// What run()'s boot thread does after boot: open the audio device now that
-	// the firmware is up. a.latency is the shared default (30 ms); exclusive
-	// would ask for hog mode, which does not exist on iOS. On failure the shared
-	// code parks the engine (state 2) and says why - silence with a reason beats
-	// silence without one. start_ad (recording input) is skipped: there is no
-	// input backend yet.
-	if (gui.start_audio(a.latency, false)) {
-		gui.say_audio_opened(false);
-		gui.say_audio_running();
-	} else {
-		std::fprintf(stderr, "[ios] audio start failed; panel runs silent\n");
-	}
-	gui.audio_ready.store(true);
 
 	// The window system: a UIView with a CAMetalLayer and a 30 Hz CADisplayLink.
 	const CGRect b = [UIScreen mainScreen].bounds;
@@ -209,6 +248,40 @@ std::string rom_dir()
 // Touch works now (one finger = mouse, held second finger = right button), so
 // the panel can be operated; keyboard and audio are still missing.
 	std::fprintf(stderr, "[ios] running: tap to press, hold a second finger for menus\n");
+
+	// Nothing to boot means nothing to play, so ask for the images rather than
+	// showing a dead panel: the picker opens on this launch, and installing
+	// boots the machine on the spot (no relaunch). Deferred one turn so the
+	// scene is fully connected before anything is presented - presenting during
+	// willConnectToSession is refused, silently.
+	if (!booted) {
+		ui::gui_app *g = &gui;
+		ui::engine *e = &eng;
+		ui::tool_args *args = &a;
+		set_rom_import_done([g, e, args] {
+			// The container now holds a whole set, so the shared search finds
+			// it on its own; refresh the path the boot will use.
+			args->dir = rom_dir();
+			boot_machine(*g, *e, *args);
+		});
+		dispatch_async(dispatch_get_main_queue(), ^{
+			prompt_for_roms(panel_view);
+		});
+	}
+}
+
+// UIKit turns the idle timer back on when the app is sent to the background,
+// so the engine being up is not enough on its own.
+- (void)sceneDidEnterBackground:(UIScene *)scene
+{
+	UIApplication.sharedApplication.idleTimerDisabled = NO;
+}
+
+// Coming back with the machine still up means the screen stays on; if the
+// engine never booted (no ROMs) or failed, the device can sleep as it likes.
+- (void)sceneWillEnterForeground:(UIScene *)scene
+{
+	keep_screen_awake();
 }
 
 @end

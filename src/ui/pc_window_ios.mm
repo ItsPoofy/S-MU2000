@@ -20,17 +20,23 @@
 // controller whose Done button hides it. That is the only UIKit chrome in the
 // file; everything else is the Metal/ImGui shell both twins share.
 //
-// Not yet: keyboard (editors have text fields; UIKeyCommand/UITextInput next) and
-// file drops (no UIDropInteraction yet - set_drop_handler is accepted and ignored,
-// as on the panel).
+// Keyboard: the view is UIKeyInput (software keyboard follows WantTextInput,
+// hardware keys feed ImGui key events, clipboard bridges UIPasteboard) - see
+// the keyboard section of PCEditView and src/ios/keymap_ios.h.
+ //
+// Not yet: file drops (no UIDropInteraction yet - set_drop_handler is accepted
+// and ignored, as on the panel).
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <UIKit/UIKit.h>
 
+#include <string>
+
 #include "ui/pc_window.h"
 
+#include "ios/keymap_ios.h"
 #include "ui/font_file.h"
 #include "ui/imgui_shell.h"
 #include "ui/xg_ui.h"
@@ -38,11 +44,26 @@
 // The per-editor view: +layerClass Metal, own touches into its own context. Same
 // shape as SMUView in window_ios.mm, minus the display link (frame() drives) and
 // the app pointer (editors talk to the bridge through draw(), not verbs).
-@interface PCEditView : UIView
+//
+// UIKeyInput, so the software keyboard has a first responder to show for: the
+// view becomes first responder exactly while io.WantTextInput holds (frame()
+// below syncs it every tick) and resigns when the field deactivates. Software
+// text arrives through insertText:; hardware keys arrive as raw presses (a
+// bare UIKeyInput gets no insertText: synthesis - that is full UITextInput
+// only), so presses feed key events plus printable characters when a field is
+// active. The traits are set in init: hex, SysEx and voice names must not
+// meet autocorrect, and the keyboard stays Default (not ASCII) so CJK names
+// can be typed.
+@interface PCEditView : UIView <UIKeyInput>
 {
 @public
 	ImGuiContext *ctx;
 }
+@property (nonatomic, readwrite) UITextAutocorrectionType autocorrectionType;
+@property (nonatomic, readwrite) UITextAutocapitalizationType autocapitalizationType;
+@property (nonatomic, readwrite) UITextSpellCheckingType spellCheckingType;
+@property (nonatomic, readwrite) UIKeyboardType keyboardType;
+@property (nonatomic, readwrite) UIReturnKeyType returnKeyType;
 @end
 
 @implementation PCEditView
@@ -58,8 +79,48 @@
 	if (self) {
 		self.multipleTouchEnabled = YES;
 		self.backgroundColor = UIColor.blackColor;
+		self.autocorrectionType = UITextAutocorrectionTypeNo;
+		self.autocapitalizationType = UITextAutocapitalizationTypeNone;
+		self.spellCheckingType = UITextSpellCheckingTypeNo;
+		self.keyboardType = UIKeyboardTypeDefault;
+		self.returnKeyType = UIReturnKeyDefault;
+		// Right-click is a long-press here: the editors have no second-finger
+		// chord (the panel does) and no Ctrl key, but rows open pickers on
+		// right-click (BeginPopupContextItem). Movement cancels it, so drags
+		// and slider gestures never right-click by accident.
+		UILongPressGestureRecognizer *hold =
+		    [[UILongPressGestureRecognizer alloc] initWithTarget:self
+		                                                   action:@selector(longPressed:)];
+		hold.minimumPressDuration = 0.5;
+		hold.allowableMovement = 12;
+		// The touch sequence is managed below by hand (button 0 released,
+		// button 1 pressed); cancelling the touches would fight that.
+		hold.cancelsTouchesInView = NO;
+		[self addGestureRecognizer:hold];
 	}
 	return self;
+}
+
+// A held finger becomes the right button for exactly the hold: button 0 goes
+// up first (a right-click is not also a left-press), button 1 goes down for
+// as long as the finger stays, then up. ImGui's context-item popups fire on
+// the down edge, so even a hold-and-release opens the picker.
+- (void)longPressed:(UILongPressGestureRecognizer *)recognizer
+{
+	if (!self->ctx)
+		return;
+	ImGui::SetCurrentContext(self->ctx);
+	ImGuiIO &io = ImGui::GetIO();
+	if (recognizer.state == UIGestureRecognizerStateBegan) {
+		const CGPoint p = [recognizer locationInView:self];
+		io.MousePos = ImVec2((float)p.x, (float)p.y);
+		io.MouseDown[0] = false;
+		io.MouseDown[1] = true;
+	} else if (recognizer.state == UIGestureRecognizerStateEnded ||
+	           recognizer.state == UIGestureRecognizerStateCancelled ||
+	           recognizer.state == UIGestureRecognizerStateFailed) {
+		io.MouseDown[1] = false;
+	}
 }
 
 - (void)pushTouch:(UITouch *)t down:(BOOL)down
@@ -102,6 +163,157 @@
 		return;
 	ImGui::SetCurrentContext(self->ctx);
 	ImGui::GetIO().MouseDown[0] = false;
+}
+
+// ---- keyboard ---------------------------------------------------------------
+//
+// First responder only while a text field is active (frame() syncs it): that
+// is what shows and hides the software keyboard. Hardware keys arrive as
+// presses whether or not the software keyboard is up, and feed key events;
+// printable text never comes through here (insertText: below owns it).
+
+- (BOOL)canBecomeFirstResponder
+{
+	return YES;
+}
+
+- (BOOL)hasText
+{
+	// The text lives in ImGui, not in this view; nothing here deletes or
+	// selects. NO keeps the software keyboard's delete key honest about there
+	// being nothing to delete in the view itself - deleteBackward below still
+	// fires and reaches the ImGui field.
+	return NO;
+}
+
+- (void)insertText:(NSString *)text
+{
+	if (!self->ctx)
+		return;
+	ImGui::SetCurrentContext(self->ctx);
+	ImGuiIO &io = ImGui::GetIO();
+	// The mac twin gates text on WantTextInput for the same reason: a held key
+	// playing notes repeats text, and ImGui trickles text against mouse moves,
+	// so an ungated feed lags drags further and further behind.
+	if (!io.WantTextInput)
+		return;
+	for (NSUInteger i = 0; i < [text length]; i++) {
+		const unichar c = [text characterAtIndex:i];
+		// The return key arrives here as newline. The character feeds
+		// multiline fields; the key event feeds EnterReturnsTrue singles -
+		// the same both-ways shape as the SDL backend.
+		if (c == '\n' || c == '\r') {
+			io.AddKeyEvent(ImGuiKey_Enter, true);
+			io.AddKeyEvent(ImGuiKey_Enter, false);
+		}
+		io.AddInputCharacterUTF16(c);
+	}
+}
+
+- (void)deleteBackward
+{
+	if (!self->ctx)
+		return;
+	ImGui::SetCurrentContext(self->ctx);
+	ImGuiIO &io = ImGui::GetIO();
+	if (!io.WantTextInput)
+		return;
+	io.AddKeyEvent(ImGuiKey_Backspace, true);
+	io.AddKeyEvent(ImGuiKey_Backspace, false);
+}
+
+// Paste bridges into insertText: (which gates and feeds), because the pasted
+// text belongs to the ImGui field, not to this view. Copy, cut and select stay
+// off: ImGui owns its selection and its own Cmd+C/X/V through the clipboard
+// functions wired in create() below.
+- (void)paste:(id)sender
+{
+	(void)sender;
+	NSString *s = [UIPasteboard generalPasteboard].string;
+	if (s)
+		[self insertText:s];
+}
+
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+{
+	(void)sender;
+	if (action == @selector(paste:))
+		return [UIPasteboard generalPasteboard].string != nil;
+	return NO;
+}
+
+// One press to key events. Never characters: printable keys already arrived
+// through insertText: above (software and Smart Keyboard alike), and feeding
+// them here too doubles text. Modifiers feed every time so Ctrl+C/V/X/A and
+// Shift+arrows read in ImGui exactly as on desktop.
+- (void)pushPress:(UIPress *)press down:(BOOL)down
+{
+	if (!self->ctx || !press.key)
+		return;
+	ImGui::SetCurrentContext(self->ctx);
+	ImGuiIO &io = ImGui::GetIO();
+	feed_key_modifiers(io, press.key.modifierFlags);
+	const ImGuiKey key = imgui_key_from_hid(press.key.keyCode);
+	if (key != ImGuiKey_None)
+		io.AddKeyEvent(key, down ? true : false);
+	// Printable text, hardware keyboards only. A bare UIKeyInput responder
+	// gets raw presses and no insertText: from hardware keys (the system
+	// synthesizes text solely for full UITextInput, and for the software
+	// keyboard) - so without this, hardware typing lands nowhere while
+	// shortcuts and editing keys work. The software keyboard never reaches
+	// here, so nothing doubles. Return/newline stays a key event only (the
+	// filter drops \r anyway); the character feeds everything else, shifted
+	// case included, exactly like the mac twin's keyDown.
+	if (down && io.WantTextInput && press.key.characters) {
+		NSString *chars = press.key.characters;
+		for (NSUInteger i = 0; i < [chars length]; i++) {
+			const unichar c = [chars characterAtIndex:i];
+			if (c == '\r' || c == '\n')
+				continue;
+			io.AddInputCharacterUTF16(c);
+		}
+	}
+}
+
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	BOOL handled = NO;
+	for (UIPress *p in presses) {
+		// Any key press, mapped or not: pushPress feeds modifiers every time
+		// and characters when there are printable ones, so an unmapped
+		// punctuation key still types. Nil-key presses (volume buttons and
+		// friends) fall through to super and stay the system's.
+		if (p.key) {
+			[self pushPress:p down:YES];
+			handled = YES;
+		}
+	}
+	// iOS hardware keys do not autorepeat pressesBegan, so unlike the mac
+	// twin no repeat guard is needed: one began is one press.
+	if (!handled)
+		[super pressesBegan:presses withEvent:event];
+}
+
+- (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	BOOL handled = NO;
+	for (UIPress *p in presses) {
+		if (p.key) {
+			[self pushPress:p down:NO];
+			handled = YES;
+		}
+	}
+	if (!handled)
+		[super pressesEnded:presses withEvent:event];
+}
+
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	// A key held across an interruption must come up: a latched ImGui key
+	// (Shift held for a range select) would otherwise stick until pressed again.
+	for (UIPress *p in presses)
+		[self pushPress:p down:NO];
+	(void)event;
 }
 
 @end
@@ -236,6 +448,20 @@ bool pc_window::create(std::string &err)
 	ImGuiIO &io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.IniFilename = nullptr;
+	// Cut/copy/paste inside the fields goes through here (UIPasteboard both
+	// ways), the way the desktop front ends go through the OS clipboard. The
+	// get buffer is static: ImGui uses the pointer only synchronously, and
+	// every editor context runs on the main thread.
+	io.SetClipboardTextFn = [](void *, const char *text) {
+		if (text)
+			[UIPasteboard generalPasteboard].string = [NSString stringWithUTF8String:text];
+	};
+	io.GetClipboardTextFn = [](void *) -> const char * {
+		static std::string buf;
+		NSString *s = [UIPasteboard generalPasteboard].string;
+		buf = s ? [s UTF8String] : "";
+		return buf.c_str();
+	};
 
 	ImGui::StyleColorsDark();
 	ImGuiStyle &st = ImGui::GetStyle();
@@ -309,8 +535,11 @@ bool pc_window::show(std::string &err)
 
 void pc_window::hide()
 {
-	if (host *h = (host *)m_ns)
+	if (host *h = (host *)m_ns) {
+		if ([h->view isFirstResponder])
+			[h->view resignFirstResponder];
 		[h->vc dismissViewControllerAnimated:YES completion:nil];
+	}
 }
 
 bool pc_window::visible() const
@@ -341,10 +570,27 @@ void pc_window::frame(xg::model &m, const xg_snapshot &ram, bridge &br)
 		m_view->hidden(br);   // dismissed mid-gesture: release held-down buttons
 	}
 	m_was_visible = shown;
-	if (!shown)
+	if (!shown) {
+		// Gone (dismissed or never shown): drop the keyboard if it was up for
+		// a field. The view without a window cannot stay first responder, but
+		// resigning here hides the keyboard on the dismissal frame rather
+		// than leaving it orphaned over the panel.
+		if (h && h->view && [h->view isFirstResponder])
+			[h->view resignFirstResponder];
 		return;
+	}
 	ImGui::SetCurrentContext(m_imgui);
 	ImGuiIO &io = ImGui::GetIO();
+	// The software keyboard follows the active field: first responder exactly
+	// while WantTextInput holds, resigned the frame it clears. Tapping another
+	// field keeps it up (resign+become across one frame is a no-op visually);
+	// tapping outside deactivates the field and the keyboard goes with it.
+	if (io.WantTextInput) {
+		if (![h->view isFirstResponder])
+			[h->view becomeFirstResponder];
+	} else if ([h->view isFirstResponder]) {
+		[h->view resignFirstResponder];
+	}
 
 	const CGRect b = [h->view bounds];
 	const CGFloat scale = [h->view contentScaleFactor];

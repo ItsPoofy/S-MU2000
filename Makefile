@@ -1448,7 +1448,7 @@ IOS_ENGINE_OBJS := $(SRCS:%.cpp=$(IOS_BUILD)/%.o)
 # shared, which is the point - nothing here is rewritten for iOS.
 IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
                src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
-               src/ui/master_editor.cpp src/ui/fx_icons.cpp
+               src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/fx_icons.cpp
 
 # The AUv3-UI: factory_ios.mm is the AUViewController + factory (one class,
 # like macOS), view_controller_ios.mm hosts the shared panel through
@@ -1462,6 +1462,7 @@ IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
                  src/mu2000.cpp \
                  src/vst3/engine.cpp src/vst3/iids.cpp src/vst3/view.cpp \
                  src/vst3/panel_uiview.mm src/vst3/view_ios.mm src/ui/menu_ios.mm src/ui/pc_window_ios.mm \
+                 src/ios/rom_import.mm \
                  $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
 IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
@@ -1484,8 +1485,11 @@ $(IOS_BUILD)/%.o: %.mm
 	$(CXX) $(IOS_CXXFLAGS) $(VST3_INC) $(IMGUI_FLAGS) $(AUV3_FLAGS) -ObjC++ -c -o $@ $<
 
 # ROMs baked into the extension. Off by default for the same reason as macOS: the
-# images are Yamaha's and must not travel in anything we hand out. Working without a
-# paid account rules out App Groups, so a local build bakes them instead of importing.
+# images are Yamaha's and must not travel in anything we hand out. The normal
+# path on iOS is not baking at all - the user picks the dump from Files or
+# iCloud Drive and it is copied into the app's own container
+# (src/ios/rom_import.mm), which the shared ROM search finds ahead of the bundle.
+# Baking stays only as a development shortcut (no picker round trip per launch).
 # engine.cpp already searches module_dir()/../Resources/roms, which lands here on the
 # flat iOS layout.
 #   make ios-auv3                     no ROMs (a build to look at)
@@ -1663,7 +1667,7 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
                 src/xg/model.cpp \
                 src/ui/window_ios.mm src/ui/app_ios.cpp src/ui/pc_window_ios.mm \
-                src/ui/menu_ios.mm \
+                src/ui/menu_ios.mm src/ios/midi_setup.mm src/ios/rom_import.mm \
                 src/ios/app.mm
 
 # MIDI: the Mac ports, used by iOS UNCHANGED. CoreMIDI.h is complete on iOS -

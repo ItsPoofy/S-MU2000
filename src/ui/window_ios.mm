@@ -9,9 +9,10 @@
 // window_mac.mm's shell - tick, resize, paint - without the AppKit input, menus and
 // drag-and-drop that file also carries.
 //
-// Step 1 of the iOS port: pixels only. No touch, no keyboard, no audio. What it
-// answers is whether the ImGui panel renders at all on iOS, which is the same
-// question for the app and for the AUv3 because both paint through panel.cpp.
+// The panel shell: touch as the mouse (second finger held is right-click),
+// the Smart Keyboard as the panel keys, and the MIDI setup entries appended
+// to the context menu. Text input lives in the editors (pc_window_ios.mm);
+// this view never summons the software keyboard.
 
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CADisplayLink.h>
@@ -22,6 +23,9 @@
 
 #include "ui/app_ios.h"
 #include "ui/menu_ios.h"
+#include "ios/keymap_ios.h"
+#include "ios/midi_setup.h"
+#include "ios/rom_import.h"
 
 // imgui_shell.h imports Metal and QuartzCore itself now, so nothing here has to
 // remember to do it first - which is what ui/app.h -> ui/shot.h -> imgui_shell.h
@@ -158,6 +162,15 @@
 	(void)sender;
 	if (!self->ctx || !self->_layer)
 		return;
+	// Keyboard focus follows the topmost surface: the panel holds it whenever
+	// no modal is up, so a Smart Keyboard's keys reach app->key() without a
+	// tap first. Editors and sheets take it while shown (their own views
+	// become first responder); the guard hands it back when they close.
+	// Edit menus need no keys and change nothing.
+	if (self.window && ![self isFirstResponder]) {
+		if (![self.window.rootViewController presentedViewController])
+			[self becomeFirstResponder];
+	}
 	// The paint lambda is the mac window's, unchanged: app->paint_main does
 	// frame_work() (the panel tick and the PC windows) and then the picture. Nothing
 	// iOS-specific happens in here, which is the whole point - the panel does not
@@ -186,10 +199,14 @@
 
 // ---- touch ------------------------------------------------------------------
 //
-// The only input step 1 has: one finger is the mouse (press/drag/release),
-// a second finger held down is the right button. No keyboard yet - the panel's
-// single-key shortcuts (A=PLAY, E=EDIT, ...) and the editors' text fields need
-// UIKeyCommand / UITextInput, which is the next piece, not this one.
+// Touch is the mouse (press/drag/release, second finger held down is the
+// right button); the Smart Keyboard is the panel keys. The view is first
+// responder for the keyboard's sake only - it is not UIKeyInput, so no
+// software keyboard ever shows for the panel. Key events become app->key()
+// through the shared iOS map (ios/keymap_ios.h), the same codes
+// window_mac.mm hands over: F2-F5 open windows, letters press panel buttons
+// while held (key-up releases, which is why UIKeyCommand is not the
+// mechanism - it reports no release).
 //
 // Two sinks, because the UI has two halves. The panel itself is raw ImDrawList,
 // not ImGui widgets, so it only hears ui::app verbs - mouse_down/mouse_drag/
@@ -247,9 +264,20 @@
 	if (!theApp)
 		return;
 	std::vector<ui::menu_group> groups = theApp->context_menu((int)p.x, (int)p.y);
+	// The app's menu first, then the iOS-only groups: ROM import (the images
+	// are never in a distributable build, so the user brings them) and
+	// Bluetooth/network MIDI setup, which have no desktop counterpart - macOS
+	// does both in Audio MIDI Setup. Appended, never regrouped.
+	append_rom_import_group(groups);
+	append_midi_setup_group(groups);
 	if (groups.empty())
 		return;
-	show_menu_groups(self, p, groups, [theApp](int itemId) {
+	UIView *here = self;
+	show_menu_groups(self, p, groups, [theApp, here, p](int itemId) {
+		if (handle_rom_import_item(here, itemId))
+			return;
+		if (handle_midi_setup_item(here, p, itemId))
+			return;
 		theApp->menu_chosen(itemId);
 	});
 }
@@ -257,6 +285,10 @@
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
 	(void)event;
+	// Tapping the panel takes keyboard focus with it: the Smart Keyboard's
+	// keys go to the first responder, and nothing else here wants them while
+	// no editor or sheet is up. Harmless when already first responder.
+	[self becomeFirstResponder];
 	// First finger takes button 0 and the pointer; a second finger while it is
 	// held takes button 1. Two fingers landing in the same event both read as
 	// begun: the first enumerated takes the pointer, which is arbitrary but
@@ -338,6 +370,71 @@
 	io.MouseDown[1] = false;
 	self->leftTouch = nil;
 	self->rightTouch = nil;
+}
+
+// ---- keyboard ---------------------------------------------------------------
+
+// First responder for hardware keys only. No UIKeyInput conformance here, so
+// becoming first responder never summons the software keyboard - the panel
+// has no text fields. (The editors' views are UIKeyInput and take over while
+// a field is active; this reclaims on the next tap.)
+- (BOOL)canBecomeFirstResponder
+{
+	return YES;
+}
+
+- (void)didMoveToWindow
+{
+	[super didMoveToWindow];
+	// Leaving the window with a panel button latched (key still held) would
+	// stick it until pressed again: let go of everything on the way out.
+	if (!self.window && self->app)
+		self->app->focus_lost();
+}
+
+// One press to app->key(), down and up. Unmapped keys fall through to super
+// (responder chain, then the system beep) rather than being swallowed: this
+// view owns no keys except the panel's.
+- (void)pushPress:(UIPress *)press down:(BOOL)down
+{
+	const int code = panel_code_from_press(press);
+	if (code >= 0 && self->app)
+		self->app->key(code, down ? true : false);
+}
+
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	BOOL handled = NO;
+	for (UIPress *p in presses) {
+		if (panel_code_from_press(p) >= 0) {
+			[self pushPress:p down:YES];
+			handled = YES;
+		}
+	}
+	if (!handled)
+		[super pressesBegan:presses withEvent:event];
+}
+
+- (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	BOOL handled = NO;
+	for (UIPress *p in presses) {
+		if (panel_code_from_press(p) >= 0) {
+			[self pushPress:p down:NO];
+			handled = YES;
+		}
+	}
+	if (!handled)
+		[super pressesEnded:presses withEvent:event];
+}
+
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+	(void)event;
+	// A key held across an interruption must come up, or its panel button
+	// latches until pressed again.
+	for (UIPress *p in presses)
+		[self pushPress:p down:NO];
 }
 
 - (void)dealloc

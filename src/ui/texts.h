@@ -78,6 +78,15 @@ struct ui_texts {
 	const char *menu_audio_title;
 	const char *menu_audio_default;
 	const char *menu_no_audio;
+	// iOS-only menu rows (Bluetooth/network setup, ROM import). The tables are
+	// the one place UI text lives, so iOS rows are localized like every other
+	// row even though no desktop front end offers them.
+	const char *menu_bt_title;
+	const char *menu_bt_connect;
+	const char *menu_bt_advertise;
+	const char *menu_net_midi;
+	const char *menu_roms_title;
+	const char *menu_roms_install;
 	const char *audio_switch_failed_fmt; // %s: device and backend error
 	const char *menu_out_mu;
 	const char *menu_thru_a;
@@ -149,6 +158,7 @@ struct ui_texts {
 	const char *dlg_roms_pick;
 	const char *dlg_roms_quit;
 	const char *dlg_roms_ok_cancel;
+	const char *dlg_roms_installed;
 	const char *dlg_cancel;
 	// .syx file notes, shown in the master editor (produced by the
 	// pc_window backends and master_editor.cpp).

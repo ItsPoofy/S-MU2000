@@ -307,6 +307,67 @@ mismatch vs claimed IDs vs free-provisioning limits).
 | taps do nothing | panel hears app verbs, not `io` | `mouse_down/drag/up` like `window_mac.mm`; `io` only serves widgets |
 | silence, no log | `make_audio` empty / `start_audio` never called | mirror `run()`; status `Starting...` means `!(out && produced())` |
 
+### Bluetooth and network MIDI (standalone only)
+
+CoreMIDI lists only connected endpoints, so USB MIDI appears on plug-in but
+Bluetooth LE and network MIDI never do without setup (`src/ios/midi_setup.mm`,
+additive iOS-only files; the AUv3 needs nothing, the host routes MIDI):
+
+- The context menu gains one appended group, "Bluetooth & network MIDI"
+  (titles in `ui/texts.h`, localized like the rest): Connect Bluetooth
+  MIDI... (Apple's `CABTMIDICentralViewController`), Advertise this
+  device... (`CABTMIDILocalPeripheralViewController`), and a Network MIDI
+  checkmark toggle. The app's own groups are untouched and render first.
+- `Info.plist` carries `NSBluetoothAlwaysUsageDescription` (BLE pairing goes
+  through CoreBluetooth; required since iOS 13) and
+  `NSLocalNetworkUsageDescription` (the network session, since iOS 14).
+- The toggle enables `MIDINetworkSession` with policy `Anyone`, persisted in
+  `NSUserDefaults` (`smu_network_midi`) and applied at startup; the menu
+  re-enumerates on every open, so newly paired/found endpoints appear with no
+  extra refresh.
+- The sheets present fullscreen, 0.4 s past the pick, clearing anything
+  still presented first: presenting while the context menu is still
+  dismissing force-loads the BT view mid-transition. The "already presenting
+  `_UIContextMenuActionsOnlyViewController`" log line is that collision.
+- Root cause of the `CALayerInvalidGeometry` (NaN-height table) crashes, all
+  three traces: Apple's BT controllers build their table from deprecated
+  `-[UIScreen applicationFrame]` (disassembled `loadView` proves it:
+  `mainScreen` -> `applicationFrame` -> `initWithFrame:style:`, no other
+  input), which returns a NaN-height rect on this runtime. Fixed by a
+  one-time substitution returning `bounds` (`patch_application_frame` in
+  `src/ios/midi_setup.mm`), applied before presenting.
+- Simulator cannot test pairing (no Bluetooth hardware): sheets present with
+  an empty list. Proven working there; real-device pairing still owed.
+
+## ROM images: imported, not bundled
+
+The images are Yamaha's, so no build we hand out carries them (`IOS_ROMS` is empty
+by default, exactly as `AUV3_ROMS` is on macOS). The user brings their own dump,
+and the flow is the one the desktop already had, in `src/ui/rom_locate.h`:
+
+- Shared, one implementation: the "here's what you need and how to dump it" text
+  (`roms_needed_message`), the "that folder is not a set, missing …" answer
+  (`roms_bad_message`), the validation (`smu2000::accept_roms_choice`, which also
+  accepts the parent of a `roms/` folder) and the remembering
+  (`remember_roms_dir` → `roms.txt`). `locate_roms_for_gui` is written from those,
+  and so is iOS, so the platforms cannot drift.
+- iOS-only: the picker (a document picker must be presented and answer later, so
+  it cannot be the blocking `ask_roms_folder` seam the desktop implements) and the
+  **copy**. The copy is forced: a picked folder is granted for that run only —
+  iOS has no security-scoped bookmark (`NSURLBookmarkCreationWithSecurityScope` is
+  `API_UNAVAILABLE(ios)`) and no `accessForFolder` API — so `install_roms()` into
+  `config_dir()/roms` is what survives a relaunch. UIKit also refuses to import a
+  folder at all ("folder import is not supported, use asCopy:false"), which is why
+  the folder is picked in place and copied by hand.
+- Two copies, one per process: no App Groups without a paid account, so the app
+  and the extension have separate containers and separate `roms.txt`.
+- A launch that finds no set opens the flow by itself, and installing boots the
+  machine in place (no relaunch). `boot_machine()` in `src/ios/app.mm` exists for
+  that second call.
+- Entry points: the standalone's context menu, and the extension's panel menu —
+  which `plug_window` leaves empty ("a plug-in has no settings of its own") and
+  iOS now fills, since installing the images is the one setting it has.
+
 ## Open questions for the owner
 
 - Should the iOS app be a *different* UI codebase from the macOS one, or the same? The
@@ -315,3 +376,7 @@ mismatch vs claimed IDs vs free-provisioning limits).
   hard the JIT entitlement is to keep.
 - Does the MIDI IN need to be a full 4-cable virtual MIDI endpoint as on the real machine
   (`virtualMIDICableCount` returns 4), or is a single physical input enough for the app?
+- Should the macOS app that bundles the AUv3 (`src/auv3/main_app.mm`, today a ROM
+  installer and a test harness) become a standalone S-MU2000 the way the iOS one is?
+  The iOS port is the working reference for the parts macOS lacks: no XPC round
+  trip for its own extension, and a panel the app owns rather than borrows.

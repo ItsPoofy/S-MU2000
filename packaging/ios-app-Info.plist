@@ -48,6 +48,29 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<!--
+	  Bluetooth LE MIDI pairing (CABTMIDICentralViewController /
+	  CABTMIDILocalPeripheralViewController in src/ios/midi_setup.mm) goes
+	  through CoreBluetooth, which requires this key from iOS 13. Without it
+	  the pairing sheets have no permission to scan or advertise.
+	-->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>S-MU2000 uses Bluetooth to connect to Bluetooth MIDI instruments and controllers.</string>
+	<!--
+	  The network MIDI session (MIDINetworkSession, toggled from the same
+	  menu) talks to other devices on the local network, which requires this
+	  key from iOS 14.
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>S-MU2000 uses the local network to send and receive network MIDI.</string>
+	<!--
+	  A/D INPUT records through the microphone (audio_in in src/ui/audio_ios.mm).
+	  Recording needs this key; without it the system denies capture silently
+	  and the input list stays empty. The prompt appears when the input menu
+	  is first opened, not at startup.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>S-MU2000 records audio for sampling through the microphone (A/D INPUT).</string>
+	<!--
 	  The scene manifest is NOT optional on this iOS, contrary to the note that used to
 	  be here. Without it the app installs, then traps with SIGTRAP the moment UIKit
 	  connects the first scene:

@@ -23,10 +23,13 @@
 #include "plug_window.h"
 #include "view.h"
 
+#include "ios/rom_import.h"
+
 #include "ui/font_file.h"
 #include "ui/fx_editor.h"
 #include "ui/imgui_shell.h"
 #include "ui/master_editor.h"
+#include "ui/sampling_editor.h"
 #include "ui/menu.h"
 #include "ui/menu_ios.h"
 #include "ui/overview.h"
@@ -340,6 +343,10 @@ public:
 	void detach() override;
 	void set_size(int w, int h) override;
 	void card_menu(int x, int y) override;
+	// The plug-in's own right-click menu, which plug_window leaves empty by
+	// default ("a plug-in has no settings of its own"). On iOS it has one:
+	// installing the ROM images, which are never in a distributable build.
+	void panel_menu(int x, int y) override;
 	void alert(const std::string &text) override;
 	void pc_frame(::xg::model &m, const ::ui::xg_snapshot &ram,
 	              ::ui::bridge &br) override;
@@ -359,6 +366,7 @@ private:
 	ui::pc_window m_fx{ std::make_unique<ui::fx_editor>() };
 	ui::pc_window m_shapes{ std::make_unique<ui::part_shapes>() };
 	ui::pc_window m_master{ std::make_unique<ui::master_editor>() };
+	ui::pc_window m_sampling{ std::make_unique<ui::sampling_editor>() };
 
 	void open_pc(ui::pc_window &w);
 	void show_alert(const char *title, const std::string &text);
@@ -429,13 +437,13 @@ void ios_window::open_pc(ui::pc_window &w)
 // Driven at the panel's repaint rate. Hidden windows cost nothing
 void ios_window::pc_frame(::xg::model &m, const ::ui::xg_snapshot &ram, ::ui::bridge &br)
 {
-	ui::pc_frame_all(m_list, m_editor, m_fx, m_shapes, m_master, m, ram, br,
+	ui::pc_frame_all(m_list, m_editor, m_fx, m_shapes, m_master, m_sampling, m, ram, br,
 	                 [this](ui::pc_window &w) { open_pc(w); });
 }
 
 void ios_window::open_pc_window(int kind)
 {
-	open_pc(*pc_window_for_kind(kind, m_list, m_editor, m_fx, m_shapes, m_master));
+	open_pc(*pc_window_for_kind(kind, m_list, m_editor, m_fx, m_shapes, m_master, m_sampling));
 }
 
 void ios_window::alert(const std::string &text)
@@ -479,6 +487,25 @@ void ios_window::card_menu(int x, int y)
 	ios_window *win = this;
 	show_menu_groups(m_view, CGPointMake(x, y), groups, [win](int itemId) {
 		win->pickCardItem(itemId);
+	});
+}
+
+// The plug-in's panel menu: the shared ui/menu.h content (the PC windows, as
+// the Windows and mac plug-ins show here) plus the iOS-only ROM import group,
+// which is the one setting this platform has. The ROM images cannot be shipped,
+// and an extension has no container app of its own to import them, so the
+// picker lives here.
+void ios_window::panel_menu(int x, int y)
+{
+	if (!m_view)
+		return;
+	std::vector<ui::menu_group> groups = ui::menu_plug_panel();
+	append_rom_import_group(groups);
+	if (groups.empty())
+		return;
+	UIView *here = m_view;
+	show_menu_groups(m_view, CGPointMake(x, y), groups, [here](int itemId) {
+		handle_rom_import_item(here, itemId);
 	});
 }
 
