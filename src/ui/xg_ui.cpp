@@ -773,9 +773,11 @@ std::string g_file_note;
 }
 
 bool g_file_ask_midi = false, g_midi_paths_ready = false, g_midi_dialog = false;
+bool g_file_ask_dls = false, g_dls_path_ready = false;
+std::string g_dls_path;
 std::vector<std::string> g_midi_paths;
-void ask_open_card() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = true; g_file_ask_midi = false; }
-void ask_open_midi() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = true; }
+void ask_open_card() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = true; g_file_ask_midi = false; g_file_ask_dls = false; }
+void ask_open_midi() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = true; g_file_ask_dls = false; }
 bool file_ask_is_midi() { return g_file_ask_midi; }
 void give_opened_midi(std::vector<std::string> paths) { g_midi_paths = std::move(paths); g_midi_paths_ready = true; }
 bool take_midi_paths(std::vector<std::string> &paths)
@@ -800,11 +802,23 @@ bool take_opened_card(std::string &path)
 	return true;
 }
 
+void ask_open_dls() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = false; g_file_ask_dls = true; }
+bool file_ask_is_dls() { return g_file_ask_dls; }
+void give_opened_dls(const std::string &path) { g_dls_path = path; g_dls_path_ready = true; g_file_ask_dls = false; }
+bool take_opened_dls(std::string &path)
+{
+	if (!g_dls_path_ready)
+		return false;
+	path = std::move(g_dls_path);
+	g_dls_path_ready = false;
+	return true;
+}
+
 void set_file_dialogs(bool on) { g_file_dialogs = on; }
 bool file_dialogs() { return g_file_dialogs; }
 void ask_save_file(std::vector<u8> bytes) { g_file_out = std::move(bytes); g_file_ask = file_ask::save; }
-void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = false; }
-void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; g_file_ask_card = false; g_file_ask_midi = false; }
+void ask_open_file() { g_file_ask = file_ask::open; g_file_ask_wav = false; g_file_ask_card = false; g_file_ask_midi = false; g_file_ask_dls = false; }
+void ask_open_wav() { g_file_ask = file_ask::open; g_file_ask_wav = true; g_file_ask_card = false; g_file_ask_midi = false; g_file_ask_dls = false; }
 bool file_ask_is_wav() { return g_file_ask_wav; }
 file_ask take_file_ask(std::vector<u8> &bytes)
 {

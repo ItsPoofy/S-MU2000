@@ -190,6 +190,11 @@ bool midi_dialog();
 bool file_ask_is_card();                            // 持ち主が、今の頼みがカードかを見る（take_file_ask の前に）
 void give_opened_card(const std::string &path);     // 持ち主が、選ばれた場所を返す
 bool take_opened_card(std::string &path);           // 頼んだ側が受け取る（1 回だけ）
+// DLS のファイル（マスターの窓の「DLS のボード」）。これも場所（UTF-8）だけを返す
+void ask_open_dls();
+bool file_ask_is_dls();
+void give_opened_dls(const std::string &path);
+bool take_opened_dls(std::string &path);
 void set_file_note(std::string text);               // 結果のひとこと（「書き出した」など）
 const std::string &file_note();
 

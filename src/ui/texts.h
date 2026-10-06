@@ -321,6 +321,15 @@ struct ui_texts {
 	const char *me_board_none;
 	const char *me_board_fc;
 	const char *me_board_fc16;
+	const char *me_board_dls;
+	const char *me_board_dls_open;
+	const char *me_board_dls_path;
+	const char *me_board_dls_load;
+	const char *me_board_dls_tip;
+	const char *me_board_dls_error_fmt;
+	const char *me_board_dls_empty;
+	const char *me_board_dls_loaded_fmt;
+	const char *dlg_dls_desc;
 	const char *me_board_port_e;
 	const char *me_board_tip;
 	const char *me_board_part;

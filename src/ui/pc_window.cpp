@@ -36,7 +36,8 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	if (ask == xgui::file_ask::save)
 		wcscpy_s(path, L"S-MU2000.syx");
 	const bool wav = ask == xgui::file_ask::open && xgui::file_ask_is_wav();
-	const bool card = ask == xgui::file_ask::open && xgui::file_ask_is_card();
+	const bool dls = ask == xgui::file_ask::open && xgui::file_ask_is_dls();
+	const bool card = !dls && ask == xgui::file_ask::open && xgui::file_ask_is_card();
 	// MIDI ファイル（プレイヤーの窓）。何個でも選べるので、道の入れ物を大きく取って別に開く
 	if (ask == xgui::file_ask::open && xgui::file_ask_is_midi()) {
 		std::vector<wchar_t> many(32768, 0);
@@ -65,7 +66,9 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 		return;
 	}
 	// Bound here: the dialog reads the filter while it runs.
-	const std::wstring filter = card ? dlg_filter(UI_TEXT(dlg_card_or_m2a_desc, "SmartMedia image or M2A file"), "*.img;*.sm;*.m2a",
+	const std::wstring filter = dls ? dlg_filter(UI_TEXT(dlg_dls_desc, "DLS sound bank"), "*.dls",
+	                                             UI_TEXT(dlg_all_files, "All files"), "*.*")
+	                          : card ? dlg_filter(UI_TEXT(dlg_card_or_m2a_desc, "SmartMedia image or M2A file"), "*.img;*.sm;*.m2a",
 	                                              UI_TEXT(dlg_all_files, "All files"), "*.*")
 	                          : wav ? dlg_filter(UI_TEXT(dlg_wav_desc, "WAV audio or SysEx"), "*.wav;*.syx",
 	                                             UI_TEXT(dlg_all_files, "All files"), "*.*")
@@ -94,6 +97,10 @@ void file_dialog(HWND owner, xgui::file_ask ask, const std::vector<u8> &bytes)
 	o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 	if (!GetOpenFileNameW(&o))
 		return;
+	if (dls) {
+		xgui::give_opened_dls(to_utf8(path));
+		return;
+	}
 	// カードの画像は大きい（最大 132MB）ので読まずに、場所だけを返す（読むのはサンプリングの窓）
 	if (card) {
 		xgui::give_opened_card(to_utf8(path));

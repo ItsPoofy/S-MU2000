@@ -3317,7 +3317,7 @@ void mu2000::plg_pump()
 
 void mu2000::set_virtual_board(int kind, int part)
 {
-	kind = kind == VBOARD_FC || kind == VBOARD_FC16 ? kind : VBOARD_NONE;
+	kind = kind == VBOARD_FC || kind == VBOARD_FC16 || kind == VBOARD_DLS ? kind : VBOARD_NONE;
 	part = std::clamp(part, 0, 63);
 	if (kind == m_vb_kind && part == m_vb_part && m_vb_on)
 		return;
@@ -3393,11 +3393,11 @@ void mu2000::vb_from_firmware(const std::vector<u8> &m)
 		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4e, m[4], m[5], m[6] };
 		switch (addr) {
 		case 0x011000:                     // 種類（0 = 1 パートのボード、1 = マルチパートのボード）・番号・?
-			r.insert(r.end(), { u8(m_vb_kind == VBOARD_FC16 ? 0x01 : 0x00), 0x01, 0x00 });
+			r.insert(r.end(), { u8(vb_multi() ? 0x01 : 0x00), 0x01, 0x00 });
 			m_vb_known = true;
 			break;
 		case 0x010000: {                   // 名前 14 文字
-			const char *name = m_vb_kind == VBOARD_FC16 ? "FC16 BOARD    " : "FC BOARD      ";
+			const char *name = m_vb_kind == VBOARD_DLS ? "DLS BOARD     " : m_vb_kind == VBOARD_FC16 ? "FC16 BOARD    " : "FC BOARD      ";
 			r.insert(r.end(), name, name + 14);
 			break;
 		}
@@ -3562,6 +3562,7 @@ void mu2000::vb16_reset(bool voices)
 		vb16_gain(c);
 	}
 	if (voices) {
+		m_vb_dls.reset();
 		m_vb16_parse = vb_parse();
 		m_vb16_sx.clear();
 	}
@@ -3584,8 +3585,9 @@ void mu2000::vb16_gain(vb_chan &c)
 // 口 E の MIDI を 1 バイト。チャンネルメッセージが揃ったら、そのチャンネルの音源へ
 void mu2000::board_midi_in(u8 byte)
 {
-	if (m_vb_kind != VBOARD_FC16 || byte >= 0xf8)
+	if (!vb_multi() || byte >= 0xf8)
 		return;
+	const bool dls = m_vb_kind == VBOARD_DLS;
 	// SysEx は XG System On（F0 43 1n 4C 00 00 7E 00 F7）と GM System On（F0 7E 7F 09 01 F7）だけ読む
 	if (byte == 0xf0) {
 		m_vb16_sx.assign(1, byte);
@@ -3626,13 +3628,30 @@ void mu2000::board_midi_in(u8 byte)
 		case 121:                         // Reset All Controllers: エクスプレッション・ベンド・モジュレーションを戻す
 			c.exp = 127;
 			vb16_gain(c);
-			c.fc.midi(0xe0, 0x00, 0x40);
-			c.fc.midi(0xb0, 1, 0);
+			if (dls) {
+				m_vb_dls.midi(p.status, 121, 0);
+			} else {
+				c.fc.midi(0xe0, 0x00, 0x40);
+				c.fc.midi(0xb0, 1, 0);
+			}
 			return;
 		default:  break;
 		}
 	}
-	c.fc.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
+	if (dls)
+		m_vb_dls.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
+	else
+		c.fc.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
+}
+
+bool mu2000::load_board_dls(const std::string &path, std::string &err)
+{
+	std::shared_ptr<smu2000::vboard::dls_bank> bank = smu2000::vboard::dls_load(path, err);
+	if (!bank)
+		return false;
+	m_vb_dls.set_bank(std::move(bank));
+	m_vb_dls_path = path;
+	return true;
 }
 
 // 1 サンプルぶん。鳴っているチャンネルを足して、MU のエフェクトの入口へ入れる
@@ -3640,13 +3659,31 @@ void mu2000::vb16_render()
 {
 	float bus[6] = { 0, 0, 0, 0, 0, 0 };
 	bool any = false;
-	for (vb_chan &c : m_vb16) {
-		if (!c.fc.sounding())
-			continue;
-		any = true;
-		const float s = c.fc.render();
-		for (int i = 0; i < 6; i++)
-			bus[i] += s * c.gain[i];
+	if (m_vb_kind == VBOARD_DLS) {
+		// DLS の音源はチャンネルごとの左右を返す。チャンネルの音量・パン・送りはここで掛ける
+		if (m_vb_dls.sounding()) {
+			any = true;
+			float ch[16][2] = {};
+			m_vb_dls.render(ch);
+			for (int i = 0; i < 16; i++) {
+				const vb_chan &c = m_vb16[size_t(i)];
+				bus[0] += ch[i][0] * c.gain[0];
+				bus[1] += ch[i][1] * c.gain[1];
+				bus[2] += ch[i][0] * c.gain[2];
+				bus[3] += ch[i][1] * c.gain[3];
+				bus[4] += ch[i][0] * c.gain[4];
+				bus[5] += ch[i][1] * c.gain[5];
+			}
+		}
+	} else {
+		for (vb_chan &c : m_vb16) {
+			if (!c.fc.sounding())
+				continue;
+			any = true;
+			const float s = c.fc.render();
+			for (int i = 0; i < 6; i++)
+				bus[i] += s * c.gain[i];
+		}
 	}
 	if (!any) {
 		if (m_vb_live) {
@@ -3696,7 +3733,7 @@ void mu2000::vb_render()
 void mu2000::run_sample(s32 &left, s32 &right)
 {
 	if (m_vb_kind) {
-		if (m_vb_kind == VBOARD_FC16) {
+		if (vb_multi()) {
 			vb16_render();
 		} else {
 			if (m_vb_resync && !--m_vb_resync)

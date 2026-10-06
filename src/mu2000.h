@@ -14,6 +14,7 @@
 #include "compat/cli_text.h"
 #include "sampling.h"
 #include "vboard.h"
+#include "vboard_dls.h"
 #include "voice_lib.h"
 #include "smartmedia.h"
 #include "state.h"
@@ -303,7 +304,18 @@ public:
 	// メッセージ F5 05 のあとの MIDI で鳴る。チャンネルごとのプログラム・音量（CC7）・エクスプレッション（CC11）・
 	// パン（CC10）・リバーブ／コーラスの送り（CC91・CC93）はボードが自分で持つ。firmware は UTIL → PLG に名前を
 	// 並べるだけで、液晶にパートは出ず、パネルからは音色を選べない（実機の MU でも同じ）。part は使わない
-	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2 };
+	//
+	// VBOARD_DLS もマルチパートのボード。DLS のファイル（Windows の gm.dls など。load_board_dls で読む）を鳴らす
+	// 16 パートの音源で、口 E を受け持つ（src/vboard_dls.h）。チャンネル 10 はドラム。バンクセレクトと
+	// プログラムチェンジで音色を選ぶ。ファイルを読んでいなければ鳴らない
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2, VBOARD_DLS = 3 };
+	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
+	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
+	bool load_board_dls(const std::string &path, std::string &err);
+	const std::string &board_dls_path() const { return m_vb_dls_path; }
+	// 読んである DLS の音色の数・波形の数（読んでいなければ 0）
+	int board_dls_instruments() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->instruments.size()) : 0; }
+	int board_dls_waves() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->waves.size()) : 0; }
 	// 口 E に来た MIDI を 1 バイト（VBOARD_FC16 が挿さっているときだけ鳴る）。音を作る糸から呼ぶこと
 	void board_midi_in(u8 byte);
 	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号
@@ -1043,6 +1055,9 @@ private:
 		float gain[6] = { 0, 0, 0, 0, 0, 0 };        // dry 左右・reverb 左右・chorus 左右
 	};
 	std::array<vb_chan, 16> m_vb16;
+	smu2000::vboard::dls_synth m_vb_dls;      // VBOARD_DLS の音源（ミキサーの値は m_vb16 のものを使う）
+	std::string m_vb_dls_path;
+	bool vb_multi() const { return m_vb_kind == VBOARD_FC16 || m_vb_kind == VBOARD_DLS; }
 	vb_parse m_vb16_parse;
 	std::vector<u8> m_vb16_sx;
 	void vb16_reset(bool voices);

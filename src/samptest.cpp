@@ -19,6 +19,8 @@
 #include "ui/panel_macro.h"
 #include "xg/wave_catalog.h"
 
+#include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2081,6 +2083,106 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(left.r / std::max(1e-12, left.l)) + " 倍、音量 0 で " +
 				      std::to_string(level(quiet.mono) / std::max(1e-12, level(sq.mono))) + " 倍、口 A の内蔵の音 " +
 				      std::to_string(level(inner.mono)) + "（2 倍音 " + std::to_string(i2 / std::max(1e-12, i1)) + " 倍）");
+			}
+
+			// DLS のボード（VBOARD_DLS）。DLS のファイルを読んで、口 E の 16 チャンネルで鳴らす。ここでは小さな DLS を
+			// その場で作る（440Hz の正弦 1 つ。メロディの音色 1 つと、鍵 36 だけに音があるドラムキット 1 つ）。
+			// 基準の鍵で 440Hz、1 オクターブ上で 880Hz。チャンネル 10 はドラムの音色を引く。DLS でないファイルは断って、前のものを残す
+			{
+				auto put32 = [](std::vector<u8> &v, u32 x) { for (int i = 0; i < 4; i++) v.push_back(u8(x >> (8 * i))); };
+				auto put16 = [](std::vector<u8> &v, u32 x) { v.push_back(u8(x)); v.push_back(u8(x >> 8)); };
+				auto chunk = [&](const char *id, const std::vector<u8> &body) {
+					std::vector<u8> v(id, id + 4);
+					put32(v, u32(body.size()));
+					v.insert(v.end(), body.begin(), body.end());
+					if (body.size() & 1)
+						v.push_back(0);
+					return v;
+				};
+				auto list = [&](const char *type, const std::vector<std::vector<u8>> &kids) {
+					std::vector<u8> body(type, type + 4);
+					for (const auto &k : kids)
+						body.insert(body.end(), k.begin(), k.end());
+					return chunk("LIST", body);
+				};
+				const u32 frames = 2205;                       // 22050Hz で 0.1 秒。440Hz がちょうど 44 周期
+				std::vector<u8> fmt, data, wsmp;
+				put16(fmt, 1); put16(fmt, 1); put32(fmt, 22050); put32(fmt, 44100); put16(fmt, 2); put16(fmt, 16);
+				for (u32 i = 0; i < frames; i++)
+					put16(data, u32(s16(std::lround(20000.0 * std::sin(2 * PI * 440.0 * i / 22050.0)))) & 0xffff);
+				put32(wsmp, 20); put16(wsmp, 69); put16(wsmp, 0); put32(wsmp, 0); put32(wsmp, 0); put32(wsmp, 1);
+				put32(wsmp, 16); put32(wsmp, 0); put32(wsmp, 0); put32(wsmp, frames);
+				auto instrument = [&](bool drum, int key_lo, int key_hi) {
+					std::vector<u8> insh, rgnh, wlnk;
+					put32(insh, 1); put32(insh, drum ? 0x80000000u : 0u); put32(insh, 0);
+					put16(rgnh, u32(key_lo)); put16(rgnh, u32(key_hi)); put16(rgnh, 0); put16(rgnh, 127); put16(rgnh, 0); put16(rgnh, 0);
+					put16(wlnk, 0); put16(wlnk, 0); put32(wlnk, 1); put32(wlnk, 0);
+					return list("ins ", { chunk("insh", insh), list("lrgn", { list("rgn ", { chunk("rgnh", rgnh), chunk("wsmp", wsmp), chunk("wlnk", wlnk) }) }) });
+				};
+				std::vector<u8> colh, ptbl;
+				put32(colh, 2);
+				put32(ptbl, 8); put32(ptbl, 1); put32(ptbl, 0);
+				std::vector<u8> body = { 'D', 'L', 'S', ' ' };
+				for (const auto &k : { chunk("colh", colh), list("lins", { instrument(false, 0, 127), instrument(true, 36, 36) }), chunk("ptbl", ptbl),
+				                       list("wvpl", { list("wave", { chunk("fmt ", fmt), chunk("data", data), chunk("wsmp", wsmp) }) }) })
+					body.insert(body.end(), k.begin(), k.end());
+				const std::vector<u8> file = chunk("RIFF", body);
+				const std::string good = (std::filesystem::temp_directory_path() / "smu2000_test.dls").string();
+				const std::string bad = (std::filesystem::temp_directory_path() / "smu2000_test_bad.dls").string();
+				{
+					std::ofstream f(good, std::ios::binary);
+					f.write(reinterpret_cast<const char *>(file.data()), std::streamsize(file.size()));
+					std::ofstream g(bad, std::ios::binary);
+					g << "this is not a DLS file";
+				}
+				static rig d;
+				if (!d.mu.load_program(dir + "/mu2000_flash.bin") || !d.mu.load_wave(dir + "/dump"))
+					return 1;
+				d.mu.load_sintab(dir + "/standin/sin-table.bin");
+				std::string err, err_bad;
+				const bool loaded = d.mu.load_board_dls(good, err);
+				const bool refused = !d.mu.load_board_dls(bad, err_bad) && d.mu.board_dls_path() == good;
+				d.mu.set_virtual_board(mu2000::VBOARD_DLS, 0);
+				d.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !d.mu.midi_ready(); i += RATE / 100)
+					d.pump(10);
+				d.pump(3000);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						d.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](int ch, int key) {
+					d.pump(200);
+					d.out.clear();
+					d.collect = true;
+					send({ 0x90 | ch, key, 127 });
+					d.pump(300);
+					d.collect = false;
+					send({ 0x80 | ch, key, 0 });
+					const std::vector<double> o = d.out;
+					d.pump(300);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb9, 91, 0, 0xc0, 0 });
+				const std::vector<double> a4 = play(0, 69), a5 = play(0, 81), kick = play(9, 36), none = play(9, 40);
+				send({ 0xf5, 1 });
+				const double a4_440 = tone(a4, 440), a4_880 = tone(a4, 880), a5_880 = tone(a5, 880), a5_440 = tone(a5, 440);
+				std::remove(good.c_str());
+				std::remove(bad.c_str());
+				check(loaded && refused && d.mu.board_dls_instruments() == 2 && d.mu.virtual_board_known() &&
+				      a4_440 > 0.01 && a4_880 < 0.02 * a4_440 && a5_880 > 0.01 && a5_440 < 0.02 * a5_880 &&
+				      level(kick) > 0.01 && level(none) < 0.001 * level(kick),
+				      "DLS のボードが、読んだ DLS の音色を口 E で鳴らす",
+				      std::string(loaded ? "読めた" : "読めない: " + err) + "、DLS でないものは「" + err_bad + "」、音色 " +
+				      std::to_string(d.mu.board_dls_instruments()) + "、A4 の 440Hz " + std::to_string(a4_440) + "（880Hz " +
+				      std::to_string(a4_880) + "）、A5 の 880Hz " + std::to_string(a5_880) + "、ドラム 鍵 36 " + std::to_string(level(kick)) +
+				      " / 鍵 40 " + std::to_string(level(none)));
 			}
 
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
