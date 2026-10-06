@@ -498,7 +498,8 @@ public:
 	// PLG ボード用のシリアル（SCI4）のレジスタの読み書きを書き出す（調べもの用）
 	void set_plg_trace(std::FILE *f) { if (m_sci4) m_sci4->set_trace(f); }
 	// ---- PLG ボードの側をこちらで演じる（firmware にボードが挿さっていると思わせる。調べている途中）
-	// firmware がボードへ送ったバイト（slots はどのスロット宛てか。bit0 = PLG1）。音を作る糸から呼ばれる
+	// firmware がボードへ送ったバイト（slots はどのスロット宛てか。bit0 = PLG1）。音を作る糸から呼ばれる。
+	// SCI4 の別々の 3 本の線（chan 0-2）に出たものは、slots = 0x10・0x20・0x40 で来る
 	using plg_tx_fn = std::function<void(int slots, u8 byte)>;
 	void set_plg_tx(plg_tx_fn fn);
 	// スロット（0-2）のボードから本体へ送るバイトを積む。本体がそのスロットを聞いているときに、31250bps の間隔で届く

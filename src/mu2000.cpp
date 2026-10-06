@@ -3258,6 +3258,8 @@ void mu2000::set_plg_tx(plg_tx_fn fn)
 	m_sci4->set_tx_tap([fn](int chan, u8 targets, u8 byte) {
 		if (chan == 3)
 			fn(targets & 7, byte);
+		else
+			fn(0x10 << chan, byte);       // 別々の 3 本の線（chan 0-2）。0x10・0x20・0x40 で知らせる
 	});
 }
 
