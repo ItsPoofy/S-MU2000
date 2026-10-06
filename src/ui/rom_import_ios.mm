@@ -2,7 +2,8 @@
 //
 // See rom_import.h for what this is and why it exists.
 
-#import "ios/rom_import.h"
+#import "ui/rom_import_ios.h"
+
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -11,6 +12,7 @@
 #include "compat/paths.h"
 #include "roms_dir.h"
 #include "ui/menu.h"
+#include "ui/presenter_ios.h"
 #include "ui/rom_locate.h"
 #include "ui/texts.h"
 
@@ -41,20 +43,6 @@ static std::string rom_container_dir()
 	return smu2000::join(conf, "roms");
 }
 
-// The view controller to present from: the view's own, found by walking up to
-// the view whose next responder is a controller, else the window's root (an
-// extension's panel is hosted by the host app).
-static UIViewController *presenter_for(UIView *view)
-{
-	if (!view)
-		return nil;
-	for (UIView *up = view; up; up = up.superview) {
-		if ([up.nextResponder isKindOfClass:[UIViewController class]])
-			return (UIViewController *)up.nextResponder;
-	}
-	return view.window.rootViewController;
-}
-
 // The localized tables hand out const char*; the alerts want NSString.
 static NSString *ns(const char *s)
 {
@@ -68,7 +56,7 @@ static void say(UIView *view, NSString *title, NSString *message,
 {
 	std::fprintf(stderr, "[ios] roms: %s\n",
 	             message ? ([message UTF8String] ?: "") : "");
-	UIViewController *presenter = presenter_for(view);
+	UIViewController *presenter = ui::presenter_for(view);
 	if (!presenter) {
 		std::fprintf(stderr, "[ios] roms: (no view controller for the message)\n");
 		return;
@@ -87,10 +75,10 @@ static void say(UIView *view, NSString *title, NSString *message,
 	[presenter presentViewController:a animated:YES completion:nil];
 }
 
-// The importer hangs off the picker as an associated object. The delegate
-// property is weak (UIDocumentPickerViewController.h:65), and the flow itself is
-// held by g_importer - this keeps it alive for the presentation even if that
-// changes. Same trap, same remedy as the menu presenter.
+// The importer hangs off the picker as an associated object, as the menu
+// presenter does in ui/menu_ios.mm. The delegate property is weak
+// (UIDocumentPickerViewController.h:65), and the flow itself is held by
+// g_importer - this keeps it alive for the presentation even if that changes.
 static const void *kImporterKey = &kImporterKey;
 
 // The picker and the copy.
@@ -159,7 +147,7 @@ static const void *kImporterKey = &kImporterKey;
 	nav.navigationBar.prefersLargeTitles = NO;
 	objc_setAssociatedObject(picker, kImporterKey, self,
 	                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	UIViewController *presenter = presenter_for(_view);
+	UIViewController *presenter = ui::presenter_for(_view);
 	if (!presenter) {
 		std::fprintf(stderr, "[ios] roms: no view controller to present the picker\n");
 		[self endFlow];
@@ -215,7 +203,7 @@ static const void *kImporterKey = &kImporterKey;
 	std::fprintf(stderr, "[ios] roms: installed in %s\n", dest.c_str());
 	if (scoped)
 		[url stopAccessingSecurityScopedResource];
-	// A caller that skipped the boot because there were no ROMs gets it now, so
+	// A caller that skipped the boot because there were no ROMs boots here, so
 	// the panel is already alive behind the message that follows.
 	if (g_rom_import_done)
 		g_rom_import_done();

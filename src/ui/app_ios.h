@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "app.h"
+#include "window_ios.h"   // open_midi_file_panel(), the way app_mac.h takes window_mac.h
 
 namespace ui {
 
@@ -40,11 +41,11 @@ public:
 
 	// ---- audio
 	//
-	// Nothing yet was the state when there was no backend; now make_audio above
-	// works like app_mac.cpp, and AVAudioEngine is the device (audio_ios.mm).
-	// The mac file is not reusable after all - iOS has no AudioHardware HAL -
-	// but mach_absolute_time and os/workgroup.h do both exist on iOS (verified
-	// against the iPhoneSimulator SDK).
+	// make_audio() is where the device is made, the way app_mac.cpp does it, and
+	// AVAudioEngine is the device (src/ui/audio_apple.mm). app_mac.cpp is not
+	// reusable: iOS has no AudioHardware HAL. mach_absolute_time and
+	// os/workgroup.h do both exist on iOS (verified against the iPhoneSimulator
+	// SDK).
 
 	void make_audio() override
 	{
@@ -100,10 +101,9 @@ public:
 	//
 	// Through engine::fill(), not mu.run_sample() directly: fill() is what pumps
 	// the bridge (drv.publish) at the end, and the panel only ever reads the
-	// bridge. Calling run_sample alone advances the SH2 but the display keeps
-	// showing the boot-time snapshot - which is exactly the "stuck at 起動中
-	// forever" that survived the first version of this method. fill() also drains
-	// MIDI and applies panel buttons, so touch will already have somewhere to go.
+	// bridge. run_sample on its own advances the SH2 but publishes nothing, so
+	// the panel keeps showing the boot-time snapshot. fill() also drains MIDI and
+	// applies panel buttons, so touch will already have somewhere to go.
 	//
 	// Only once booted (state == 1): fill() on any other state zeroes the buffer
 	// and returns, so this guard is documentation rather than load-bearing - but
@@ -142,7 +142,16 @@ public:
 	void menu_note(const std::string &) override {}
 	std::string ask_card_open_path() override { return std::string(); }
 	std::string ask_card_save_path() override { return std::string(); }
-	std::string ask_midi_file_path() override { return std::string(); }
+	// By name, the way app_mac.h asks window_mac.h for its open panel: the
+	// window system owns the dialog. The empty return is honest rather than
+	// lazy - a document picker answers later, so the path cannot come back from
+	// the call that starts it, and the shared caller reads empty as "cancelled"
+	// while the window layer plays the file itself when the answer arrives.
+	std::string ask_midi_file_path() override
+	{
+		open_midi_file_panel();
+		return std::string();
+	}
 	bool confirm_factory_reset() override { return false; }
 
 	// An editor window comes up, or says why it could not. The five PC editors

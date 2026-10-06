@@ -5,10 +5,10 @@
 //
 // These are the questions AVAudioEngine cannot answer: which devices exist,
 // what they are called, which one a remembered name means, how big their
-// buffer may be, and whether we can have one to ourselves. Both directions
-// (playback and recording) are here because the two used to keep byte-identical
-// copies of name_of() and lowered(), which is how the output and input sides
-// quietly drift apart.
+// buffer may be, and whether we can have one to ourselves. Playback and
+// recording ask the same questions of the same HAL, so the queries take a
+// direction rather than being written twice - two copies of name_of() and
+// lowered() are two places for the two sides to drift apart.
 //
 // macOS only: iOS ships no public HAL (AudioObject* appears in no header), so
 // nothing here compiles there - which is exactly why the answers to these

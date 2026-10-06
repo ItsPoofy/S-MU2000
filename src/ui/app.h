@@ -880,6 +880,29 @@ public:
 		return true;
 	}
 
+	// The same, from bytes rather than a path: a front end that cannot hand over
+	// a path - iOS reads a picked file while its grant lasts, because the grant
+	// dies with the process - plays the file it read. The reporting is
+	// play_song's, so a failure reads the same whichever way it arrived.
+	bool play_song_from_memory(const u8 *data, size_t size, const std::string &name)
+	{
+		std::string err;
+		if (!play.start_from_memory(data, size, name, br, err)) {
+			std::fprintf(stderr, "開けない: %s\n", err.c_str());
+			char m[512];
+			std::snprintf(m, sizeof m, UI_TEXT(dlg_cannot_fmt, "Cannot open: %s"), err.c_str());
+			menu_error(m);
+			return false;
+		}
+		std::printf("再生: %s（%.1f 秒）\n", name.c_str(), play.length());
+		if (play.ports_used() > 2)
+			std::printf("  この曲は %d 口ぶん。C・D は未対応なので、口 3 以降は%s\n",
+			            play.ports_used(),
+			            play.fold_extra_ports() ? " A・B に重ねて鳴らす" : "鳴らさない");
+		std::fflush(stdout);
+		return true;
+	}
+
 	void do_midi_file()
 	{
 		const std::string path = ask_midi_file_path();
@@ -1325,9 +1348,9 @@ public:
 #if defined(__APPLE__)
 		// The parallel slave thread joins the output unit's audio workgroup
 		// from here (Apple's parallel real-time threads pattern; the join
-		// itself is in compat/realtime.h). Null keeps today's behavior.
-		// Only macOS has a group to hand over, so only it asks. This was
-		// gui_mac.cpp's own line before the three front ends shared a base
+		// itself is in compat/realtime.h), and a null group leaves the thread
+		// outside any workgroup. Only macOS has a group to hand over, so only it
+		// asks.
 		eng->mu.set_realtime_workgroup(out->realtime_workgroup());
 #endif
 		return true;

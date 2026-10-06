@@ -176,7 +176,7 @@ else ifeq ($(PLATFORM),macos)
 # recording one asks its own questions of the platform (same reason live links
 # it: MAC_IO_OBJS). The test never calls it.
 AUDIO_OUTPUT_TEST_SRC := src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
-                        src/ui/audio_apple.mm
+                        src/ui/audio_apple.mm src/ui/session_mac.cpp
 AUDIO_OUTPUT_TEST_FLAGS := -fobjc-arc
 AUDIO_OUTPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation \
                          -framework AVFAudio -framework Foundation
@@ -203,7 +203,7 @@ AUDIO_INPUT_TEST_SRC := src/ui/audio_in.cpp
 AUDIO_INPUT_TEST_LIBS := -lole32 -lavrt -lwinmm
 else ifeq ($(PLATFORM),macos)
 AUDIO_INPUT_TEST_SRC := src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
-                        src/ui/audio_apple.mm
+                        src/ui/audio_apple.mm src/ui/session_mac.cpp
 AUDIO_INPUT_TEST_FLAGS := -fobjc-arc
 AUDIO_INPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation \
                         -framework AVFAudio -framework Foundation
@@ -812,7 +812,8 @@ MAC_FRAMEWORKS := -framework CoreAudio -framework AudioToolbox \
 # audio_apple.o is the render path audio_out_mac.cpp shares with iOS; live links
 # it directly, gui through MAC_GUI_SRCS below.
 MAC_IO_OBJS := $(BUILD)/src/ui/audio_out_mac.o $(BUILD)/src/ui/audio_apple.o \
-               $(BUILD)/src/ui/audio_in_mac.o $(BUILD)/src/ui/midi_in_mac.o
+               $(BUILD)/src/ui/audio_in_mac.o $(BUILD)/src/ui/session_mac.o \
+               $(BUILD)/src/ui/midi_in_apple.o
 
 $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/live.o
 	@mkdir -p $(dir $@)
@@ -829,7 +830,8 @@ $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/l
 MAC_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
                 src/ui/audio_out_mac.cpp src/ui/audio_apple.mm src/ui/audio_in_mac.cpp \
-                src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp \
+                src/ui/session_mac.cpp \
+                src/ui/midi_in_apple.cpp src/ui/midi_out_apple.cpp \
                 src/xg/model.cpp \
                 src/ui/window_mac.mm src/ui/app_mac.cpp src/ui/shot_mac.mm \
                 src/gui_mac.cpp
@@ -1488,7 +1490,9 @@ IOS_ENGINE_OBJS := $(SRCS:%.cpp=$(IOS_BUILD)/%.o)
 # shared, which is the point - nothing here is rewritten for iOS.
 IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
                src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
-               src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/fx_icons.cpp
+               src/ui/master_editor.cpp src/ui/sampling_editor.cpp \
+               src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp \
+               src/ui/fx_icons.cpp
 
 # The AUv3-UI: factory_ios.mm is the AUViewController + factory (one class,
 # like macOS), view_controller_ios.mm hosts the shared panel through
@@ -1499,10 +1503,11 @@ IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
 # in the standalone.
 IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
                  src/auv3/view_controller_ios.mm \
+                 src/ui/presenter_ios.mm \
                  src/mu2000.cpp \
                  src/vst3/engine.cpp src/vst3/iids.cpp src/vst3/view.cpp \
                  src/vst3/panel_uiview.mm src/vst3/view_ios.mm src/ui/menu_ios.mm src/ui/pc_window_ios.mm \
-                 src/ios/rom_import.mm \
+                 src/ui/rom_import_ios.mm \
                  $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
 IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
@@ -1528,7 +1533,7 @@ $(IOS_BUILD)/%.o: %.mm
 # images are Yamaha's and must not travel in anything we hand out. The normal
 # path on iOS is not baking at all - the user picks the dump from Files or
 # iCloud Drive and it is copied into the app's own container
-# (src/ios/rom_import.mm), which the shared ROM search finds ahead of the bundle.
+# (src/ui/rom_import_ios.mm), which the shared ROM search finds ahead of the bundle.
 # Baking stays only as a development shortcut (no picker round trip per launch).
 # engine.cpp already searches module_dir()/../Resources/roms, which lands here on the
 # flat iOS layout.
@@ -1699,7 +1704,7 @@ IOS_STANDALONE := $(IOS_APP)/Standalone       # the real front end, step 1
 #
 # The deliberate difference from the macOS list: no *_mac equivalents for MIDI, and
 # none for audio either - audio is shared instead (src/ui/audio_apple.mm is in
-# IOS_AUDIO_SRCS and answers the questions audio_ios.mm cannot). midi_in_mac.cpp
+# IOS_AUDIO_SRCS and answers the questions the shared core cannot). midi_in_apple.cpp
 # and friends are the near-copies still waiting for this step to finish, and
 # listing them now would only fail the link on missing symbols.
 #
@@ -1709,30 +1714,32 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
                 src/xg/model.cpp \
                 src/ui/window_ios.mm src/ui/app_ios.cpp src/ui/pc_window_ios.mm \
-                src/ui/menu_ios.mm src/ios/midi_setup.mm src/ios/rom_import.mm \
+                src/ui/menu_ios.mm src/ui/presenter_ios.mm \
+                src/ui/rom_import_ios.mm \
                 src/ios/app.mm
 
-# MIDI: the Mac ports, used by iOS UNCHANGED. CoreMIDI.h is complete on iOS -
-# MIDIClientCreate, MIDIPortConnectSource, MIDIClientCreate and the event-block
-# variants are all declared there - so these two compile as they are. They are plain
-# C++ with no #if and no Objective-C, so they need no -ObjC++ either.
+# MIDI: CoreMIDI, shared with macOS. CoreMIDI.h is complete on iOS -
+# MIDIClientCreate, MIDIPortConnectSource and the event-block variants are all
+# declared there - so these two compile for it as they are: plain C++ with no #if
+# and no Objective-C, which is also why they need no -ObjC++. Named _apple like
+# src/ui/audio_apple.mm for the same reason: one file, both platforms.
 #
-# Audio: NOT portable, and src/ui/audio_ios.mm is written from scratch instead.
-# This corrects an earlier claim of mine that CoreAudio is "the same API on iOS",
-# which is true for CoreMIDI and false for CoreAudio: iOS ships
-# CoreAudio.framework with only three headers (AudioHardwareBase.h,
+# Audio: NOT portable. CoreMIDI is the same API on iOS and CoreAudio is not: iOS
+# ships CoreAudio.framework with only three headers (AudioHardwareBase.h,
 # AudioServerPlugIn.h, CoreAudioTypes.h) and no umbrella, and
 # AudioObjectGetPropertyData appears in no public header - only in the link stub
-# CoreAudio.tbd. So the AudioHardware HAL that audio_out_mac.cpp and
-# audio_in_mac.cpp are built on does not exist in public form on iOS, and they fail
-# to compile on "CoreAudio/CoreAudio.h file not found". iOS gets AVAudioSession +
-# AVAudioEngine against the same class interfaces instead: a source node whose
-# render block calls the stored fill_fn, ui::resampler when the device rate is not
-# 44100. Audio in stays a stub (RemoteIO next); only the symbols app.h needs.
-IOS_APPLE_PORT_SRCS := src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp
-# audio_apple.mm is the render path both platforms share; audio_ios.mm is
-# what only iOS has (the session, its observers, its answers).
-IOS_AUDIO_SRCS := src/ui/audio_ios.mm src/ui/audio_apple.mm
+# CoreAudio.tbd. The AudioHardware HAL that audio_out_mac.cpp and audio_in_mac.cpp
+# are built on therefore does not exist in public form on iOS, and those two fail
+# to compile there on "CoreAudio/CoreAudio.h file not found". iOS gets
+# AVAudioSession + AVAudioEngine against the same class interfaces instead.
+IOS_APPLE_PORT_SRCS := src/ui/midi_in_apple.cpp src/ui/midi_out_apple.cpp
+# audio_apple.mm is the render path both platforms share, and it holds
+# audio_out's and audio_in's own methods; the two _ios files are what only iOS
+# can answer, one per direction as on every other platform. session_ios.mm is
+# the AVAudioSession both of them share, and its counterpart on the macOS side
+# is session_mac.cpp, which answers the same two questions with nothing.
+IOS_AUDIO_SRCS := src/ui/audio_out_ios.mm src/ui/audio_in_ios.mm \
+                  src/ui/audio_apple.mm src/ui/session_ios.mm
 
 IOS_GUI_OBJS := $(IOS_GUI_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_GUI_OBJS := $(IOS_GUI_OBJS:%.mm=$(IOS_BUILD)/%.o)

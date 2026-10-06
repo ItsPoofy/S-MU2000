@@ -47,9 +47,9 @@ static const CGFloat kEmptyHeight = 180;
 
 // Part of the adopted protocol, not an extra: AUAudioUnitFactory includes
 // NSExtensionRequestHandling (AUAudioUnitImplementation.h). iOS hosts the
-// extension through ExtensionFoundation, which sends beginRequest first -
-// without it every instantiation died with "unrecognized selector" (-> -10863).
-// Long-lived by design: never complete the request.
+// extension through ExtensionFoundation, which sends beginRequest first, and a
+// factory that does not answer it is what "unrecognized selector" (-10863) on
+// instantiation is. Long-lived by design: never complete the request.
 - (void)beginRequestWithExtensionContext:(NSExtensionContext *)context
 {
 	(void)context;

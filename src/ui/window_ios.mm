@@ -15,7 +15,13 @@
 // this view never summons the software keyboard.
 
 #import <UIKit/UIKit.h>
+#import <CoreAudioKit/CABTMIDICentralViewController.h>
+#import <CoreAudioKit/CABTMIDILocalPeripheralViewController.h>
+#import <CoreMIDI/MIDINetworkSession.h>
 #import <QuartzCore/CADisplayLink.h>
+
+#import <objc/runtime.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <cstdio>
 
@@ -23,9 +29,11 @@
 
 #include "ui/app_ios.h"
 #include "ui/menu_ios.h"
-#include "ios/keymap_ios.h"
-#include "ios/midi_setup.h"
-#include "ios/rom_import.h"
+#include "ui/presenter_ios.h"
+#include "ui/texts.h"
+#include "ui/app_ios.h"
+#include "ui/keymap_ios.h"
+#include "ui/rom_import_ios.h"
 
 // imgui_shell.h imports Metal and QuartzCore itself now, so nothing here has to
 // remember to do it first - which is what ui/app.h -> ui/shot.h -> imgui_shell.h
@@ -211,9 +219,8 @@
 // Two sinks, because the UI has two halves. The panel itself is raw ImDrawList,
 // not ImGui widgets, so it only hears ui::app verbs - mouse_down/mouse_drag/
 // mouse_up, exactly what window_mac.mm calls. Setting io.MouseDown alone does
-// nothing for it (that was the first version of this code, and taps did
-// nothing). io.MousePos/MouseDown are still fed as well: the toolbar strip and
-// the future editors ARE ImGui widgets and will need them.
+// nothing for it. io.MousePos/MouseDown are still fed as well: the toolbar strip
+// and the editors are ImGui widgets and need them.
 //
 // Coordinates pass through in points, the same units macOS passes in view
 // coordinates: the panel maps screen->logical itself (panel::at()/scale()), so
@@ -263,20 +270,32 @@
 	ui::gui_app *theApp = self->app;
 	if (!theApp)
 		return;
-	std::vector<ui::menu_group> groups = theApp->context_menu((int)p.x, (int)p.y);
-	// The app's menu first, then the iOS-only groups: ROM import (the images
-	// are never in a distributable build, so the user brings them) and
-	// Bluetooth/network MIDI setup, which have no desktop counterpart - macOS
-	// does both in Audio MIDI Setup. Appended, never regrouped.
-	append_rom_import_group(groups);
-	append_midi_setup_group(groups);
+	const int mx = int(p.x), my = int(p.y);
+	std::vector<ui::menu_group> groups = theApp->context_menu(mx, my);
+	// The iOS-only groups go where they belong, not into every menu: the ROM
+	// import is a storage thing and sits with the SmartMedia card menu, and
+	// Bluetooth/network MIDI setup with the menus that carry MIDI at all (the
+	// ports menu and the MIDI IN plug). Neither has a desktop counterpart -
+	// macOS does both in Audio MIDI Setup. Appended after the app's own groups,
+	// never regrouped; the tap already said which menu this is.
+	switch (theApp->menu_kind_at(mx, my)) {
+	case ui::app::menu_kind::card:
+		append_rom_import_group(groups);
+		break;
+	case ui::app::menu_kind::phones:
+	case ui::app::menu_kind::ports:
+		ui::append_midi_setup_group(groups);
+		break;
+	default:
+		break;
+	}
 	if (groups.empty())
 		return;
 	UIView *here = self;
 	show_menu_groups(self, p, groups, [theApp, here, p](int itemId) {
 		if (handle_rom_import_item(here, itemId))
 			return;
-		if (handle_midi_setup_item(here, p, itemId))
+		if (ui::handle_midi_setup_item(here, p, itemId))
 			return;
 		theApp->menu_chosen(itemId);
 	});
@@ -441,18 +460,181 @@
 {
 	[self stopLink];
 	// No local and no [super dealloc]: metal_stop takes the context by reference
-	// and nulls it, so the ivar can go straight in - and under ARC (which the iOS
-	// ObjC++ files now use, like every other ObjC++ file here) calling super
-	// dealloc is an error rather than an omission. The warning that used to fire
-	// here (-Wobjc-missing-super-calls) was really saying this file was built
-	// without ARC, which was never intended.
+	// and nulls it, so the ivar can go straight in. These files are built with
+	// ARC, like every other ObjC++ file here, and under ARC a super dealloc call
+	// is an error rather than an omission.
 	if (self->ctx)
 		ui::imshell::metal_stop(self->ctx);
 }
 
 @end
 
+// One picker delegate, retained for the life of the presentation: UIKit holds the
+// delegate weakly, and the picker is the only other thing keeping it alive.
+@interface SMUMidiFileDelegate : NSObject <UIDocumentPickerDelegate>
+@property (nonatomic, strong) UIDocumentPickerViewController *picker;
+@end
+
+@implementation SMUMidiFileDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
+{
+	(void)controller;
+	NSURL *src = urls.firstObject;
+	if (!src) {
+		std::fprintf(stderr, "[ios] midi: nothing picked\n");
+		return;
+	}
+	NSError *e = nil;
+	NSData *data = [NSData dataWithContentsOfURL:src options:0 error:&e];
+	if (!data || data.length == 0) {
+		std::fprintf(stderr, "[ios] midi: cannot read: %s\n",
+		             e ? [[e localizedDescription] UTF8String] : "?");
+		return;
+	}
+	const std::string leaf = std::string([src.lastPathComponent UTF8String] ?: "song.mid");
+	std::fprintf(stderr, "[ios] midi: %zu bytes from %s\n", size_t(data.length), leaf.c_str());
+	// Straight into the player: the shared do_midi_file() returned long ago,
+	// since the picker answered after it did.
+	if (ui::g_gui)
+		ui::g_gui->play_song_from_memory(static_cast<const u8 *>(data.bytes),
+		                             size_t(data.length), leaf);
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
+{
+	(void)controller;
+	std::fprintf(stderr, "[ios] midi: cancelled\n");
+}
+
+@end
+
+// ---- Bluetooth and network MIDI: the file-scope parts ----------------------
+//
+// Apple's pairing sheets, the sheet's Done target and the network session's
+// policy. These are at global scope because the Objective-C classes cannot be
+// declared inside a namespace; the four services at the end of namespace ui are
+// what the rest of the app calls.
+
+static NSString *const kNetworkMidiKey = @"smu_network_midi";
+
+static void apply_network_midi(bool on)
+{
+	MIDINetworkSession *session = [MIDINetworkSession defaultSession];
+	// Anyone may connect: this is a synth, not a secret. The desktop leaves
+	// the session to Audio MIDI Setup; here there is no such app, so the
+	// toggle owns the policy too.
+	session.connectionPolicy = MIDINetworkConnectionPolicy_Anyone;
+	session.enabled = on ? YES : NO;
+	[[NSUserDefaults standardUserDefaults] setBool:on forKey:kNetworkMidiKey];
+}
+
+// The Done button's target. Held by association on the navigation controller
+// (the button does not retain it), released with the sheet.
+@interface SMUMidiSetupCloser : NSObject
+- (void)dismiss:(id)sender;
+@end
+
+@implementation SMUMidiSetupCloser
+- (void)dismiss:(id)sender
+{
+	(void)sender;
+	UIViewController *presented = nil;
+	for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+		if (![scene isKindOfClass:[UIWindowScene class]])
+			continue;
+		for (UIWindow *w in [(UIWindowScene *)scene windows]) {
+			if (w.isKeyWindow && w.rootViewController.presentedViewController)
+				presented = w.rootViewController.presentedViewController;
+		}
+	}
+	[presented dismissViewControllerAnimated:YES completion:nil];
+}
+@end
+
+static const void *kCloserKey = &kCloserKey;
+
+// -[UIScreen applicationFrame] is deprecated since iOS 9, and on this runtime
+// it returns a NaN-height rect. Apple's BT MIDI controllers still build their
+// table straight from it (disassembled loadView: mainScreen -> applicationFrame
+// -> initWithFrame:style:, no other input), so every sheet dies in
+// CALayerInvalidGeometry. Substitute bounds once, before presenting them:
+// strictly more correct than NaN, and nothing modern should be calling this.
+// dispatch_once: process-wide, one method, no per-presentation cost.
+static void patch_application_frame()
+{
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		Method m = class_getInstanceMethod([UIScreen class], @selector(applicationFrame));
+		if (!m)
+			return;
+		IMP fixed = imp_implementationWithBlock(^CGRect(id self) {
+			return [(UIScreen *)self bounds];
+		});
+		method_setImplementation(m, fixed);
+	});
+}
+
+static void present_bt_controller(UIView *view, CGPoint at, UIViewController *bt)
+{
+	(void)at;
+	UIViewController *presenter = ui::presenter_for(view);
+	if (!presenter)
+		return;
+	// Apple's own recipe (QA1831) wraps these in a navigation controller with
+	// Done. Presented as a form sheet, NOT a popover: UIPopoverPresentationController
+	// forces the child to load while sizing it, and the BT controllers build
+	// their table with a NaN-height frame on that path (CALayerInvalidGeometry
+	// crash, proven on the simulator). A sheet gives them real bounds at load.
+	SMUMidiSetupCloser *closer = [[SMUMidiSetupCloser alloc] init];
+	bt.navigationItem.rightBarButtonItem =
+	    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+	                                                  target:closer
+	                                                  action:@selector(dismiss:)];
+	UINavigationController *nav =
+	    [[UINavigationController alloc] initWithRootViewController:bt];
+	objc_setAssociatedObject(nav, kCloserKey, closer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	// A real size BEFORE presenting: sheet sizing force-loads the BT view to
+	// measure it, and Apple's loadView builds its table from the deprecated
+	// applicationFrame (see patch_application_frame above), which is only
+	// valid once something has measured it. 540x620 up front.
+	bt.preferredContentSize = CGSizeMake(540, 620);
+	// Fullscreen, not a sheet: every sheet variant (popover, form sheet) loads
+	// the BT view while measuring it, and each measuring path has produced the
+	// same NaN table frame. Fullscreen hands it window bounds up front, so
+	// there is nothing to measure through.
+	nav.modalPresentationStyle = UIModalPresentationFullScreen;
+	// The menu this was picked from dismisses on selection, but the dismissal
+	// is still in flight when this runs: presenting on a controller that is
+	// already presenting (or dismissing) warns and force-loads the BT view
+	// mid-transition, which is the NaN crash. So wait past the dismissal,
+	// then clear anything still up before presenting.
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+	               dispatch_get_main_queue(), ^{
+		               if (presenter.presentedViewController) {
+			               [presenter dismissViewControllerAnimated:NO
+			                                        completion:^{
+				                                        [presenter presentViewController:nav
+				                                                              animated:YES
+				                                                            completion:nil];
+			                                        }];
+		               } else {
+			               [presenter presentViewController:nav
+			                                     animated:YES
+			                                   completion:nil];
+		               }
+	               });
+}
+
 namespace ui {
+
+// The panel view, kept here because a dialog the app asks for by name has to be
+// presented from something: make_ios_view() is the only place that has it, and
+// the app class calling open_midi_file_panel() does not. macOS needs no such
+// thing - NSOpenPanel is app-modal - which is the one difference between this and
+// window_mac.mm's open_midi_file_panel().
+static UIView *s_panel_view = nil;
 
 // Not blocking, unlike run_window(): UIKit owns the run loop, and a display link
 // added to the main run loop drives the panel from inside it. So this makes the view,
@@ -461,12 +643,100 @@ namespace ui {
 UIView *make_ios_view(gui_app &a, int w, int h)
 {
 	SMUView *v = [[SMUView alloc] initWithFrame:CGRectMake(0, 0, w, h) app:&a];
+	s_panel_view = v;
 	if (![v start]) {
 		NSLog(@"[ios] no Metal device: the panel cannot be drawn");
 		return nil;
 	}
 	[v startLink];
 	return v;
+}
+
+// ---- The dialogs ui/window_mac.h puts in window_mac.mm ----------------------
+//
+// A file panel belongs to the window system, so the app asks for it by name rather
+// than reaching for UIKit itself - the rule window_mac.h states for
+// open_midi_file_panel(). The iOS one differs in exactly one respect: a document
+// picker answers later, so it plays the file itself when the answer arrives
+// instead of returning a path.
+void open_midi_file_panel()
+{
+	UIViewController *presenter = presenter_for(s_panel_view);
+	if (!presenter) {
+		std::fprintf(stderr, "[ios] midi: nowhere to present the picker from\n");
+		return;
+	}
+	// asCopy:YES: a single file may be copied (it is folders that UIKit refuses to
+	// copy, which is why the ROM import picks one in place). We want the bytes
+	// rather than the file, so UIKit's copy is only the transport.
+	UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
+	    initForOpeningContentTypes:@[ UTTypeMIDI ]
+	                          asCopy:YES];
+	SMUMidiFileDelegate *delegate = [[SMUMidiFileDelegate alloc] init];
+	delegate.picker = picker;
+	picker.delegate = delegate;
+	[presenter presentViewController:picker animated:YES completion:nil];
+}
+
+// ---- Bluetooth and network MIDI (the ids are in window_ios.h) --------------
+//
+// Presented from the window, like open_midi_file_panel(), and with no desktop
+// counterpart: macOS leaves the CoreMIDI session to Audio MIDI Setup, so its menu
+// only lists endpoints, while here the toggle owns the policy - there is no such
+// app on iOS.
+
+void append_midi_setup_group(std::vector<menu_group> &groups)
+{
+	menu_group g;
+	g.title = UI_TEXT(menu_bt_title, "Bluetooth & network MIDI");
+	menu_item connect;
+	connect.label = UI_TEXT(menu_bt_connect, "Connect Bluetooth MIDI...");
+	connect.id = ID_IOS_BT_CONNECT;
+	g.items.push_back(connect);
+	menu_item advertise;
+	advertise.label = UI_TEXT(menu_bt_advertise, "Advertise this device...");
+	advertise.id = ID_IOS_BT_ADVERTISE;
+	g.items.push_back(advertise);
+	menu_item net;
+	net.label = UI_TEXT(menu_net_midi, "Network MIDI");
+	net.id = ID_IOS_NET_MIDI;
+	net.checked = network_midi_enabled();
+	g.items.push_back(net);
+	groups.push_back(g);
+}
+
+bool network_midi_enabled()
+{
+	return [[NSUserDefaults standardUserDefaults] boolForKey:kNetworkMidiKey];
+}
+
+void apply_stored_midi_setup()
+{
+	// Stored OFF (the default) still writes through: a session left enabled
+	// by an older install or a crash must not survive the switch.
+	apply_network_midi(network_midi_enabled());
+}
+
+bool handle_midi_setup_item(UIView *view, CGPoint at, int itemId)
+{
+	switch (itemId) {
+	case ID_IOS_BT_CONNECT:
+	case ID_IOS_BT_ADVERTISE: {
+		patch_application_frame();
+		UIViewController *bt = (itemId == ID_IOS_BT_CONNECT)
+		    ? (UIViewController *)[[CABTMIDICentralViewController alloc] init]
+		    : (UIViewController *)[[CABTMIDILocalPeripheralViewController alloc] init];
+		present_bt_controller(view, at, bt);
+		return true;
+	}
+	case ID_IOS_NET_MIDI:
+		// The menu that held the checkmark is already dismissing (selection
+		// dismisses); the next open re-snapshots and shows the new state.
+		apply_network_midi(!network_midi_enabled());
+		return true;
+	default:
+		return false;
+	}
 }
 
 } // namespace ui

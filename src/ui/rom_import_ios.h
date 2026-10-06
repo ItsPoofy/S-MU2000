@@ -2,6 +2,14 @@
 //
 // Importing the ROM images on iOS, for both the standalone and the AUv3.
 //
+// A shared file rather than part of a window layer: both front ends import
+// images - the standalone from its card menu, the extension from its own, since a
+// plug-in has no container app of its own - and each has a window layer of its own
+// (window_ios.mm and vst3/view_ios.mm) with neither linking the other, so this
+// cannot live in either. presenter_ios.{h,mm} is here for the same reason. What
+// belongs to one window is in that window: window_ios.mm holds the MIDI file
+// panel and the Bluetooth MIDI sheets, because only the standalone has them.
+//
 // The images are Yamaha's, so no build we hand out carries them: the user brings
 // their own dump. This is the iOS half of the flow the desktop already has in
 // src/ui/rom_locate.h: find, explain, ask, validate, remember. The wording, the
@@ -24,8 +32,9 @@
 //
 // Objective-C++ only (UIKit + std::function). Both callers are .mm files.
 
-#ifndef S_MU2000_IOS_ROM_IMPORT_H
-#define S_MU2000_IOS_ROM_IMPORT_H
+
+#ifndef S_MU2000_UI_ROM_IMPORT_IOS_H
+#define S_MU2000_UI_ROM_IMPORT_IOS_H
 
 #pragma once
 
@@ -66,4 +75,4 @@ bool handle_rom_import_item(UIView *view, int itemId);
 // when there is no view controller to present from.
 bool prompt_for_roms(UIView *view);
 
-#endif // S_MU2000_IOS_ROM_IMPORT_H
+#endif // S_MU2000_UI_ROM_IMPORT_IOS_H

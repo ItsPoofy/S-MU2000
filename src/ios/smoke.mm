@@ -44,19 +44,14 @@ static const AudioComponentDescription kDesc = {
 
 @implementation SmokeDelegate
 
-// A UISceneDelegate, not a UIApplicationDelegate, and that is not a style choice.
+// A UISceneDelegate, and the scene lifecycle on this iOS is not optional: without it UIKit
+// raises a runtime issue named NoSceneLifecycleAdoption while connecting the first scene
+// and traps the process with SIGTRAP (see ~/Library/Logs/DiagnosticReports/S-MU2000-*.ips,
+// whose faulting frame is
+// ___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke).
 //
-// The first version of this file was a plain UIApplicationDelegate with no
-// UIApplicationSceneManifest, on the reasoning that "a scene-based app gets no delegate
-// callbacks until a scene connects, so the test would never run". That reasoning was
-// half right and got the conclusion exactly backwards: on this iOS the scene lifecycle
-// is no longer optional. UIKit raises a runtime issue named
-// NoSceneLifecycleAdoption while connecting the first scene and traps the process with
-// SIGTRAP - see ~/Library/Logs/DiagnosticReports/S-MU2000-*.ips, whose faulting frame is
-// ___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke.
-//
-// So the window has to be built from the UIWindowScene handed to us, and the delegate has
-// to be a scene delegate, and the plist has to declare it. Three places, all required.
+// So the window is built from the UIWindowScene handed to us, the delegate is a scene
+// delegate, and the plist declares it. Three places, all required.
 - (void)scene:(UIScene *)scene
 	willConnectToSession:(UISceneSession *)session
 	options:(UISceneConnectionOptions *)opts
@@ -184,15 +179,11 @@ static const AudioComponentDescription kDesc = {
 
 @end
 
-// The fourth argument is the *application* delegate class name, and it must be nil here.
-//
-// The first version of this file passed NSStringFromClass([SmokeDelegate class]), left over
-// from when SmokeDelegate was a UIApplicationDelegate. After it became a
-// UIWindowSceneDelegate that argument became a lie: UIKit instantiated it as the app delegate,
-// found it does not configure scenes, and raised NoSceneLifecycleAdoption - trapping with
-// SIGTRAP even though the scene manifest in the plist was present and correct. The manifest
-// alone does not satisfy the check; UIKit also expects the app delegate to be either absent
-// or scene-aware.
+// The fourth argument is the *application* delegate class name, and it must be nil here: a
+// scene delegate named there is instantiated as the app delegate, does not configure scenes,
+// and UIKit raises NoSceneLifecycleAdoption and traps with SIGTRAP even though the scene
+// manifest in the plist is present and correct. The manifest alone does not satisfy the
+// check; the app delegate has to be absent or scene-aware.
 //
 // nil means "the default UIApplication", which is the standard Xcode template and leaves the
 // scene delegate to be resolved from UISceneDelegateClassName in Info.plist.

@@ -16,12 +16,10 @@
 
 // This whole header is Windows-only: to_wide/to_utf8 call MultiByteToWideChar and
 // WideCharToMultiByte, and dlg_filter builds the UTF-16 form a Win32 file dialog
-// wants. It used to be included unconditionally and happened to work on macOS only
-// because every file that reached it there (midi_in.cpp, midi_out.cpp,
-// pc_window.cpp) is itself Windows-only, including <mmsystem.h> and <d3d11.h>.
-// iOS reached it through a shared file and failed on "windows.h file not found".
-//
-// So the guard belongs here, where the dependency is, rather than in each caller.
+// wants. On macOS the files that would include it (midi_in.cpp, midi_out.cpp,
+// pc_window.cpp) are themselves Windows-only, so the guard here costs them
+// nothing; a file shared with another platform gets the error instead. The guard
+// belongs here, where the dependency is, rather than in each caller.
 #ifdef _WIN32
 #include <windows.h>
 

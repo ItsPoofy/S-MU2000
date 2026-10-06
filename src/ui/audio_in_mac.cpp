@@ -3,28 +3,32 @@
 // The macOS half of Apple audio, recording side: the questions the engine
 // cannot answer, and nothing else.
 //
-// The input path that used to live here - its own AudioUnit, its own input
-// callback, the float-to-s16 conversion, the ring and the resampler - is
-// audio_apple.mm now, shared with iOS, which taps an input node to get the same
-// buffers. What is left is the HAL: which devices can record, which one a
-// remembered name means, and the three properties that pin the unit to it.
-//
-// The queries themselves are in ui/hal_mac.h, because the playback and
-// recording halves used to carry byte-identical copies of them.
+// The tap, the float-to-s16 conversion, the ring and the resampler are
+// audio_apple.mm's, shared with iOS. What is left is the HAL: which devices can
+// record, which one a remembered name means, and the three properties that pin
+// the unit to it. The queries themselves are in ui/hal_mac.h, which both halves
+// include - the same queries answer for playback and for recording, only the
+// direction differs.
 
 #include "audio_in.h"
 #include "audio_out.h"          // AUDIO_RATE, shared with the output side
 #include "audio_apple.h"
+#include "compat/cli_text.h"
 #include "hal_mac.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace ui {
+
+// ---- The answers, and nothing else -----------------------------------------
+//
+// audio_out's and audio_in's own methods are in audio_apple.mm, beside the code
+// they forward to. What this file holds is the answers to the questions in
+// ui/audio_apple.h that only this platform can answer.
 
 // ---- The macOS answers to the shared core (see ui/audio_apple.h) ------------
 
@@ -75,7 +79,7 @@ bool pin_input(AudioUnit unit, const device_ref &dev, std::string &err)
 	                         kAudioUnitScope_Output, 0, &off, sizeof(off)) != noErr ||
 	    AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
 	                         kAudioUnitScope_Global, 0, &dev.id, sizeof(dev.id)) != noErr) {
-		err = "録音デバイスを選べない";
+		err = CLI_T("Cannot select the recording device", "録音デバイスを選べない");
 		return false;
 	}
 	return true;
@@ -94,69 +98,5 @@ std::string input_label(const device_ref &dev, double rate, u32 channels)
 }
 
 } // namespace apple
-
-// ---- audio_in: the shell the shared core is driven through ------------------
-//
-// The interface is unchanged and every method is one line, because the work
-// behind it is audio_apple.mm's.
-
-struct audio_in::impl {
-	std::unique_ptr<apple_audio_in> core = std::make_unique<apple_audio_in>();
-};
-
-audio_in::audio_in()
-	: m_impl(std::make_unique<impl>())
-{
-}
-
-audio_in::~audio_in()
-{
-	stop();
-}
-
-std::vector<std::string> audio_in::list()
-{
-	return apple::input_list();
-}
-
-bool audio_in::start(const std::string &device, std::string &err)
-{
-	return m_impl->core->start(device, err);
-}
-
-void audio_in::stop()
-{
-	m_impl->core->stop();
-}
-
-bool audio_in::running() const
-{
-	return m_impl->core->running();
-}
-
-void audio_in::pop(s32 &l, s32 &r)
-{
-	m_impl->core->pop(l, r);
-}
-
-std::string audio_in::device_name() const
-{
-	return m_impl->core->device_name();
-}
-
-std::string audio_in::format_line() const
-{
-	return m_impl->core->format_line();
-}
-
-u64 audio_in::empty_count() const
-{
-	return m_impl->core->empty_count();
-}
-
-u64 audio_in::dropped_count() const
-{
-	return m_impl->core->dropped_count();
-}
 
 } // namespace ui

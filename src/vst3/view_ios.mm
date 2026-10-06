@@ -23,7 +23,9 @@
 #include "plug_window.h"
 #include "view.h"
 
-#include "ios/rom_import.h"
+#include "ui/rom_import_ios.h"
+
+#include "compat/cli_text.h"
 
 #include "ui/font_file.h"
 #include "ui/fx_editor.h"
@@ -157,9 +159,12 @@
 	_taps++;
 	UIView *hit = [self hitTest:[t locationInView:self.superview] withEvent:nil];
 	char b[200];
-	std::snprintf(b, sizeof(b), "タップ %d 回目: 主の糸 %s、当たった先 %s",
+	std::snprintf(b, sizeof(b),
+	              CLI_T("tap %d: main thread %s, hit %s",
+	                    "タップ %d 回目: 主の糸 %s、当たった先 %s"),
 	              _taps, [NSThread isMainThread] ? "yes" : "no",
-	              hit ? NSStringFromClass([hit class]).UTF8String : "なし");
+	              hit ? NSStringFromClass([hit class]).UTF8String
+	                  : CLI_T("none", "なし"));
 	_owner->log_line(b);
 }
 
@@ -480,27 +485,36 @@ void ios_window::card_menu(int x, int y)
 
 	ui::plug_menu_state s{ m_owner.card_path(), m_owner.card_ready() };
 	std::vector<ui::menu_group> groups = ui::menu_plug_card(s);
+	// The ROM import joins this menu rather than the panel menu: it is a storage
+	// thing, and this is where the storage lives on both front ends - the
+	// standalone puts it in the same one. The images cannot be shipped, and an
+	// extension has no container app of its own to import them.
+	append_rom_import_group(groups);
 	if (groups.empty())
 		return;
 	// Raw this, like mac's SMUCardMenu target holding _owner/_win: the menu
-	// lives seconds and the window outlives it (both die with the view).
+	// lives seconds and the window outlives it (both die with the view). Two
+	// dispatchers, the ROM one first: its ids cannot collide with the card
+	// verbs, and handle_rom_import_item() answers false for anything that is not
+	// its own.
 	ios_window *win = this;
-	show_menu_groups(m_view, CGPointMake(x, y), groups, [win](int itemId) {
+	UIView *here = m_view;
+	show_menu_groups(m_view, CGPointMake(x, y), groups, [win, here](int itemId) {
+		if (handle_rom_import_item(here, itemId))
+			return;
 		win->pickCardItem(itemId);
 	});
 }
 
 // The plug-in's panel menu: the shared ui/menu.h content (the PC windows, as
-// the Windows and mac plug-ins show here) plus the iOS-only ROM import group,
-// which is the one setting this platform has. The ROM images cannot be shipped,
-// and an extension has no container app of its own to import them, so the
-// picker lives here.
+// the Windows and mac plug-ins show here), and nothing else. The ROM import
+// group is in the card menu, which is where the standalone puts it too (see
+// card_menu above).
 void ios_window::panel_menu(int x, int y)
 {
 	if (!m_view)
 		return;
 	std::vector<ui::menu_group> groups = ui::menu_plug_panel();
-	append_rom_import_group(groups);
 	if (groups.empty())
 		return;
 	UIView *here = m_view;

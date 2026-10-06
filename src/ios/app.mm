@@ -25,8 +25,7 @@
 #include "rom_search.h"
 #include "ui/app_ios.h"
 #include "ui/engine.h"
-#include "ios/midi_setup.h"
-#include "ios/rom_import.h"
+#include "ui/rom_import_ios.h"
 #include "ui/layout.h"
 #include "ui/options.h"
 #include "ui/tool_args.h"
@@ -41,7 +40,7 @@ namespace {
 
 // The ROM directory, through the shared search (src/rom_search.h) rather than
 // one hardcoded path: an installed set in the container (the "Install ROM
-// files..." menu entry, src/ios/rom_import.mm) has to win over a bundle copy,
+// files..." menu entry, src/ui/rom_import_ios.mm) has to win over a bundle copy,
 // and that ordering is exactly what the desktop already does. The bundle's
 // roms/ stays the last candidate, so `make ios-standalone IOS_ROMS=roms` still
 // works for local builds.
@@ -62,10 +61,9 @@ std::string rom_dir()
 
 } // namespace
 
-// Whether the machine is up. A synth that dims its own screen mid-play is a
-// bug, and it is not enough to ask from the scene method: boot_machine() also
-// runs from the install callback, so the flag has to live next to the code that
-// decides it.
+// Whether the machine is up, kept next to the code that decides it rather than
+// in the scene method, because boot_machine() also runs from the install
+// callback.
 static bool s_machine_up = false;
 
 // The screen sleeps only while we are foreground *and* silent. UIKit clears
@@ -167,7 +165,7 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	gui.eng = nullptr;
 	// Network MIDI endpoints only exist while the session is enabled, so apply
 	// the stored switch before anything enumerates ports.
-	apply_stored_midi_setup();
+	ui::apply_stored_midi_setup();
 	// Creates the audio objects now (needs no firmware); opening them waits for
 	// boot below. Without this out stays null and start_audio refuses - which is
 	// exactly the silence with no log line, since nothing ever tried.
@@ -224,12 +222,12 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 		return;
 	}
 	// The view has to be in the hierarchy or it draws nothing, and nothing says so.
-	// As a pinned subview, not as the root view: a manually assigned root view
-	// keeps the fixed frame it was created with (UIScreen bounds at launch), so
-	// in a smaller Stage Manager window it overflowed right and bottom while the
-	// scale was computed for fullscreen - the "resize broken" that kept the panel
-	// cut off. Anchors make the view track the window on rotation and resize, and
-	// layoutSubviews refits the panel from the real size every time.
+	// As a pinned subview, not as the root view: a root view assigned by hand
+	// keeps the fixed frame it was created with (UIScreen bounds at launch), so in
+	// a smaller Stage Manager window it overflowed right and bottom while the
+	// scale was computed for fullscreen. Anchors make the view track the window on
+	// rotation and resize, and layoutSubviews refits the panel from the real size
+	// every time.
 	panel_view.translatesAutoresizingMaskIntoConstraints = NO;
 	[vc.view addSubview:panel_view];
 	// Pinned to the safe area on all four sides, not the view edges: the panel's

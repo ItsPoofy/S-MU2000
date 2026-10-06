@@ -74,23 +74,28 @@ Two facts shape the design:
 
   | concern | macOS | Linux |
   |---|---|---|
-  | audio out | `src/ui/audio_apple.mm` (shared) + `audio_out_mac.cpp` (HAL only) | WASAPI version |
-  | audio in | `src/ui/audio_apple.mm` (shared) + `audio_in_mac.cpp` (HAL only) | — |
-  | MIDI in | `src/ui/midi_in_mac.cpp` (160) | `src/ui/midi_in_linux.cpp` |
-  | MIDI out | `src/ui/midi_out_mac.cpp` (256) | `src/ui/midi_out_linux.cpp` |
+  | audio out | `src/ui/audio_apple.mm` (shared: render path *and* the class) + `audio_out_mac.cpp` (HAL only) | WASAPI version |
+  | audio in | `src/ui/audio_apple.mm` (same file) + `audio_in_mac.cpp` (HAL only) | — |
+  | session | `src/ui/session_mac.cpp` (nothing to watch) | — |
+  | MIDI in | `src/ui/midi_in_apple.cpp` (160) | `src/ui/midi_in_linux.cpp` |
+  | MIDI out | `src/ui/midi_out_apple.cpp` (256) | `src/ui/midi_out_linux.cpp` |
   | window | `src/ui/window_mac.mm` (637) | `gui_linux.cpp` |
 
 **iOS needs exactly one file per row**, behind the same headers:
 
   - `midi_in_ios.cpp` / `midi_out_ios.cpp` — **CoreMIDI is the same API on iOS**, so these
     should be close to copies of the macOS ones.
-  - `audio_ios.mm` — the `AVAudioSession` and the answers to what the engine cannot ask.
+  - `audio_out_ios.mm` / `audio_in_ios.mm` — the answers to what the engine cannot ask, and
+    `session_ios.{h,mm}` — the `AVAudioSession` they ask them of.
     **What this study got wrong:** the audio was expected to be the one genuinely rewritten
     part, and it isn't. `AVAudioEngine`'s input and output nodes hand out the very `AudioUnit`
     a hand-written backend owns, so device, buffer size, stream format and workgroup are the
     same properties on both systems. The render path therefore became
     `src/ui/audio_apple.mm`, shared with macOS, and what stays per platform is the short list
     in `src/ui/audio_apple.h`: the session (iOS), device enumeration and hog mode (macOS).
+    `audio_out`'s and `audio_in`'s own methods live in `audio_apple.mm` too, so the platform
+    files hold answers only, one per direction, with the session each platform has beside
+    them in `session_ios.mm` and `session_mac.cpp`.
   - `window_ios.mm` — UIKit + the same `CAMetalLayer`/Metal/ImGui stack.
 
 #### A design decision worth making deliberately
@@ -317,7 +322,7 @@ mismatch vs claimed IDs vs free-provisioning limits).
 ### Bluetooth and network MIDI (standalone only)
 
 CoreMIDI lists only connected endpoints, so USB MIDI appears on plug-in but
-Bluetooth LE and network MIDI never do without setup (`src/ios/midi_setup.mm`,
+Bluetooth LE and network MIDI never do without setup (`ui/window_ios.mm`,
 additive iOS-only files; the AUv3 needs nothing, the host routes MIDI):
 
 - The context menu gains one appended group, "Bluetooth & network MIDI"
@@ -342,7 +347,7 @@ additive iOS-only files; the AUv3 needs nothing, the host routes MIDI):
   `mainScreen` -> `applicationFrame` -> `initWithFrame:style:`, no other
   input), which returns a NaN-height rect on this runtime. Fixed by a
   one-time substitution returning `bounds` (`patch_application_frame` in
-  `src/ios/midi_setup.mm`), applied before presenting.
+  `ui/window_ios.mm`), applied before presenting.
 - Simulator cannot test pairing (no Bluetooth hardware): sheets present with
   an empty list. Proven working there; real-device pairing still owed.
 

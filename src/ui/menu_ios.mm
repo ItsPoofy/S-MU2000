@@ -1,14 +1,14 @@
 // license:BSD-3-Clause
 //
-// See menu_ios.h for what this is and why it exists once.
+// See menu_ios.h for what this is, and why it is a file of its own.
 
 #import "ui/menu_ios.h"
 
 #include "ui/menu.h"
 
 // One presenter per show: it holds the groups, the callback and the interaction
-// for exactly as long as the menu is up. Lifetime chain, all documented because
-// getting it wrong is a dangling delegate crash: the view retains the
+// for exactly as long as the menu is up. The lifetime chain is one link per
+// holder, and a missing link is a dangling delegate: the view retains the
 // interaction (addInteraction), the interaction retains the presenter through
 // an associated object (the delegate property is weak), and willDismiss removes
 // the interaction - releasing the chain. Blocks hold groups/callback by value.

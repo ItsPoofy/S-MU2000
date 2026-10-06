@@ -3,23 +3,21 @@
 // One audio render path for both Apple front ends.
 //
 // macOS and iOS differ in what surrounds the audio, not in the audio itself.
-// The session - category, permission, route and interruption observers - is
-// iOS only. Device enumeration and hog mode are macOS only. The part in
+// The session - category, permission, ports, route and interruption observers -
+// is iOS only. Device enumeration and hog mode are macOS only. The part in
 // between is one implementation, here: the engine, the source node, the render
-// block, the resampler, the meters, the capture and the workgroup read. That
-// way a fix cannot be made on one platform and forgotten on the other, which is
-// what the two near-copies (audio_out_mac.cpp's AudioUnit lifecycle and
-// audio_ios.mm's AVAudioSourceNode block) kept making possible.
+// block, the resampler, the meters, the capture and the workgroup read.
 //
-// The engine is AVAudioEngine on both systems. Its input and output nodes hand
-// out the underlying AudioUnit (AVAudioIONode.audioUnit), which is the very
-// handle audio_out_mac.cpp used to own itself - so pinning a device, asking for
-// a buffer size and reading the workgroup all go through the same properties
-// they always went through. RemoteIO was never needed for any of it.
+// The engine is AVAudioEngine on both systems, and its input and output nodes
+// hand out the underlying AudioUnit (AVAudioIONode.audioUnit). So pinning a
+// device, asking for a buffer size and reading the workgroup all go through the
+// AudioUnit properties on both platforms, and RemoteIO is not involved.
 //
 // What stays per platform is the short list of questions the engine cannot
-// answer by itself, declared at the bottom of this file and implemented in
-// audio_ios.mm (iOS) and audio_out_mac.cpp (macOS).
+// answer by itself: declared at the bottom of this file, answered in
+// audio_out_mac.cpp and audio_in_mac.cpp (the HAL) and audio_out_ios.mm and
+// audio_in_ios.mm (the session), with audio_out's and audio_in's own methods
+// here beside the code they forward to.
 
 #ifndef S_MU2000_UI_AUDIO_APPLE_H
 #define S_MU2000_UI_AUDIO_APPLE_H
@@ -28,6 +26,7 @@
 
 #include <AudioToolbox/AudioToolbox.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -136,7 +135,7 @@ private:
 // ---- The platform half ------------------------------------------------------
 //
 // One function per question the engine cannot answer, or per action only that
-// system has a way to take. Implemented in audio_ios.mm and audio_out_mac.cpp;
+// system has a way to take. Implemented in audio_out_ios.mm and audio_out_mac.cpp;
 // nothing above this line branches on the platform.
 namespace apple {
 
@@ -153,8 +152,8 @@ struct device_ref {
 	bool        found = true;    // false when a name was given and nothing matches
 };
 
-// What a device claim ended up being: which device, and whether taking it is
-// what got it (in which case it has to be given back).
+// What a device claim is: which device, and whether taking it is what got
+// it (in which case it has to be given back).
 struct device_claim {
 	UInt32 id = 0;
 	bool   took = false;
@@ -198,6 +197,21 @@ void release_output(const device_claim &claim);
 
 // The name to show for what was opened: the device on macOS, the route on iOS.
 std::string output_label(const device_ref &dev, double rate);
+
+// ---- The session watchers --------------------------------------------------
+//
+// The engine stops itself when the route changes or a call arrives, and nothing
+// restarts it, so each half asks to be told and calls its own restart() from the
+// callback. The platform owns the observers and calls back only while the
+// function is set - pass an empty one to stop being called, which is what
+// stop() does. It is a function rather than a token the caller holds because the
+// session is a process-wide object: keeping the tokens per device would mean a
+// callback outliving the core it points at.
+//
+// iOS watches AVAudioSession. macOS has no session and nothing that stops an
+// engine behind our back, so both are no-ops there.
+void watch_output_session(const std::function<void()> &on_change);
+void watch_input_session(const std::function<void()> &on_change);
 
 // ---- The input side, same questions ----------------------------------------
 

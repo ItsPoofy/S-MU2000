@@ -36,7 +36,7 @@
 
 #include "ui/pc_window.h"
 
-#include "ios/keymap_ios.h"
+#include "ui/keymap_ios.h"
 #include "ui/font_file.h"
 #include "ui/imgui_shell.h"
 #include "ui/xg_ui.h"
@@ -484,9 +484,9 @@ bool pc_window::create(std::string &err)
 	PCEditController *vc = [[PCEditController alloc] init];
 	vc.title = title_of_view(*m_view);
 	// Subview pinned to the safe area, not the root view: edge-to-edge puts
-	// content under the status bar and home indicator (the main panel had the
-	// same bug with its editor-launching buttons untappable). Same pattern as
-	// the standalone's panel for the same reason.
+	// content under the status bar and home indicator, which is where the
+	// standalone's panel puts its editor-launching buttons. Same pattern, same
+	// reason.
 	vc.view.backgroundColor = UIColor.blackColor;
 	view.translatesAutoresizingMaskIntoConstraints = NO;
 	[vc.view addSubview:view];

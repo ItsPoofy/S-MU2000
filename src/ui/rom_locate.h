@@ -28,7 +28,7 @@ bool ask_roms_folder(const std::string &message, std::string &picked);
 // ---- The steps a ROM import is made of, once for every platform.
 //
 // locate_roms_for_gui below is written from these, and so is iOS
-// (src/ios/rom_import.mm): its picker cannot be a blocking ask_roms_folder, since
+// (src/ui/rom_import_ios.mm): its picker cannot be a blocking ask_roms_folder, since
 // a document picker must be presented and answer later, and it has to copy the
 // set as well, because a picked folder's access grant dies with the process.
 // So the wording and the "what is missing" answer live here instead of being
