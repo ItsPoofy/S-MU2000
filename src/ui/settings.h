@@ -23,7 +23,9 @@
 namespace ui {
 
 // gui.ini keys, in A B C D order for the MIDI IN ports.
-inline constexpr const char *SET_IN_KEYS[4] = { "midi_in", "midi_in_b", "midi_in_c", "midi_in_d" };
+// 5 つ目は口 E（マルチパートのプラグインボードが受け持つ口。mu2000::board_midi_in）
+inline constexpr int IN_PORTS = 5;
+inline constexpr const char *SET_IN_KEYS[IN_PORTS] = { "midi_in", "midi_in_b", "midi_in_c", "midi_in_d", "midi_in_e" };
 inline constexpr const char *SET_OUT = "midi_out";
 inline constexpr const char *SET_OUT_B = "midi_out_b";
 inline constexpr const char *SET_OUT_MU = "midi_out_mu";
@@ -89,7 +91,7 @@ inline const std::string *find_setting(const settings_map &m, const char *key)
 // file mapping once. in[] has 4 entries, like SET_IN_KEYS (both front ends
 // run 4 MIDI ports).
 struct remembered {
-	std::string in[4];
+	std::string in[IN_PORTS];
 	std::string out, out_b, out_mu;
 	std::string audio_out;
 	std::string audio_in;
@@ -99,7 +101,7 @@ struct remembered {
 	bool thin_bends = false; // thin_bends=1 (the player thins dense pitch bends)
 	bool analog = false;  // output=analog (DC removed)
 	std::string edit_out; // edit_out= (the voice window's send-to port; empty = the panel's ports)
-	int board = 0;        // board=fc (the imaginary plug-in board, mu2000::VBOARD_FC; 0 = none)
+	int board = 0;        // board=fc / fc16 (the imaginary plug-in board, mu2000::VBOARD_FC / VBOARD_FC16; 0 = none)
 	int board_part = 1;   // board_part= (1-64)
 };
 
@@ -107,7 +109,7 @@ struct remembered {
 inline settings_map collect_settings(const remembered &r)
 {
 	settings_map kv;
-	for (int p = 0; p < 4; p++)
+	for (int p = 0; p < IN_PORTS; p++)
 		kv.emplace_back(SET_IN_KEYS[p], r.in[p]);
 	kv.emplace_back(SET_OUT, r.out);
 	kv.emplace_back(SET_OUT_B, r.out_b);
@@ -122,7 +124,7 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_THIN_BENDS, r.thin_bends ? "1" : "0");
 	kv.emplace_back(SET_OUTPUT, r.analog ? "analog" : "digital");
 	kv.emplace_back(SET_EDIT_OUT, r.edit_out);
-	kv.emplace_back(SET_BOARD, r.board == 1 ? "fc" : "");
+	kv.emplace_back(SET_BOARD, r.board == 1 ? "fc" : r.board == 2 ? "fc16" : "");
 	kv.emplace_back(SET_BOARD_PART, std::to_string(r.board_part));
 	return kv;
 }
@@ -131,7 +133,7 @@ inline settings_map collect_settings(const remembered &r)
 // can start from what they already have.
 inline void apply_settings(const settings_map &kv, remembered &r)
 {
-	for (int p = 0; p < 4; p++)
+	for (int p = 0; p < IN_PORTS; p++)
 		if (const std::string *v = find_setting(kv, SET_IN_KEYS[p]))
 			r.in[p] = *v;
 	if (const std::string *v = find_setting(kv, SET_OUT))     r.out     = *v;
@@ -144,7 +146,7 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_THIN_BENDS)) r.thin_bends = *v == "1";
 	if (const std::string *v = find_setting(kv, SET_OUTPUT))  r.analog  = *v == "analog";
 	if (const std::string *v = find_setting(kv, SET_EDIT_OUT)) r.edit_out = *v;
-	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = *v == "fc" ? 1 : 0;
+	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = *v == "fc" ? 1 : *v == "fc16" ? 2 : 0;
 	if (const std::string *v = find_setting(kv, SET_BOARD_PART)) {
 		const int n = std::atoi(v->c_str());
 		r.board_part = n >= 1 && n <= 64 ? n : 1;

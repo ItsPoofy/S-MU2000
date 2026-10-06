@@ -31,8 +31,11 @@ struct event {
 // A-D の 4 口がそのまま届く。DIN の口だけ（--host-midi）のときは実機と同じく A・B しか無いので、
 // 3 口目以降は fold が真なら A・B に交互に重ね（口 3 → A、口 4 → B）、偽なら鳴らさない（-1）。
 // 5 口目以降は USB でも同じ扱い（fold なら 4 口に重ねる）
-inline int mu_port(u8 port, bool fold, bool usb = false)
+// board が真（口 E を受け持つマルチパートのプラグインボードが挿さっている）なら、5 口目はそのボードへ（4）
+inline int mu_port(u8 port, bool fold, bool usb = false, bool board = false)
 {
+	if (board && port == 4)
+		return 4;
 	const int n = usb ? 4 : 2;
 	if (port < n)
 		return port;

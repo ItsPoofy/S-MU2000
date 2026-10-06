@@ -70,6 +70,7 @@ struct ui_texts {
 	const char *menu_in_b;
 	const char *menu_in_c;
 	const char *menu_in_d;
+	const char *menu_in_e;
 	const char *menu_unused;
 	const char *menu_no_devices;
 	const char *menu_ain_title;
@@ -319,6 +320,8 @@ struct ui_texts {
 	const char *me_board_title;
 	const char *me_board_none;
 	const char *me_board_fc;
+	const char *me_board_fc16;
+	const char *me_board_port_e;
 	const char *me_board_tip;
 	const char *me_board_part;
 	const char *me_board_booting;

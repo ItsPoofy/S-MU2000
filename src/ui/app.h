@@ -109,8 +109,8 @@ public:
 	// The remembered ports, by name (empty = default/unused). *_keep is the
 	// name to fall back on when a port is not there (yet). Four entries,
 	// like ui::SET_IN_KEYS (both front ends run 4 MIDI ports)
-	std::string in_name[4];
-	std::string in_keep[4];
+	std::string in_name[IN_PORTS];
+	std::string in_keep[IN_PORTS];
 	std::string out_name, out_name_b, out_name_mu;
 	// 音色の窓の送り先（Ctrl＋右クリックで送るもの）。空ならパネルの設定（A → THRU A、B → THRU B）。
 	// THRU A・B と同じ機器を選んだときはそちらの出力を使い、ほかの機器なら edit_out を開く
@@ -133,7 +133,7 @@ public:
 
 	// Device indices being opened (-1 unused). Names above outlive them:
 	// unplugging USB shifts numbers, so reconnects look the names up again
-	int in_dev[4] = { -1, -1, -1, -1 };
+	int in_dev[IN_PORTS] = { -1, -1, -1, -1, -1 };
 	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
 	int ain_dev = -1;
 	u64 reported_drops = 0;          // MIDI drops the UI thread last reported
@@ -442,7 +442,7 @@ public:
 		if (path.empty())
 			return;
 		remembered r;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			r.in[p] = in_name[p].empty() ? in_keep[p] : in_name[p];
 		r.out       = out_name.empty()    ? out_keep    : out_name;
 		r.out_b     = out_name_b.empty()  ? out_keep_b  : out_name_b;
@@ -481,7 +481,7 @@ public:
 	// menu_error only for menu picks (never boot-time).
 	bool choose_in(int port, int dev, bool keep = false)
 	{
-		if (port < 0 || port >= 4)
+		if (port < 0 || port >= IN_PORTS)
 			return false;
 		if (!keep)
 			in_keep[port].clear();
@@ -945,7 +945,7 @@ public:
 		s.audio_ready = audio_ready.load() && state && (state->load() == 1 || audio_failed);
 		if (s.audio_ready)
 			s.audio_name = audio_name;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			s.in_dev[p] = in_dev[p];
 		s.out_dev = out_dev;
 		s.out_dev_b = out_dev_b;
@@ -968,8 +968,9 @@ public:
 	// (the hooks below); everything else is the same calls in the same order
 	void menu_chosen(int id)
 	{
-		for (int p = 0; p < 4; p++) {
-			const int none = ID_IN_NONE + p * ID_IN_STRIDE, base = ID_IN_BASE + p * ID_IN_STRIDE;
+		for (int p = 0; p < IN_PORTS; p++) {
+			const int none = p == 4 ? int(ID_INE_NONE) : ID_IN_NONE + p * ID_IN_STRIDE;
+			const int base = p == 4 ? int(ID_INE_BASE) : ID_IN_BASE + p * ID_IN_STRIDE;
 			if (id == none)                    { choose_in(p, -1); return; }
 			if (id >= base && id < base + 256) { choose_in(p, id - base); return; }
 		}
@@ -1009,7 +1010,7 @@ public:
 			o.voicecache = 1;
 		apply_engine_options(eng.mu, o);
 		eng.native_fx.store(o.native_fx);
-		for (int p = 1; p < mu2000::MIDI_PORTS; p++)
+		for (int p = 1; p <= mu2000::MIDI_PORTS; p++)        // the last one is port E (the plug-in board)
 			eng.midi_p[p] = &midi[p];
 		eng.mout_b = &thru_b;
 		eng.mout_edit = &edit_out;
@@ -1161,19 +1162,19 @@ public:
 		// (empty is off). Opened by start_ad once the firmware is up
 		if (o.audio_in_dev)
 			ain_name = o.audio_in_dev;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			if (a.in_dev[p] == -2)
 				a.in_dev[p] = find_device(midi_in::list(), want.in[p]);
 		if (a.mout_dev == -2)   a.mout_dev   = find_device(midi_out::list(), want.out);
 		if (a.moutb_dev == -2)  a.moutb_dev  = find_device(midi_out::list(), want.out_b);
 		if (a.moutmu_dev == -2) a.moutmu_dev = find_device(midi_out::list(), want.out_mu);
 		// A port that is not there yet keeps its name in the settings
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			in_keep[p] = want.in[p];
 		out_keep    = want.out;
 		out_keep_b  = want.out_b;
 		out_keep_mu = want.out_mu;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			choose_in(p, a.in_dev[p], true);
 		choose_out(a.mout_dev, true);
 		choose_out_b(a.moutb_dev, true);
@@ -1184,7 +1185,7 @@ public:
 			choose_edit_out(find_device(midi_out::list(), want.edit_out), true);
 		// A port that would not open keeps showing its remembered name
 		// until it is picked again
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			show_port(in_label(p), in_name[p], in_keep[p]);
 		show_port("MIDI OUT", out_name_mu, out_keep_mu);
 		show_port("MIDI THRU A", out_name, out_keep);
@@ -1328,7 +1329,7 @@ public:
 			}
 		}
 		play.stop();
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			midi[p].close();
 		thru_a.close();
 		thru_b.close();

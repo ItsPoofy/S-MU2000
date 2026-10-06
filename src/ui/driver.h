@@ -180,6 +180,7 @@ public:
 	{
 		sampling_tick(mu, br);
 		serve_defaults(mu, br);
+		br.set_board_port(mu.virtual_board_kind() == mu2000::VBOARD_FC16);
 		u8 b;
 		while (br.take_midi(b)) {
 			watch(b, mu.midi_in(b));
@@ -192,6 +193,9 @@ public:
 		for (int port = 1; port < mu2000::MIDI_PORTS; port++)
 			while (br.take_midi_port(port, b))
 				watch(b, mu.midi_in(b, port));
+		// 口 E（マルチパートのプラグインボード）。本体（firmware）には行かない
+		while (br.take_midi_port(mu2000::MIDI_PORTS, b))
+			mu.board_midi_in(b);
 	}
 
 	void pump_midi(mu2000 &mu, bridge &br)

@@ -43,6 +43,7 @@ inline const ui_texts &en_texts()
 		.menu_in_b = "MIDI IN B (parts 17-32)",
 		.menu_in_c = "MIDI IN C (parts 33-48)",
 		.menu_in_d = "MIDI IN D (parts 49-64)",
+		.menu_in_e = "MIDI IN E (multi-part plug-in board)",
 		.menu_unused = "Unused",
 		.menu_no_devices = "(No devices)",
 		.menu_ain_title = "A/D INPUT (sound to sample)",
@@ -80,7 +81,7 @@ inline const ui_texts &en_texts()
 		.status_middle_win_fmt = "wait %.0f ms  late %llu",
 		.status_middle_mac_fmt = "late %llu",
 		.status_middle_linux_fmt = "starved %llu",
-		.help_usage = "Usage: gui <rom directory> [--midi N] [--midi-b N] [--midi-c N] [--midi-d N]"
+		.help_usage = "Usage: gui <rom directory> [--midi N] [--midi-b N] [--midi-c N] [--midi-d N] [--midi-e N]"
 		              " [--midiout N] [--midiout-b N] [--midiout-mu N]"
 		              " [--latency ms] [--exclusive] [--layout panel.txt] [--play song.mid] [--lcd] [--fast-midi] [--host-midi]\n"
 		              "        [--factory]   forget remembered settings and boot factory-fresh\n"
@@ -287,7 +288,9 @@ inline const ui_texts &en_texts()
 		.me_board_title = "Imaginary plug-in board",
 		.me_board_none = "(none)",
 		.me_board_fc = "FC board (8-bit console sounds)",
-		.me_board_tip = "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it). Plugging or unplugging restarts the MU, as boards go in with the power off, in place of that part's own voice. On any other bank the part plays its own voice. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.",
+		.me_board_fc16 = "FC board, 16 parts on port E",
+		.me_board_port_e = "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels",
+		.me_board_tip = "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05.",
 		.me_board_part = "Part",
 		.me_board_booting = "Restarting the MU so that it finds the board...",
 		.me_board_idle = "Silent now: that part is on another bank. Select bank MSB 90, LSB 0 there to hear the board",
