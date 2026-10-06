@@ -1134,6 +1134,18 @@ tresult PLUGIN_API mu_plugin::process(ProcessData &data)
 					const int bend = std::clamp(int(std::lround(v * 16383.0)), 0, 16383);
 					queue(port, off, uint8(0xe0 | ch), uint8(bend & 127), uint8(bend >> 7));
 				} else {
+					// REAPER が PC の offset を 0 として返す場合、同じポート・チャンネルの
+					// 先行 MIDI メッセージの直後へ移して順序を保つ。
+					if (data.numSamples > 0) {
+						int32 latestPriorOffset = -1;
+						for (const msg &prior : m_msgs) {
+							if (prior.sysex == nullptr && prior.port == port &&
+							    (prior.b[0] & 0x0f) == ch)
+								latestPriorOffset = std::max(latestPriorOffset, prior.off);
+						}
+						if (latestPriorOffset > 0 && off <= latestPriorOffset)
+							off = std::min(latestPriorOffset + 1, data.numSamples - 1);
+					}
 					queue(port, off, uint8(0xc0 | ch),
 					      uint8(std::clamp(int(std::lround(v * 127.0)), 0, 127)), 0, 2);
 				}
