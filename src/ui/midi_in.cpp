@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 
 #include "midi_in.h"
+#include "compat/cli_text.h"
 #include "mm_open.h"
 #include "text.h"
 
@@ -54,7 +55,7 @@ bool midi_in::open(int device, std::string &err)
 	if (device < 0)
 		return true;
 	if (UINT(device) >= midiInGetNumDevs()) {
-		err = "その番号の MIDI 入力は無い";
+		err = CLI_T("No MIDI input with that number", "その番号の MIDI 入力は無い");
 		return false;
 	}
 
@@ -69,12 +70,12 @@ bool midi_in::open(int device, std::string &err)
 		},
 		[](HMIDIIN late) { midiInClose(late); }, h);
 	if (r == 2) {
-		err = "MIDI 入力が応答しない（loopMIDI やドライバが固まっているかもしれない。"
-		      "loopMIDI を起動し直すか、機器を挿し直す）";
+		err = CLI_T("The MIDI input does not respond (loopMIDI or the driver may be stuck; restart loopMIDI or replug the device)",
+		      "MIDI 入力が応答しない（loopMIDI やドライバが固まっているかもしれない。loopMIDI を起動し直すか、機器を挿し直す）");
 		return false;
 	}
 	if (r != 0) {
-		err = "MIDI 入力を開けない";
+		err = CLI_T("Cannot open the MIDI input", "MIDI 入力を開けない");
 		return false;
 	}
 	MIDIINCAPSW caps{};
@@ -150,7 +151,7 @@ void midi_in::close()
 		midiInClose(h);
 	});
 	if (!in_time)
-		std::fprintf(stderr, "MIDI 入力「%s」が閉じる呼び出しに応答しない。置いていく\n",
+		std::fprintf(stderr, CLI_T("MIDI input \"%s\" does not answer the close call; leaving it behind\n", "MIDI 入力「%s」が閉じる呼び出しに応答しない。置いていく\n"),
 		             m_name.c_str());
 	m_handle = nullptr;
 	m_name.clear();

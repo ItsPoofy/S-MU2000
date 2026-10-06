@@ -8,6 +8,7 @@
 // thread here because CoreAudio already calls us on its real-time HAL thread.
 
 #include "audio_out.h"
+#include "compat/cli_text.h"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
@@ -366,8 +367,8 @@ audio_out::~audio_out()
 	// reported before anything is opened
 	const AudioDeviceID dev = find_device(device, exact);
 	if (dev == kAudioObjectUnknown) {
-		err = device.empty() ? "音声の出口が見つからない"
-		                     : "その名前の音声の出口が見つからない: " + device;
+		err = device.empty() ? CLI_T("No audio output found", "音声の出口が見つからない")
+		                     : CLI_T("No audio output with that name: ", "その名前の音声の出口が見つからない: ") + device;
 		return false;
 	}
 
@@ -401,16 +402,16 @@ audio_out::~audio_out()
 	desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 	AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
 	if (!comp)
-		return dispose("既定の音声出力が見つからない");
+		return dispose(CLI_T("No default audio output found", "既定の音声出力が見つからない"));
 	if (AudioComponentInstanceNew(comp, &up->unit) != noErr || !up->unit)
-		return dispose("AudioUnit を作れない");
+		return dispose(CLI_T("Cannot create the AudioUnit", "AudioUnit を作れない"));
 
 	// Open the device that was picked rather than whichever one the system is
 	// defaulting to. Set before the format: that is checked against the device
 	// that is open
 	if (AudioUnitSetProperty(up->unit, kAudioOutputUnitProperty_CurrentDevice,
 	                         kAudioUnitScope_Global, 0, &dev, sizeof(dev)) != noErr)
-		return dispose("音声の出口を選べない");
+		return dispose(CLI_T("Cannot select the audio output", "音声の出口を選べない"));
 
 	// Ask for the format we generate: 44100Hz, 16bit, stereo, interleaved. The
 	// unit converts to whatever the device actually wants
@@ -425,14 +426,14 @@ audio_out::~audio_out()
 	fmt.mBytesPerPacket   = 4;
 	if (AudioUnitSetProperty(up->unit, kAudioUnitProperty_StreamFormat,
 	                         kAudioUnitScope_Input, 0, &fmt, sizeof(fmt)) != noErr)
-		return dispose("音声の形式を指定できない");
+		return dispose(CLI_T("Cannot set the audio format", "音声の形式を指定できない"));
 
 	AURenderCallbackStruct cb{};
 	cb.inputProc       = impl::render_cb;
 	cb.inputProcRefCon = up.get();
 	if (AudioUnitSetProperty(up->unit, kAudioUnitProperty_SetRenderCallback,
 	                         kAudioUnitScope_Input, 0, &cb, sizeof(cb)) != noErr)
-		return dispose("音声の呼び出し口を繋げない");
+		return dispose(CLI_T("Cannot install the audio callback", "音声の呼び出し口を繋げない"));
 
 	// Room for the largest slice we might be asked for in one go
 	constexpr u32 MAX_SLICE = 4096;
@@ -448,11 +449,11 @@ audio_out::~audio_out()
 	up->buffer_frames.store(buf);
 
 	if (AudioUnitInitialize(up->unit) != noErr)
-		return dispose("音声を初期化できない");
+		return dispose(CLI_T("Cannot initialise the audio output", "音声を初期化できない"));
 
 	up->realtime.store(true);     // the HAL thread is already real-time
 	if (AudioOutputUnitStart(up->unit) != noErr)
-		return dispose("再生を開始できない");
+		return dispose(CLI_T("Cannot start playback", "再生を開始できない"));
 
 	// Hog mode is claimed *after* IO has started. Apple's notes say a device that
 	// cannot be mixed is held by whoever starts its IO first, so taking it
@@ -467,7 +468,7 @@ audio_out::~audio_out()
 		if (up->hog_owned) {
 			AudioOutputUnitStop(up->unit);
 			if (AudioOutputUnitStart(up->unit) != noErr)
-				return dispose("再生を開始できない");
+				return dispose(CLI_T("Cannot start playback", "再生を開始できない"));
 		}
 	}
 
@@ -539,12 +540,12 @@ u64 audio_out::capture_frames() const
 bool audio_out::write_capture(std::string &err)
 {
 	if (m_cap_path.empty()) {
-		err = "書き出す先が決まっていない";
+		err = CLI_T("No output file was given", "書き出す先が決まっていない");
 		return false;
 	}
 	std::FILE *f = std::fopen(m_cap_path.c_str(), "wb");
 	if (!f) {
-		err = "書けない: " + m_cap_path;
+		err = CLI_T("Cannot write: ", "書けない: ") + m_cap_path;
 		return false;
 	}
 	const u32 frames = u32(m_cap.size() / 2);
@@ -553,7 +554,7 @@ bool audio_out::write_capture(std::string &err)
 	    ? 0 : std::fwrite(m_cap.data(), sizeof(s16), m_cap.size(), f);
 	const bool ok = std::fclose(f) == 0 && wrote == m_cap.size();
 	if (!ok)
-		err = "書き込みが途中で終わった: " + m_cap_path;
+		err = CLI_T("The write ended early: ", "書き込みが途中で終わった: ") + m_cap_path;
 	return ok;
 }
 

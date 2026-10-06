@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 
 #include "audio_out.h"
+#include "compat/cli_text.h"
 #include "resampler.h"
 
 #include <windows.h>
@@ -158,7 +159,7 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 		Sleep(5);
 	if (!m_running.load()) {
 		stop();
-		err = m_err.empty() ? "音声デバイスを開けない" : m_err;
+		err = m_err.empty() ? CLI_T("Cannot open the audio device", "音声デバイスを開けない") : m_err;
 		return false;
 	}
 	return true;
@@ -240,13 +241,13 @@ std::string audio_out::format_line() const
 {
 	char buf[200];
 	std::snprintf(buf, sizeof(buf),
-	              "%s / %u Hz %u ch %s / 周期 %.1f ms / 変換 %s",
-	              m_exclusive.load() ? "独り占め" : "共有",
+	              CLI_T("%s / %u Hz %u ch %s / period %.1f ms / resampling %s", "%s / %u Hz %u ch %s / 周期 %.1f ms / 変換 %s"),
+	              m_exclusive.load() ? CLI_T("exclusive", "独り占め") : CLI_T("shared", "共有"),
 	              m_dev_rate.load(), m_dev_channels.load(),
 	              m_dev_bits.load() == 24 ? "24bit(32)"
 	              : (m_dev_float.load() ? "float" : "16bit"),
 	              m_period_ms.load(),
-	              m_converting.load() ? "自前 sinc" : "無し（44100 のまま）");
+	              m_converting.load() ? CLI_T("own sinc", "自前 sinc") : CLI_T("none (44100 as is)", "無し（44100 のまま）"));
 	if (m_raw.load())
 		std::strncat(buf, " / RAW", sizeof(buf) - std::strlen(buf) - 1);
 	return buf;
@@ -256,9 +257,8 @@ std::string audio_out::latency_line() const
 {
 	char buf[220];
 	std::snprintf(buf, sizeof(buf),
-	              "溜め 目標 %.1f / 実測 平均 %.1f 最悪 %.1f ms。"
-	              "**まだ鳴っていない量 平均 %.1f 最悪 %.1f ms**"
-	              "（GetStreamLatency %.1f / 器 %.1f ms）",
+	              CLI_T("queue: target %.1f / measured mean %.1f worst %.1f ms. **not yet played: mean %.1f worst %.1f ms** (GetStreamLatency %.1f / buffer %.1f ms)",
+	                    "溜め 目標 %.1f / 実測 平均 %.1f 最悪 %.1f ms。**まだ鳴っていない量 平均 %.1f 最悪 %.1f ms**（GetStreamLatency %.1f / 器 %.1f ms）"),
 	              target_ms(), queue_ms(), queue_worst_ms(),
 	              inflight_ms(), inflight_worst_ms(), device_ms(), buffer_ms());
 	return buf;
@@ -267,7 +267,7 @@ std::string audio_out::latency_line() const
 void audio_out::run(int latency_ms, bool want_exclusive)
 {
 	if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
-		m_err = "COM を初期化できない";
+		m_err = CLI_T("Cannot initialise COM", "COM を初期化できない");
 		return;
 	}
 
@@ -297,13 +297,13 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 
 	auto fail = [this](const char *what, HRESULT hr) {
 		char buf[140];
-		std::snprintf(buf, sizeof(buf), "%s に失敗 (0x%08lx)", what, (unsigned long)hr);
+		std::snprintf(buf, sizeof(buf), CLI_T("%s failed (0x%08lx)", "%s に失敗 (0x%08lx)"), what, (unsigned long)hr);
 		m_err = buf;
 	};
 
 	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
 	                              __uuidof(IMMDeviceEnumerator), (void **)&en);
-	if (FAILED(hr)) { fail("デバイス一覧の取得", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Listing the devices", "デバイス一覧の取得"), hr); goto done; }
 
 	// Prefer an exact menu name, then allow a substring for --audio.
 	if (!m_want_dev.empty()) {
@@ -325,19 +325,19 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 			all->Release();
 		}
 		if (!dev) {
-			m_err = "その名前の再生デバイスが無い: " + m_want_dev;
+			m_err = CLI_T("No playback device with that name: ", "その名前の再生デバイスが無い: ") + m_want_dev;
 			goto done; // a vanished selection must not silently open another output
 		}
 	}
 	if (!dev) {
 		hr = en->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
-		if (FAILED(hr)) { fail("既定の音声デバイスの取得", hr); goto done; }
+		if (FAILED(hr)) { fail(CLI_T("Getting the default audio device", "既定の音声デバイスの取得"), hr); goto done; }
 	}
 	m_dev_name = endpoint_name(dev);
 
 	hr = dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&client);
-	if (FAILED(hr)) { fail("音声デバイスの起動", hr); goto done; }
-	if (FAILED(client->GetMixFormat(&mix)) || !mix) { fail("形式の取得", E_FAIL); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Activating the audio device", "音声デバイスの起動"), hr); goto done; }
+	if (FAILED(client->GetMixFormat(&mix)) || !mix) { fail(CLI_T("Reading the device format", "形式の取得"), E_FAIL); goto done; }
 
 	{
 		REFERENCE_TIME def_period = 0, min_period = 0;
@@ -422,8 +422,8 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 					break;
 			}
 			if (!exclusive && client)
-				m_err = "独り占めで開けなかった（共有に落とす）";
-			if (!client) { fail("音声デバイスの起動", E_FAIL); goto done; }
+				m_err = CLI_T("Could not open in exclusive mode (falling back to shared)", "独り占めで開けなかった（共有に落とす）");
+			if (!client) { fail(CLI_T("Activating the audio device", "音声デバイスの起動"), E_FAIL); goto done; }
 		}
 
 		// ---- 共有モード
@@ -472,7 +472,7 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 			                                 AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY) : 0u);
 			hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags,
 			                        REFERENCE_TIME(buf_ms * 10000.0), 0, use, nullptr);
-			if (FAILED(hr)) { fail("音声の開始準備", hr); goto done; }
+			if (FAILED(hr)) { fail(CLI_T("Initialising the audio stream", "音声の開始準備"), hr); goto done; }
 
 			// **目標は周期の倍数にする。** エンジンは周期ごとにまとめて
 			// 読んでいくので、半端な目標にすると書ける回と書けない回が
@@ -500,13 +500,13 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 	}
 
 	hr = client->SetEventHandle(ev);
-	if (FAILED(hr)) { fail("イベントの登録", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Registering the audio event", "イベントの登録"), hr); goto done; }
 
 	hr = client->GetBufferSize(&buf_frames);
-	if (FAILED(hr)) { fail("バッファ長の取得", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Reading the buffer size", "バッファ長の取得"), hr); goto done; }
 
 	hr = client->GetService(__uuidof(IAudioRenderClient), (void **)&render);
-	if (FAILED(hr)) { fail("書き込み口の取得", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Getting the render interface", "書き込み口の取得"), hr); goto done; }
 
 	{
 		// デバイス側の取り分。こちらでは短くできない
@@ -605,12 +605,12 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 		}
 
 		hr = client->Start();
-		if (FAILED(hr)) { fail("再生の開始", hr); goto done; }
+		if (FAILED(hr)) { fail(CLI_T("Starting playback", "再生の開始"), hr); goto done; }
 		m_running.store(true);
 
 		while (!m_quit.load()) {
 			if (WaitForSingleObject(ev, 2000) != WAIT_OBJECT_0) {
-				m_err = "音声デバイスからの合図が来ない";
+				m_err = CLI_T("No signal from the audio device", "音声デバイスからの合図が来ない");
 				break;
 			}
 

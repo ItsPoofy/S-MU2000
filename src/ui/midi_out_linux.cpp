@@ -8,6 +8,7 @@
 // the sequencer. The wake-up is a condition variable, like the CoreMIDI side.
 
 #include "midi_out.h"
+#include "compat/cli_text.h"
 
 #include <alsa/asoundlib.h>
 
@@ -106,7 +107,7 @@ bool midi_out::open(int device, std::string &err)
 
 	snd_seq_t *seq = nullptr;
 	if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
-		err = "MIDI シーケンサを開けない";
+		err = CLI_T("Cannot open the ALSA sequencer", "MIDI シーケンサを開けない");
 		return false;
 	}
 	snd_seq_set_client_name(seq, "S-MU2000");
@@ -114,7 +115,7 @@ bool midi_out::open(int device, std::string &err)
 	const std::vector<seq_port> ports = writable_ports(seq);
 	if (device >= int(ports.size())) {
 		snd_seq_close(seq);
-		err = "その番号の MIDI 出力は無い";
+		err = CLI_T("No MIDI output with that number", "その番号の MIDI 出力は無い");
 		return false;
 	}
 
@@ -128,7 +129,7 @@ bool midi_out::open(int device, std::string &err)
 	if (c->port < 0) {
 		snd_seq_close(seq);
 		delete c;
-		err = "MIDI 出力を開けない";
+		err = CLI_T("Cannot open the MIDI output", "MIDI 出力を開けない");
 		return false;
 	}
 
@@ -146,7 +147,7 @@ bool midi_out::open(int device, std::string &err)
 		snd_seq_delete_simple_port(seq, c->port);
 		snd_seq_close(seq);
 		delete c;
-		err = "MIDI 出力に繋げない";
+		err = CLI_T("Cannot connect to the MIDI output", "MIDI 出力に繋げない");
 		return false;
 	}
 

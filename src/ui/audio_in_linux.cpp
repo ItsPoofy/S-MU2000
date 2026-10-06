@@ -9,6 +9,7 @@
 // drops the oldest frames when it grows past 200ms and reports 0 when empty.
 
 #include "audio_in.h"
+#include "compat/cli_text.h"
 #include "audio_out.h"   // AUDIO_RATE, the rate both directions convert to/from
 #include "resampler.h"
 
@@ -139,14 +140,14 @@ bool audio_in::start(const std::string &device, std::string &err)
 
 	snd_pcm_t *pcm = nullptr;
 	if (snd_pcm_open(&pcm, pcm_name.c_str(), SND_PCM_STREAM_CAPTURE, 0) < 0) {
-		err = "その名前の録音デバイスが開けない: " + (device.empty() ? pcm_name : device);
+		err = CLI_T("Cannot open the recording device: ", "その名前の録音デバイスが開けない: ") + (device.empty() ? pcm_name : device);
 		return false;
 	}
 	unsigned rate = AUDIO_RATE;
 	if (snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
 	                       2, AUDIO_RATE, 0, 50000) < 0) {
 		snd_pcm_close(pcm);
-		err = "録音の形式を指定できない";
+		err = CLI_T("Cannot set the recording format", "録音の形式を指定できない");
 		return false;
 	}
 	{
@@ -157,7 +158,7 @@ bool audio_in::start(const std::string &device, std::string &err)
 	}
 	if (snd_pcm_prepare(pcm) < 0) {
 		snd_pcm_close(pcm);
-		err = "録音を開始できない";
+		err = CLI_T("Cannot start recording", "録音を開始できない");
 		return false;
 	}
 

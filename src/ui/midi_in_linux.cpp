@@ -14,6 +14,7 @@
 // open() はその口からこちらへ繋ぐ。
 
 #include "midi_in.h"
+#include "compat/cli_text.h"
 
 #include <alsa/asoundlib.h>
 
@@ -121,7 +122,7 @@ bool midi_in::open(int device, std::string &err)
 	auto *c = new ctx();
 	if (snd_seq_open(&c->seq, "default", SND_SEQ_OPEN_INPUT, 0) < 0) {
 		delete c;
-		err = "ALSA のシーケンサを開けない";
+		err = CLI_T("Cannot open the ALSA sequencer", "ALSA のシーケンサを開けない");
 		return false;
 	}
 	snd_seq_set_client_name(c->seq, "S-MU2000");
@@ -132,7 +133,7 @@ bool midi_in::open(int device, std::string &err)
 	if (c->port < 0) {
 		snd_seq_close(c->seq);
 		delete c;
-		err = "MIDI の受け口を作れない";
+		err = CLI_T("Cannot create the MIDI input port", "MIDI の受け口を作れない");
 		return false;
 	}
 
@@ -140,14 +141,14 @@ bool midi_in::open(int device, std::string &err)
 	if (size_t(device) >= ports.size()) {
 		snd_seq_close(c->seq);
 		delete c;
-		err = "その番号の MIDI 入力は無い";
+		err = CLI_T("No MIDI input with that number", "その番号の MIDI 入力は無い");
 		return false;
 	}
 	const seq_port &want = ports[size_t(device)];
 	if (snd_seq_connect_from(c->seq, c->port, want.client, want.port) < 0) {
 		snd_seq_close(c->seq);
 		delete c;
-		err = "MIDI 入力に繋げない: " + want.name;
+		err = CLI_T("Cannot connect to the MIDI input: ", "MIDI 入力に繋げない: ") + want.name;
 		return false;
 	}
 	c->src_client = want.client;
@@ -158,7 +159,7 @@ bool midi_in::open(int device, std::string &err)
 	if (snd_midi_event_new(SYSEX_SIZE, &c->dec) < 0) {
 		snd_seq_close(c->seq);
 		delete c;
-		err = "MIDI の組み直しを用意できない";
+		err = CLI_T("Cannot set up the MIDI event decoder", "MIDI の組み直しを用意できない");
 		return false;
 	}
 	snd_midi_event_no_status(c->dec, 1);

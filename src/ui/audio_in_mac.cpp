@@ -12,6 +12,7 @@
 // elastic part between them.
 
 #include "audio_in.h"
+#include "compat/cli_text.h"
 #include "audio_out.h"          // AUDIO_RATE, shared with the output side
 #include "resampler.h"
 
@@ -321,13 +322,13 @@ bool audio_in::start(const std::string &device, std::string &err)
 		}
 	}
 	if (im.dev == kAudioObjectUnknown)
-		return fail("録音デバイスが見つからない");
+		return fail(CLI_T("Recording device not found", "録音デバイスが見つからない"));
 	im.dev_name = name_of(im.dev);
 
 	const u32 ch = input_channels(im.dev);
 	const double rate = nominal_rate(im.dev);
 	if (!ch || rate <= 0.0)
-		return fail("録音デバイスの形式が読めない");
+		return fail(CLI_T("Cannot read the recording device's format", "録音デバイスの形式が読めない"));
 	im.dev_channels = ch;
 	im.dev_rate = u32(rate + 0.5);
 
@@ -340,7 +341,7 @@ bool audio_in::start(const std::string &device, std::string &err)
 	desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 	AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
 	if (!comp || AudioComponentInstanceNew(comp, &im.unit) != noErr)
-		return fail("録音の口を開けない");
+		return fail(CLI_T("Cannot open the recording unit", "録音の口を開けない"));
 
 	UInt32 on = 1, off = 0;
 	if (AudioUnitSetProperty(im.unit, kAudioOutputUnitProperty_EnableIO,
@@ -349,7 +350,7 @@ bool audio_in::start(const std::string &device, std::string &err)
 	                         kAudioUnitScope_Output, 0, &off, sizeof(off)) != noErr ||
 	    AudioUnitSetProperty(im.unit, kAudioOutputUnitProperty_CurrentDevice,
 	                         kAudioUnitScope_Global, 0, &im.dev, sizeof(im.dev)) != noErr)
-		return fail("録音デバイスを選べない");
+		return fail(CLI_T("Cannot select the recording device", "録音デバイスを選べない"));
 
 	// What we want handed to the callback: float, non-interleaved (one buffer
 	// per channel), at the device's own rate. The conversion to 44100Hz is ours.
@@ -370,7 +371,7 @@ bool audio_in::start(const std::string &device, std::string &err)
 	fmt.mBytesPerPacket = 4;
 	if (AudioUnitSetProperty(im.unit, kAudioUnitProperty_StreamFormat,
 	                         kAudioUnitScope_Output, 1, &fmt, sizeof(fmt)) != noErr)
-		return fail("録音の形式を決められない");
+		return fail(CLI_T("Cannot set the recording format", "録音の形式を決められない"));
 
 	// How much the unit may ask for in one callback. Reading the device's own
 	// buffer size and setting the slice to it keeps the buffers below big
@@ -380,7 +381,7 @@ bool audio_in::start(const std::string &device, std::string &err)
 		cap = 4096;
 	if (AudioUnitSetProperty(im.unit, kAudioUnitProperty_MaximumFramesPerSlice,
 	                         kAudioUnitScope_Global, 0, &cap, sizeof(cap)) != noErr)
-		return fail("録音の刻みを決められない");
+		return fail(CLI_T("Cannot set the recording buffer size", "録音の刻みを決められない"));
 	im.cap_frames = cap;
 
 	// One buffer per channel, with the room for the list and the audio itself
@@ -403,16 +404,16 @@ bool audio_in::start(const std::string &device, std::string &err)
 	cb.inputProcRefCon = &im;
 	if (AudioUnitSetProperty(im.unit, kAudioOutputUnitProperty_SetInputCallback,
 	                         kAudioUnitScope_Global, 0, &cb, sizeof(cb)) != noErr)
-		return fail("録音の受け口を付けられない");
+		return fail(CLI_T("Cannot install the recording callback", "録音の受け口を付けられない"));
 
 	im.staging.reserve(size_t(cap) * 2);
 	im.rs.configure(rate, double(AUDIO_RATE));
 
 	if (AudioUnitInitialize(im.unit) != noErr)
-		return fail("録音の準備");
+		return fail(CLI_T("Preparing to record", "録音の準備"));
 	if (AudioOutputUnitStart(im.unit) != noErr) {
 		AudioUnitUninitialize(im.unit);
-		return fail("録音の開始");
+		return fail(CLI_T("Starting to record", "録音の開始"));
 	}
 	return true;
 }
