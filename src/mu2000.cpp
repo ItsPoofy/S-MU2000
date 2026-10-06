@@ -3472,9 +3472,13 @@ void mu2000::vb_from_firmware(const std::vector<u8> &m)
 		vb_set_bank(m_vb_bank[0], m[7]);
 	else if (m[4] == 0x08 && m[5] == m_vb_part && m_vb_part < 16 && m[6] == 0x03)
 		m_vb_fc.midi(0xc0, m[7], 0);
-	// XG System On: バンクは 0 に戻る
-	else if (m[4] == 0x00 && m[5] == 0x00 && m[6] == 0x7e)
+	// XG System On。firmware は起動の終わりにこれをボードへ送るが、パートの音色は電源を切る前のものを
+	// 持ち越していて、それをボードへは知らせてこない（起動し直した直後、液晶はボードの音色なのに
+	// ボードが鳴らなかった）。少し待ってから、firmware が持っているバンクに合わせる
+	else if (m[4] == 0x00 && m[5] == 0x00 && m[6] == 0x7e) {
 		vb_set_bank(0, 0);
+		m_vb_resync = 22050;
+	}
 }
 
 // 入ってきた MIDI を 1 バイトずつ。チャンネルメッセージが揃ったら、ボードのパートのものだけを渡す
@@ -3573,8 +3577,11 @@ void mu2000::vb_render()
 
 void mu2000::run_sample(s32 &left, s32 &right)
 {
-	if (m_vb_kind)
+	if (m_vb_kind) {
+		if (m_vb_resync && !--m_vb_resync)
+			vb_bank_from_ram();
 		vb_render();
+	}
 	plg_pump();
 	// S-MU2000: 軽量モードでは、XG の設定をときどき読み直す
 	if (m_nfx_on && !(++m_nfx_tick & 0x1ff))

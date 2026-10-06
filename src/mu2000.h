@@ -1024,6 +1024,7 @@ private:
 	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
 	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
 	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
+	u32 m_vb_resync = 0;               // 0 でなければ、このサンプル数のあとでバンクをワーク RAM から読み直す
 	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
 	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
 	bool vb_active() const { return m_vb_kind && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
