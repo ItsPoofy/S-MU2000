@@ -871,6 +871,98 @@ bool mu2000::sampling_set_voice_raw(int slot, const std::vector<u8> &rec)
 	return true;
 }
 
+bool mu2000::sampling_export_voice(int slot, smu2000::voicelib::item &out, std::string &err) const
+{
+	out = smu2000::voicelib::item();
+	if (!sampling_voice_raw(slot, out.voice)) {
+		err = "no such voice";
+		return false;
+	}
+	const std::vector<sp::sample> list = sampling_list();
+	std::vector<int> numbers;                 // out.samples と同じ並びの、サンプルの番号
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const u32 b = 12 + 84 * u32(e);
+		if (!(out.voice[b + 2] & 0x40))
+			continue;                         // 内蔵ウェーブか、波形なし
+		const int number = (((out.voice[b + 2] & 0x3f) << 8) | out.voice[b + 3]) + 1;
+		auto at = std::find(numbers.begin(), numbers.end(), number);
+		if (at == numbers.end()) {
+			const sp::sample *src = nullptr;
+			for (const sp::sample &s : list)
+				if (s.number == number)
+					src = &s;
+			if (!src) {
+				// もう無いサンプルを指している要素は「波形なし」にして出す
+				out.voice[b] = 0x00;
+				out.voice[b + 2] = 0x3f;
+				out.voice[b + 3] = 0x7f;
+				continue;
+			}
+			smu2000::voicelib::sample s;
+			s.name = src->name;
+			s.loop = src->loop;
+			s.play_from = src->play_from;
+			s.play_to = src->play_to;
+			s.loop_from = src->loop_from;
+			sampling_pcm(number, s.pcm);
+			out.samples.push_back(std::move(s));
+			numbers.push_back(number);
+			at = numbers.end() - 1;
+		}
+		out.el_sample[size_t(e)] = int(at - numbers.begin());
+	}
+	return true;
+}
+
+bool mu2000::sampling_import_voice(int slot, const smu2000::voicelib::item &in, std::string &err, int *added)
+{
+	if (added)
+		*added = 0;
+	if (slot < 0 || slot >= sp::MAX_VOICES || in.voice.size() != sp::VOICE_SIZE) {
+		err = "no such voice";
+		return false;
+	}
+	// サンプル。同じもの（名前・長さ・中身）がもうあればそれを使う
+	std::vector<int> numbers(in.samples.size(), 0);
+	for (size_t i = 0; i < in.samples.size(); i++) {
+		const smu2000::voicelib::sample &want = in.samples[i];
+		for (const sp::sample &s : sampling_list()) {
+			if (s.frames() != want.pcm.size() || s.name != want.name)
+				continue;
+			std::vector<s16> have;
+			sampling_pcm(s.number, have);
+			if (have == want.pcm) {
+				numbers[i] = s.number;
+				break;
+			}
+		}
+		if (!numbers[i]) {
+			numbers[i] = sampling_add(want.pcm.data(), want.pcm.size(), want.name, err);
+			if (!numbers[i])
+				return false;                 // 空きが足りない、など（err に理由）
+			if (added)
+				++*added;
+		}
+		sampling_points(numbers[i], want.play_from, want.play_to, want.loop, want.loop_from);
+	}
+	std::vector<u8> rec = in.voice;
+	for (int e = 0; e < sp::VOICE_ELEMENTS; e++) {
+		const u32 b = 12 + 84 * u32(e);
+		const int idx = in.el_sample[size_t(e)];
+		if (idx >= 0 && idx < int(numbers.size())) {
+			const u16 sv = u16(0x4000 | (numbers[size_t(idx)] - 1));
+			rec[b] = 0x01;
+			rec[b + 2] = u8(sv >> 8);
+			rec[b + 3] = u8(sv);
+		} else if (rec[b + 2] & 0x40) {
+			rec[b] = 0x00;                    // サンプルを指しているのに中身が付いていない: 波形なしに
+			rec[b + 2] = 0x3f;
+			rec[b + 3] = 0x7f;
+		}
+	}
+	return sampling_set_voice_raw(slot, rec);
+}
+
 bool mu2000::sampling_copy_preset(int slot, u32 rom_rec, int mask, std::string &err)
 {
 	if (slot < 0 || slot >= sp::MAX_VOICES) {
