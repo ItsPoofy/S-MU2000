@@ -989,6 +989,7 @@ def panel_txt():
     L.append(f"card.slot {LX(169)} {LY(642)} {LS(288)} {LS(21)}")
     L.append(f"adin   {LX(135)} {LY(150)} {LS(95)} {LS(230)}")
     L.append(f"phones {LX(400)} {LY(470)} {LS(70)} {LS(70)}")
+    L.append(f"power {LX(88)} {LY(446)} {LS(126)} {LS(72)}")
     L.append("")
     L.append('mode.art  "btn.png" "btn-on.png" "btn-down.png"')
     L.append('mode.on sampling "btn-on-red.png"')

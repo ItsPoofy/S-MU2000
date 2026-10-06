@@ -440,6 +440,7 @@ bool layout::load(const std::string &path, std::string &err)
 		else if (key == "card.slot") { if (need(5)) for (int i = 0; i < 4; i++) card_slot[i] = num(t[1 + i]); }
 		else if (key == "adin")   { if (need(5)) for (int i = 0; i < 4; i++) adin[i] = num(t[1 + i]); }
 		else if (key == "phones") { if (need(5)) for (int i = 0; i < 4; i++) phones[i] = num(t[1 + i]); }
+		else if (key == "power")  { if (need(5)) for (int i = 0; i < 4; i++) power[i] = num(t[1 + i]); }
 		else if (key == "low.x")  { if (need(12)) for (int i = 0; i < 11; i++) low_x[i] = num(t[1 + i]); }
 		else if (key == "low.w")  { if (need(12)) for (int i = 0; i < 11; i++) low_w[i] = num(t[1 + i]); }
 		else if (key.rfind("mode.", 0) == 0) {
@@ -577,6 +578,9 @@ bool layout::save(const std::string &path) const
 	             adin[0], adin[1], adin[2], adin[3]);
 	std::fprintf(f, "phones %g %g %g %g   # PHONES のジャック。押すと音の出口（デジタル / アナログ）の品書き\n",
 	             phones[0], phones[1], phones[2], phones[3]);
+	if (power[2] > 0)
+		std::fprintf(f, "power %g %g %g %g    # 電源スイッチ。押すと「起動し直す」の品書き\n",
+		             power[0], power[1], power[2], power[3]);
 	std::fprintf(f, "columns.y %g        # 窓の下の札（PART VOL EXP …）の高さ\n",
 	             columns_y);
 	std::fprintf(f, "modes.x %g          # 右の札（XG GS PERFORM）の左端。高さは液晶の ▶ に合わせる\n",

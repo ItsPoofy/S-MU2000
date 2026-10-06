@@ -1956,6 +1956,31 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				p.press(B::value_plus, 150);
 				const std::string named = p.lcd();
 				const bool playing = p.mu.virtual_board_playing();
+				// [AUDITION] の音符は MIDI では来ない。本体がボードへ聞かせる線（SCI4 の 1 本目）で届く。
+				// 内蔵の音源ではこのバンクは無音なので、音が出ていればボードが鳴っている
+				p.out.clear();
+				p.collect = true;
+				p.press(B::audition, 150);
+				p.pump(1500);
+				p.collect = false;
+				double aud = 0;
+				for (double v : p.out)
+					aud += v * v;
+				aud = std::sqrt(aud / double(std::max<size_t>(1, p.out.size())));
+				// 電源を入れ直す。パートの音色（ボードのバンク）は持ち越されるので、何も選び直さなくても [AUDITION] で鳴る
+				p.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !p.mu.midi_ready(); i += RATE / 100)
+					p.pump(10);
+				p.pump(3000);
+				p.out.clear();
+				p.collect = true;
+				p.press(B::audition, 150);
+				p.pump(1500);
+				p.collect = false;
+				double aud2 = 0;
+				for (double v : p.out)
+					aud2 += v * v;
+				aud2 = std::sqrt(aud2 / double(std::max<size_t>(1, p.out.size())));
 				p.press(B::util, 150);
 				for (int i = 0; i < 6; i++)
 					p.press(B::select_right, 150);
@@ -1979,11 +2004,11 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				const std::string by_xg = p.lcd();
 				const int part_xg = p.mu.virtual_board_part();
 				auto has = [](const std::string &t, const char *what) { return t.find(what) != std::string::npos; };
-				check(has(by_midi, "Square50") && has(named, "Square25") && playing && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
+				check(has(by_midi, "Square50") && has(named, "Square25") && playing && aud > 0.002 && aud2 > 0.002 && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
 				      has(down, "PartAssign=02") && part_down == 1 && has(off, "PartAssign=off") && off_seen &&
 				      has(outside, "PartAssign=06") && has(by_xg, "PartAssign=10") && part_xg == 9 && p.mu.virtual_board_assigned(),
 				      "架空のボードを firmware が見つけて、UTIL → PLG の PartAssign で動かせる",
-				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + by_midi + "] [" + named + "] [" + list + "] [" + page + "] [" + down + "] パート " +
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + by_midi + "] [" + named + "] AUDITION " + std::to_string(aud) + "、入れ直した後 " + std::to_string(aud2) + " [" + list + "] [" + page + "] [" + down + "] パート " +
 				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
 			}
 
