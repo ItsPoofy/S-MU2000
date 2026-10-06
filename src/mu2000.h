@@ -14,6 +14,7 @@
 #include "compat/cli_text.h"
 #include "sampling.h"
 #include "vboard.h"
+#include "voice_lib.h"
 #include "smartmedia.h"
 #include "state.h"
 #include "xg/native_driver.h"
@@ -388,6 +389,11 @@ public:
 	// ROM の音色の要素とサンプル音色の要素は同じ 84 バイトの並びなので、そのまま写せば同じ音が鳴る。
 	// mask は鳴らす要素（bit0 = 要素 1）。負なら記録のまま（全部）。要素を 1 つずつ聞くのに使う
 	bool sampling_copy_preset(int slot, u32 rom_rec, int mask, std::string &err);
+	// **自作音色のライブラリ**（src/voice_lib.h）。音色 1 つを、鳴らしているサンプルの波形ごと取り出す・戻す。
+	// 戻すとき、同じ波形（名前・長さ・中身が同じ）がもうメモリにあればそれを使い、無ければ空きへ足して、
+	// 要素の指すサンプルの番号を書き直す。added に足したサンプルの数を返す
+	bool sampling_export_voice(int slot, smu2000::voicelib::item &out, std::string &err) const;
+	bool sampling_import_voice(int slot, const smu2000::voicelib::item &in, std::string &err, int *added = nullptr);
 	// 録音。A/D INPUT（set_audio_input に入る値）を、選んだ入力から 16bit で集める。
 	// trigger は 0 なら押してすぐ、ほかはその大きさ（16bit の絶対値）を超えたら録り始める
 	void rec_start(smu2000::sampling::source src, int trigger, u32 max_frames);

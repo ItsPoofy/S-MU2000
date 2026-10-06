@@ -19,6 +19,7 @@
 #include "card_fs.h"
 #include "m2a.h"
 #include "wavegen.h"
+#include "voice_lib.h"
 #include "xg/wave_catalog.h"
 
 #include <array>
@@ -66,6 +67,9 @@ private:
 	void preset_pane(bridge &br);
 	void preset_restore(bridge &br);          // 借りたサンプル音色の枠を元に戻す
 	void preset_open(int msb, int lsb, int prog);
+	// ライブラリのタブ（sampling_library.cpp）
+	void library_pane(bridge &br);
+	void library_scan();
 	void import_wav(const std::vector<u8> &bytes, bridge &br);
 	void load_sysex(const std::vector<u8> &bytes, bridge &br);
 	void apply_sysex(bridge &br);
@@ -225,7 +229,7 @@ private:
 	double m_rw_play_at = 0;
 	bool m_rw_drawn = false;           // この描画で内蔵ウェーブのタブを出したか（ほかのタブへ移ったら試聴を止める）
 	bool m_hidden_stopped = false;     // 窓を閉じたときの「止める」を出し済み（閉じている間、何度も出さない）
-	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ、3 = 内蔵音色）
+	int m_goto_tab = 0;                // 次の描画で開くタブ（1 = 音色、2 = 内蔵ウェーブ、3 = 内蔵音色、4 = ライブラリ）
 	// 内蔵音色のタブ。一覧、選んでいる音色、鳴らす要素、試聴の鍵と強さ、借りた枠の元の中身
 	std::vector<xg::preset_voice> m_pv_list;
 	bool m_pv_built = false;
@@ -238,6 +242,31 @@ private:
 	u32 m_pv_sel_rec = 0;              // そのとき写していた音色と、鳴らす要素の印
 	int m_pv_sel_mask = -1;
 	std::shared_ptr<std::vector<u8>> m_pv_keep;
+	// ライブラリのタブ。置き場にある音色の一覧（ファイルの頭だけ読んだもの）と、選んでいるもの、保存と編集の欄
+	struct lib_entry {
+		std::string path, category, name, memo, waves;
+		std::array<std::string, 4> el_sample;   // 要素が鳴らすサンプルの名前（サンプルでなければ空）
+		int elements = 0, samples = 0;
+		size_t frames = 0;
+		std::vector<u8> voice;          // 音色の記録 350 バイト
+	};
+	std::vector<lib_entry> m_lib;
+	std::vector<std::string> m_lib_cats;
+	bool m_lib_scanned = false, m_lib_drawn = false;
+	int m_lib_sel = -1, m_lib_cat = 0, m_lib_target = 0;
+	char m_lib_find[32] = {};
+	char m_lib_save_name[9] = {}, m_lib_save_cat[40] = {}, m_lib_save_memo[256] = {};
+	int m_lib_save_for = -1;
+	std::string m_lib_save_src;        // 名前の欄を合わせたときの、音色の名前
+	char m_lib_edit_name[9] = {}, m_lib_edit_cat[40] = {}, m_lib_edit_memo[256] = {};
+	int m_lib_edit_for = -1;
+	std::string m_lib_note;
+	struct lib_job {
+		std::atomic<bool> done{ false };
+		smu2000::voicelib::item item;
+		std::string err, path, name, memo;
+	};
+	std::shared_ptr<lib_job> m_lib_job;
 	char m_wave_find[32] = {};         // 組の絞り込み
 	// 音色を SysEx にする仕事（音を作る糸で作る）と、外へ送っている列
 	struct sx_job {

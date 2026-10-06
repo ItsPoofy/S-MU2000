@@ -229,7 +229,11 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		const int go = m_goto_tab;
 		m_rw_drawn = false;
 		m_pv_drawn = false;
-		m_goto_tab = 0;
+		m_lib_drawn = false;
+		// 「音色」のタブは親のタブの中にある。親がまだ開いていない描画では子のタブまで届かないので、
+		// 子のタブを実際に出すまで頼みを持ち越す（1 度で消すと、親だけ替わって子が「サンプル」のままになる）
+		if (go != 1)
+			m_goto_tab = 0;
 		if (ImGui::BeginTabBar("right_tabs")) {
 			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_prepare, "Get a sound"))) {
 				if (ImGui::BeginTabBar("prepare_tabs")) {
@@ -277,6 +281,8 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 						ImGui::EndTabItem();
 					}
 					if (ImGui::BeginTabItem(UI_TEXT(smp_tab_voice, "Voice"), nullptr, go == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+						if (go == 1)
+							m_goto_tab = 0;
 						if (ImGui::BeginChild("assign", ImVec2(0, 0), ImGuiChildFlags_Borders))
 							assign_pane(br);
 						ImGui::EndChild();
@@ -300,11 +306,18 @@ void sampling_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 				ImGui::EndChild();
 				ImGui::EndTabItem();
 			}
+			// ライブラリ: 作った音色を PC に取っておき、選んで戻す（電源を切ると消えるメモリの代わりの置き場）
+			if (ImGui::BeginTabItem(UI_TEXT(smp_tab_library, "Library"), nullptr, go == 4 ? ImGuiTabItemFlags_SetSelected : 0)) {
+				if (ImGui::BeginChild("library", ImVec2(0, 0), ImGuiChildFlags_Borders))
+					library_pane(br);
+				ImGui::EndChild();
+				ImGui::EndTabItem();
+			}
 			ImGui::EndTabBar();
 		}
 		// 内蔵音色のタブから離れたら、試聴に借りたサンプル音色の枠を元に戻す
-		if (!m_pv_drawn)
-			preset_restore(br);
+		if (!m_pv_drawn && !m_lib_drawn)
+			preset_restore(br);            // ライブラリの試聴も同じ枠を借りる
 		// 内蔵ウェーブのタブから離れたら、そこで鳴らしていた波形を止める（ループする波形が鳴りっぱなしにならないように）
 		if (!m_rw_drawn && (m_rw_playing || m_rw_start || m_rw_play_wanted)) {
 			if (m_rw_playing)
