@@ -111,6 +111,8 @@ static void on_message(int slots, const std::vector<u8> &m)
 			data = &it->second;
 		else if (const auto iw = g_wild.find(std::vector<u8>(addr.begin(), addr.end() - 1)); iw != g_wild.end())
 			data = &iw->second;
+		else if (const auto i4 = g_wild.find(std::vector<u8>(addr.begin(), addr.begin() + 4)); addr.size() > 4 && i4 != g_wild.end())
+			data = &i4->second;      // 機種 4F で番地のあとに引数がいくつか付くもの（音色の名前など）。4f7f1000**=
 		if (!data) {
 			std::printf("        (no answer in the table)\n");
 			return;
