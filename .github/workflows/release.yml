@@ -103,7 +103,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
       - run: >
           sudo apt-get update -qq &&
-          sudo apt-get install -y -qq build-essential pkg-config cmake ninja-build git
+          sudo apt-get install -y -qq build-essential pkg-config cmake ninja-build git patchelf
           libasound2-dev libfontconfig-dev libcairo2-dev
           libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev
           libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libdecor-0-dev liburing-dev
@@ -144,6 +144,8 @@ jobs:
           for d in "$HOME/sdl3-release/lib" "$HOME/sdl3-release/lib/x86_64-linux-gnu"; do
             [ -f "$d/libSDL3.so" ] && cp -fL "$d"/libSDL3.so* dist-linux.AppDir/usr/lib/ || true
           done
+          # Same rpath as the libraries the staging script bundled (it ran before this copy)
+          for f in dist-linux.AppDir/usr/lib/libSDL3.so*; do patchelf --force-rpath --set-rpath '$ORIGIN' "$f" || true; done
           # Pinned packager (1.9.1): the `continuous` appimagetool build moves
           # under us (it has even shipped a `broken-zsyncmake` tag), and a
           # silent packager change must never end up in our binaries.

@@ -26,7 +26,7 @@ extract() {
 }
 
 : > "$out/extracted.inc"
-for fn in "The file for one family name" "The file for the first face fontconfig offers"; do
+for fn in "One pattern's file, added once" "The files for one family name" "The files of the faces fontconfig offers"; do
     extract "$fn" >> "$out/extracted.inc"
     echo >> "$out/extracted.inc"
 done
@@ -60,6 +60,13 @@ static const char *kFamilies[] = {
 	"DejaVu Sans", "Droid Sans Fallback", "Definitely Not Installed XYZ",
 };
 
+// The queries return every file, best first (issue #135); the tables below
+// show the first.
+static std::string first(const std::vector<std::string> &all)
+{
+	return all.empty() ? std::string() : all.front();
+}
+
 int main()
 {
 	FcInit();
@@ -68,7 +75,7 @@ int main()
 	int empty = 0, total = 0;
 	for (const char *fam : kFamilies)
 		for (int b = 0; b < 2; b++, total++) {
-			const std::string got = cjk_fontconfig_match(fam, b != 0);
+			const std::string got = first(cjk_fontconfig_match(fam, b != 0));
 			if (got.empty()) empty++;
 			std::string leaf = got;
 			const size_t s = leaf.rfind('/');
@@ -83,7 +90,7 @@ int main()
 	// is what FcFontList gives and FcFontMatch does not.
 	puts("\n=== substitution check (all must be empty) ===");
 	for (const char *fam : { "Definitely Not Installed XYZ", "No Such Font 12345" }) {
-		const std::string got = cjk_fontconfig_match(fam, false);
+		const std::string got = first(cjk_fontconfig_match(fam, false));
 		printf("  %-32s -> %s\n", fam, got.empty() ? "empty (correct)" : got.c_str());
 		if (!got.empty()) printf("      !! substituted a font nobody asked for\n");
 	}
@@ -94,7 +101,7 @@ int main()
 		{ "merge source: ja", { "ja" } },
 	};
 	for (auto &c : cases) {
-		const std::string got = cjk_fontconfig_scan(c.langs);
+		const std::string got = first(cjk_fontconfig_scan(c.langs));
 		std::string leaf = got;
 		const size_t sl = leaf.rfind('/');
 		if (sl != std::string::npos) leaf = leaf.substr(sl + 1);

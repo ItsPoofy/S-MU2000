@@ -77,17 +77,19 @@ Terminal=false
 EOF
 cp -f "$APPDIR/S-MU2000.desktop" "$APPDIR/usr/share/applications/"
 
-cat > "$APPDIR/AppRun" <<'EOF'
-#!/bin/sh
-HERE="$(dirname "$(readlink -f "$0")")"
-export LD_LIBRARY_PATH="$HERE/usr/lib:${LD_LIBRARY_PATH:-}"
-exec "$HERE/usr/bin/S-MU2000-gui" "$@"
-EOF
-chmod +x "$APPDIR/AppRun"
-
-# Bundle shared deps of the staged binaries (SDL3, cairo, ALSA, fontconfig chain).
-# Excludes loader/libc/system libs that must come from the host.
-# Patterns match the full path tail (distros use /lib, /lib64 or /usr/lib).
+# Bundle shared deps of the staged binaries (SDL3, cairo and what they pull in).
+# Excludes what must come from the host. Patterns match the file name (distros
+# use /lib, /lib64 or /usr/lib).
+#
+# Two groups are left to the host on purpose (issue #135, openSUSE Tumbleweed;
+# both are on the AppImage project's excludelist for the same reasons):
+#   - ALSA (libasound). It loads the host's plug-ins and reads the host's
+#     configuration to find "default" (PipeWire/PulseAudio). A bundled copy looks
+#     for plug-ins built for another distro and answers "No such device".
+#   - fontconfig and what it stands on (freetype, expat, zlib), and the compiler
+#     runtime (libstdc++, libgcc_s). An older bundled fontconfig cannot read a
+#     newer host's /etc/fonts (a page of warnings), and host libraries loaded
+#     into the same process expect the host's versions.
 if [ -f "$APPDIR/usr/bin/S-MU2000-gui" ]; then
   ldd "$APPDIR/usr/bin/S-MU2000-gui" 2>/dev/null | awk '{if ($3 ~ /^\//) print $3}' | sort -u | while read -r lib; do
     case "${lib##*/}" in
@@ -95,12 +97,54 @@ if [ -f "$APPDIR/usr/bin/S-MU2000-gui" ]; then
       libresolv*|libnss*|libthread_db*|\
       libX*|libxcb*|libXau*|libXdmcp*|\
       libGL*|libEGL*|libGLX*|libGLdispatch*|libvulkan*|libdrm*|libgbm*|\
-      libwayland*|libxkbcommon*)
+      libwayland*|libxkbcommon*|\
+      libasound*|libjack*|libpipewire*|libpulse*|\
+      libfontconfig*|libfreetype*|libexpat*|libz.so*|libharfbuzz*|libfribidi*|\
+      libstdc++*|libgcc_s*|libuuid*)
         ;;
       *) cp -fL "$lib" "$APPDIR/usr/lib/" 2>/dev/null || echo "warning: cannot bundle $lib" >&2 ;;
     esac
   done || true
 fi
+
+# How the staged programs find the bundled libraries.
+#
+# Preferred: an rpath ($ORIGIN/../lib) written into the programs, and $ORIGIN
+# into the bundled libraries so they find each other. Nothing is exported, so
+# programs the gui starts are not affected.
+# The old way was LD_LIBRARY_PATH in AppRun. That leaks into every child: SDL
+# opens file dialogs by running the host's zenity, which then loaded the bundled
+# libraries instead of its own and died ("symbol lookup error ... undefined
+# symbol: FcConfigSetDefaultSubstitute", issue #135). Kept only as the fallback
+# for a machine without patchelf.
+USE_RPATH=0
+if command -v patchelf >/dev/null 2>&1; then
+  USE_RPATH=1
+  for f in "$APPDIR"/usr/bin/*; do
+    [ -f "$f" ] && patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$f" 2>/dev/null || true
+  done
+  for f in "$APPDIR"/usr/lib/*.so*; do
+    [ -f "$f" ] && patchelf --force-rpath --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
+  done
+else
+  echo "warning: patchelf not found; AppRun falls back to LD_LIBRARY_PATH (file dialogs may fail on some hosts)" >&2
+fi
+
+if [ "$USE_RPATH" = 1 ]; then
+cat > "$APPDIR/AppRun" <<'EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/S-MU2000-gui" "$@"
+EOF
+else
+cat > "$APPDIR/AppRun" <<'EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$HERE/usr/lib:${LD_LIBRARY_PATH:-}"
+exec "$HERE/usr/bin/S-MU2000-gui" "$@"
+EOF
+fi
+chmod +x "$APPDIR/AppRun"
 
 echo "staged linux dist in $DIST and AppDir in $APPDIR:"
 ls "$DIST" "$DIST/bin" "$DIST/plugins"

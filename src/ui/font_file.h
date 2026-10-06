@@ -413,8 +413,7 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 // answers with DejaVu, and every fullwidth bracket and kanji outside 0x00FF
 // comes out as a tofu box. An empty list is the honest answer.
 
-// The files for one family name (none when the machine has no such family),
-// the wanted weight first.
+// One pattern's file, added once.
 static void cjk_add_file(std::vector<std::string> &out, const FcPattern *font)
 {
 	FcChar8 *file = nullptr;
@@ -425,6 +424,9 @@ static void cjk_add_file(std::vector<std::string> &out, const FcPattern *font)
 		out.push_back(std::move(path));
 }
 
+// The files for one family name (none when the machine has no such family),
+// the wanted weight first.
+//
 // **Every** file is returned, in the order fontconfig ranks them, not just the
 // first: the first may be one the rasteriser cannot read. openSUSE Tumbleweed
 // ships Noto Sans CJK as a variable font (CFF2 outlines), which stb_truetype
