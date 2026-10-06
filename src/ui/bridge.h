@@ -66,7 +66,7 @@ public:
 	{
 		if (port <= 0)
 			return send(bytes, n);
-		if (port >= mu2000::MIDI_PORTS)
+		if (port > mu2000::MIDI_PORTS)          // MIDI_PORTS 自身は口 E（マルチパートのプラグインボード）
 			return false;
 		return m_to_mu_p[port].put(bytes, n);
 	}
@@ -157,7 +157,7 @@ public:
 	bool take_ask(u8 &v)  { return m_ask.take(v); }
 	bool take_midi_port(int port, u8 &v)
 	{
-		return port > 0 && port < mu2000::MIDI_PORTS && m_to_mu_p[port].take(v);
+		return port > 0 && port <= mu2000::MIDI_PORTS && m_to_mu_p[port].take(v);
 	}
 	bool take_midi_b(u8 &v) { return take_midi_port(1, v); }
 
@@ -399,6 +399,10 @@ public:
 	// 本体の電源を入れ直してほしい（架空のボードを挿した・外したとき。アプリの側が受けて engine::restart を回す）
 	void request_restart() { m_restart_want.store(true, std::memory_order_relaxed); }
 	bool take_restart_request() { return m_restart_want.exchange(false, std::memory_order_relaxed); }
+	// 口 E を受け持つボード（マルチパートのプラグインボード）が挿さっているか。音源の側が置き、MIDI ファイルの
+	// プレイヤーが読む（挿さっていれば、5 口目のトラックを口 E へ送る）
+	void set_board_port(bool on) { m_board_port.store(on, std::memory_order_relaxed); }
+	bool board_port() const { return m_board_port.load(std::memory_order_relaxed); }
 	bool take_ain_list_request() { return m_ain_list_want.exchange(false, std::memory_order_relaxed); }
 
 	// SmartMedia の差し込み口（サンプリングの窓の「カード」）。差しているカードの場所は gui・プラグインが
@@ -468,6 +472,7 @@ private:
 	std::atomic<int> m_ain_want{-2};
 	std::atomic<bool> m_ain_list_want{false};
 	std::atomic<bool> m_restart_want{false};
+	std::atomic<bool> m_board_port{false};
 	mutable std::mutex m_wave_lock;
 	overview_req m_wave_want;
 	std::array<overview_req, DETAIL_SLOTS> m_detail_want{};
@@ -517,7 +522,7 @@ private:
 	ring                  m_to_mu;        // 画面・MIDI ファイル → 音源（THRU にも流す）
 	ring                  m_ask;          // パラメータの層の問い合わせ → 音源（THRU には流さない）
 	// 画面 → 音源の口 B・C・D（THRU には流さない）。[0] は使わない（口 A は m_to_mu）
-	ring                  m_to_mu_p[mu2000::MIDI_PORTS];
+	ring                  m_to_mu_p[mu2000::MIDI_PORTS + 1];
 	std::mutex            m_out_lock;                          // send_out の待ち行列
 	std::deque<std::pair<int, std::vector<u8>>> m_out_q;
 	ring                  m_from_mu;      // 音源の MIDI OUT → 画面

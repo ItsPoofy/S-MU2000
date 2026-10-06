@@ -48,7 +48,7 @@ struct engine {
 	midi_in  &midi;        // MIDI IN A（パート 1-16）
 	// B-D。B は実機の 2 つめの DIN、C・D は USB だけの口（パート 33-64）。
 	// [0] は使わない（midi が A）
-	midi_in  *midi_p[mu2000::MIDI_PORTS] = {};
+	midi_in  *midi_p[mu2000::MIDI_PORTS + 1] = {};   // 最後は口 E（マルチパートのプラグインボード）
 	midi_out *mout = nullptr;     // MIDI THRU A（A で受けたものを外へ）
 	midi_out *mout_b = nullptr;   // MIDI THRU B（B で受けたものを外へ）
 	midi_out *mout_edit = nullptr; // 音色の窓で選んだ送り先（Ctrl＋右クリックで送るもの）
@@ -259,6 +259,10 @@ struct engine {
 				if (p == 1 && mout_b && guard_b.pass(b)) mout_b->send(b);
 			}
 		}
+		// 口 E。本体（firmware）には行かず、マルチパートのプラグインボードだけが聞く
+		if (midi_p[mu2000::MIDI_PORTS])
+			while (midi_p[mu2000::MIDI_PORTS]->pop(b))
+				mu.board_midi_in(b);
 
 		const float g = br.gain();
 		// アナログにした最初のブロックで、前に使ったときの状態を捨てる

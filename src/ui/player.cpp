@@ -344,7 +344,7 @@ void player::run(bridge &br)
 				const bool fold = m_fold.load(std::memory_order_relaxed), usb = m_usb.load(std::memory_order_relaxed);
 				size_t bytes = 0;
 				for (const smf::event &e : smf::chase(events, target)) {
-					send(smf::mu_port(e.port, fold, usb), e.bytes.data(), e.bytes.size());
+					send(smf::mu_port(e.port, fold, usb, br.board_port()), e.bytes.data(), e.bytes.size());
 					bytes += e.bytes.size();
 				}
 				at = size_t(std::lower_bound(events.begin(), events.end(), target,
@@ -389,7 +389,7 @@ void player::run(bridge &br)
 			const bool thin = m_thin.load(std::memory_order_relaxed);
 			while (at < events.size() && events[at].time <= pos) {
 				const smf::event &e = events[at];
-				const int to = smf::mu_port(e.port, fold, usb);
+				const int to = smf::mu_port(e.port, fold, usb, br.board_port());
 				at++;
 				if (thin)
 					thinner.event(to, e.bytes.data(), e.bytes.size(), e.time, send);

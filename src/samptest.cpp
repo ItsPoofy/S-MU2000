@@ -2012,6 +2012,77 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
 			}
 
+			// 16 パートの FC ボード（VBOARD_FC16）。実機の PLG100-XG と同じマルチパートのボードで、本体のパートは借りず、
+			// 5 つ目の口（口 E）の 16 チャンネルを受け持つ。firmware は UTIL → PLG に名前を並べるだけ。
+			// ケーブルメッセージ F5 05 のあとの MIDI で鳴り、音量（CC7）とパン（CC10）はボードが自分で効かせる。
+			// 口 A に戻して弾けば、今までどおり内蔵の音が鳴る
+			{
+				using B = mu2000::button;
+				static rig q;
+				if (!q.mu.load_program(dir + "/mu2000_flash.bin") || !q.mu.load_wave(dir + "/dump"))
+					return 1;
+				q.mu.load_sintab(dir + "/standin/sin-table.bin");
+				q.mu.set_virtual_board(mu2000::VBOARD_FC16, 0);
+				q.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !q.mu.midi_ready(); i += RATE / 100)
+					q.pump(10);
+				q.pump(3000);
+				const bool known = q.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						q.mu.midi_in(u8(x), 0);
+				};
+				struct shot { std::vector<double> mono; double l = 0, r = 0; };
+				auto play = [&](int ch) {
+					shot o;
+					q.pump(200);
+					q.out.clear();
+					q.sum_l = q.sum_r = 0;
+					q.collect = true;
+					send({ 0x90 | ch, 69, 127 });
+					q.pump(300);
+					q.collect = false;
+					send({ 0x80 | ch, 69, 0 });
+					o.mono = q.out;
+					o.l = std::sqrt(q.sum_l / double(std::max<size_t>(1, q.out.size())));
+					o.r = std::sqrt(q.sum_r / double(std::max<size_t>(1, q.out.size())));
+					q.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb1, 91, 0, 0xc0, 0, 0xc1, 0 });       // 口 E へ。リバーブの送りは切って測る
+				const shot sq = play(0);
+				const double f1 = tone(sq.mono, 440), f2 = tone(sq.mono, 880), f3 = tone(sq.mono, 1320);
+				send({ 0xb1, 10, 1 });
+				const shot left = play(1);
+				send({ 0xb0, 7, 0 });
+				const shot quiet = play(0);
+				send({ 0xb0, 7, 100, 0xf5, 1 });                                   // 口 A に戻す
+				const shot inner = play(0);
+				const double i1 = tone(inner.mono, 440), i2 = tone(inner.mono, 880);
+				q.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					q.press(B::select_right, 150);
+				q.press(B::enter, 150);
+				const std::string list = q.lcd();
+				check(known && list.find("FC16 BOARD") != std::string::npos &&
+				      f1 > 0.01 && std::fabs(f3 / f1 - 1.0 / 3.0) < 0.05 && f2 < 0.05 * f1 &&
+				      left.r < 0.01 * left.l && left.l > 0.3 * sq.l &&
+				      level(quiet.mono) < 0.002 * level(sq.mono) &&
+				      level(inner.mono) > 0.003 && i2 > 0.05 * i1,
+				      "16 パートの FC ボードが口 E で鳴り、本体のパートはそのまま",
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + list + "] 440Hz " + std::to_string(f1) +
+				      "、3 倍音 " + std::to_string(f3 / std::max(1e-12, f1)) + " 倍、左に振って右は左の " +
+				      std::to_string(left.r / std::max(1e-12, left.l)) + " 倍、音量 0 で " +
+				      std::to_string(level(quiet.mono) / std::max(1e-12, level(sq.mono))) + " 倍、口 A の内蔵の音 " +
+				      std::to_string(level(inner.mono)) + "（2 倍音 " + std::to_string(i2 / std::max(1e-12, i1)) + " 倍）");
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])

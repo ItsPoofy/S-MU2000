@@ -193,7 +193,7 @@ reaches the same parts here and on the hardware.
 Choices are remembered **by name** in `%LOCALAPPDATA%\S-MU2000\gui.ini`.
 Remembering by number would connect to a different device after a USB device
 is replugged (replugging the MU2000 really does reorder the list).
-`--midi` / `--midi-b` / `--midi-c` / `--midi-d` / `--midiout` (THRU A) /
+`--midi` / `--midi-b` / `--midi-c` / `--midi-d` / `--midi-e` / `--midiout` (THRU A) /
 `--midiout-b` (THRU B) / `--midiout-mu` (OUT) take precedence when given.
 
 **A port that could not be opened at start-up keeps its remembered name.**

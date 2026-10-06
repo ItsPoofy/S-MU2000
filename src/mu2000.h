@@ -146,7 +146,7 @@ public:
 		if (port < 0 || port >= MIDI_PORTS)
 			port = 0;
 		// 架空のボードが挿さっていれば、そのパートが受ける MIDI を聞かせる（firmware にも今までどおり渡す）
-		if (m_vb_kind)
+		if (m_vb_kind == VBOARD_FC)
 			vb_tap(byte, m_cable[port]);
 		// native の口が動いているときは、鍵の上げ下げをこちらで処理する
 		// （firmware に渡さない）。詳しくは xg/native_driver.h
@@ -156,7 +156,7 @@ public:
 			if (m_cable_wait[port]) {
 				m_cable_wait[port] = false;
 				if (!(byte & 0x80)) {
-					if (byte >= 1 && byte <= MIDI_PORTS)
+					if (byte >= 1 && byte <= MIDI_PORTS + 1)       // 5 = 口 E（マルチパートのプラグインボード）
 						m_cable[port] = byte - 1;
 					return -1;
 				}
@@ -167,6 +167,10 @@ public:
 			}
 		}
 		const int to = m_cable[port];
+		if (to >= MIDI_PORTS) {                // 口 E は本体（firmware）には行かない。ボードだけが聞く
+			board_midi_in(byte);
+			return to;
+		}
 		if (to >= MIDI_DIN_PORTS || m_usb_host)
 			usb_midi_in(byte, to);
 		else if (m_midi[to].queue.size() < MIDI_QUEUE_LIMIT)
@@ -293,7 +297,15 @@ public:
 	// （やり取りの形は doc/plg-protocol.md）。firmware は UTIL → PLG にボードを並べ、そこの PartAssign を変えると
 	// こちらのパートも変わる（virtual_board_part で読める。off にするとボードは黙り、内蔵の音が戻る）。
 	// 起動のあとで挿したときは firmware は知らないままで、パートはここで決めたとおりに鳴る
-	enum { VBOARD_NONE = 0, VBOARD_FC = 1 };
+	//
+	// VBOARD_FC16 は**マルチパートのボード**（実機の PLG100-XG と同じ種類）。本体のパートは借りず、5 つ目の口
+	// （口 E。MU2000 では A-D の 64 パートの次）の 16 チャンネルを自分で受け持つ。board_midi_in か、ケーブル
+	// メッセージ F5 05 のあとの MIDI で鳴る。チャンネルごとのプログラム・音量（CC7）・エクスプレッション（CC11）・
+	// パン（CC10）・リバーブ／コーラスの送り（CC91・CC93）はボードが自分で持つ。firmware は UTIL → PLG に名前を
+	// 並べるだけで、液晶にパートは出ず、パネルからは音色を選べない（実機の MU でも同じ）。part は使わない
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2 };
+	// 口 E に来た MIDI を 1 バイト（VBOARD_FC16 が挿さっているときだけ鳴る）。音を作る糸から呼ぶこと
+	void board_midi_in(u8 byte);
 	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号
 	bool virtual_board_playing() const { return vb_active(); }  // いまボードのバンクが選ばれている
 	void set_virtual_board(int kind, int part);
@@ -1024,10 +1036,22 @@ private:
 	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
 	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
 	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
+	// 16 パートのボード（VBOARD_FC16）: チャンネルごとの音源と、ボードが自分で持つミキサーの値
+	struct vb_chan {
+		smu2000::vboard::fc_board fc;
+		u8 vol = 100, exp = 127, pan = 64, rev = 40, cho = 0;
+		float gain[6] = { 0, 0, 0, 0, 0, 0 };        // dry 左右・reverb 左右・chorus 左右
+	};
+	std::array<vb_chan, 16> m_vb16;
+	vb_parse m_vb16_parse;
+	std::vector<u8> m_vb16_sx;
+	void vb16_reset(bool voices);
+	void vb16_gain(vb_chan &c);
+	void vb16_render();
 	u32 m_vb_resync = 0;               // 0 でなければ、このサンプル数のあとでバンクをワーク RAM から読み直す
 	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
 	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
-	bool vb_active() const { return m_vb_kind && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
+	bool vb_active() const { return m_vb_kind == VBOARD_FC && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
 	void vb_bank_from_ram();
 	void vb_set_bank(u8 msb, u8 lsb);
 	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx

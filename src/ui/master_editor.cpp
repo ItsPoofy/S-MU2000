@@ -393,21 +393,24 @@ void master_editor::board_pane(bridge &br)
 {
 	const float fs = ImGui::GetFontSize();
 	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
-	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0';
+	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
+	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0';
 	bool changed = false;
 	ImGui::SetNextItemWidth(-fs * 9.5f);
 	const bool kind_changed = ImGui::Combo("##board", &m_board_kind, kinds.c_str());
 	changed |= kind_changed;
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it). Plugging or unplugging restarts the MU, as boards go in with the power off, in place of that part's own voice. On any other bank the part plays its own voice. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05."));
 	ImGui::SameLine();
 	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
+	ImGui::BeginDisabled(m_board_kind == mu2000::VBOARD_FC16);       // 16 パートのボードは本体のパートを借りない
 	if (ImGui::InputInt("##boardpart", &m_board_part)) {
 		m_board_part = std::clamp(m_board_part, 1, 64);
 		changed = true;
 	}
+	ImGui::EndDisabled();
 	const double now = ImGui::GetTime();
 	if (changed) {
 		const int kind = m_board_kind, part = m_board_part - 1;
@@ -447,7 +450,7 @@ void master_editor::board_pane(bridge &br)
 		br.post([seen = m_board_seen](mu2000 &mu) {
 			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0) |
 			            (mu.virtual_board_playing() ? 0x200 : 0) | (mu.midi_ready() ? 0x400 : 0) |
-			            (mu.virtual_board_kind() ? 0x800 : 0));
+			            (mu.virtual_board_kind() << 11));
 			return std::string();
 		});
 	}
@@ -459,8 +462,8 @@ void master_editor::board_pane(bridge &br)
 	if (seen < 0 || now - m_board_touched < 1.0)
 		return;
 	// 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）
-	if (!m_board_booting && !m_board_kind && (seen & 0x800))
-		m_board_kind = mu2000::VBOARD_FC;
+	if (!m_board_booting && !m_board_kind && (seen & 0x1800))
+		m_board_kind = (seen >> 11) & 3;
 	if (!m_board_kind)
 		return;
 	// 起動し直しが済んだ（本体がボードを見つけて MIDI を受け始めた）。そのパートにボードのバンクを選ぶ
@@ -469,12 +472,19 @@ void master_editor::board_pane(bridge &br)
 		m_board_touched = now;
 		m_board_seen->store(-1);
 		br.post([](mu2000 &mu) {
+			if (mu.virtual_board_kind() != mu2000::VBOARD_FC)
+				return std::string();
 			const int p = mu.virtual_board_part();
 			const u8 ch = u8(p % 16);
 			for (int b : { 0xb0 | ch, 0, int(mu2000::VBOARD_BANK_MSB), 0xb0 | ch, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0 | ch, 0 })
 				mu.midi_in(u8(b), p / 16);
 			return std::string();
 		});
+		return;
+	}
+	if (m_board_kind == mu2000::VBOARD_FC16) {
+		ImGui::TextDisabled("%s", (seen & 0x100) ? UI_TEXT(me_board_port_e, "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels")
+		                                         : UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 		return;
 	}
 	if ((seen & 0xff) && (seen & 0xff) != m_board_part)

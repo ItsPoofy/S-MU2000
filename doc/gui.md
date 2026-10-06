@@ -170,7 +170,7 @@ MIDI THRU B を 2 番目に繋ぐ。並べ機から流した同じものが、�
 選んだものは `%LOCALAPPDATA%\S-MU2000\gui.ini` に**名前で**覚える。
 番号で覚えると、USB の機器を挿し直したときに別の機器へ繋がってしまう
 （実際、MU2000 を挿し直すと一覧の並びが変わる）。
-`--midi` / `--midi-b` / `--midi-c` / `--midi-d` / `--midiout`（THRU A）/
+`--midi` / `--midi-b` / `--midi-c` / `--midi-d` / `--midi-e` / `--midiout`（THRU A）/
 `--midiout-b`（THRU B）/ `--midiout-mu`（OUT）を付けたときはそちらが勝つ。
 
 **起動したときに開けなかった口は、名前を覚えたままにする。** loopMIDI を
