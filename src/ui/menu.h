@@ -92,6 +92,7 @@ enum : int {
 	ID_PLAY_FILE = 5100, ID_STOP_FILE = 5101, ID_PORTS34_FOLD = 5102, ID_PORTS34_DROP = 5103,
 	ID_THIN_BENDS = 5104,    // the player lightens heavy MIDI (issue #82)
 	ID_FACTORY = 5200,
+	ID_RESTART = 5201,       // power the MU off and on
 	ID_NATIVE_FX = 5215,     // lightweight mode (C++ effects)
 	ID_NATIVE_ENGINE = 5216, // firmware を走らせない口（聞き比べ用）
 	ID_PC_EDITOR = 5201,
@@ -112,7 +113,7 @@ static_assert([] {
 	                        ID_OUT_NONE, ID_OUTB_NONE, ID_OUTMU_NONE,
 	                        ID_AIN_NONE, ID_CARD_NEW16, ID_CARD_NEW32, ID_CARD_NEW64,
 	                        ID_CARD_NEW128, ID_CARD_OPEN, ID_CARD_EJECT,
-	                        ID_PLAY_FILE, ID_STOP_FILE, ID_FACTORY, ID_NATIVE_FX,
+	                        ID_PLAY_FILE, ID_STOP_FILE, ID_FACTORY, ID_RESTART, ID_NATIVE_FX,
 	                        ID_NATIVE_ENGINE,
 	                        ID_PORTS34_FOLD, ID_PORTS34_DROP, ID_THIN_BENDS, ID_PC_EDITOR, ID_OVERVIEW,
 	                        ID_OUTPUT_DIGITAL, ID_OUTPUT_ANALOG, ID_AUDIO_DEFAULT };
@@ -296,6 +297,7 @@ inline std::vector<menu_group> menu_ports(const menu_state &s)
 	// once the firmware is actually up
 	menu_group g;
 	g.items.push_back(separator());
+	g.items.push_back(text(UI_TEXT(menu_restart, "Restart the MU (power off and on)"), ID_RESTART, false, s.ready));
 	g.items.push_back(text(UI_TEXT(menu_factory, "Factory reset..."), ID_FACTORY, false, s.ready));
 	groups.push_back(g);
 	return groups;
@@ -357,6 +359,15 @@ inline std::vector<menu_group> menu_phones(const menu_state &s)
 	g.items.push_back(text(UI_TEXT(menu_out_analog, "Analog (LINE OUT/PHONES; cuts DC)"),
 	                       ID_OUTPUT_ANALOG, s.analog, true));
 	return { menu_audio_output(s), g };
+}
+
+// The POWER switch: restart the machine
+inline std::vector<menu_group> menu_power(const menu_state &s)
+{
+	using namespace menu_detail;
+	menu_group g;
+	g.items.push_back(text(UI_TEXT(menu_restart, "Restart the MU (power off and on)"), ID_RESTART, false, s.ready));
+	return { g };
 }
 
 // The A/D INPUT jack on its own: the recording-device picker under its heading

@@ -125,6 +125,8 @@ public:
 	bool on_ad_input(int x, int y) const;
 	// PHONES のジャック。押すと音の出口（デジタル / アナログ）を選ぶ品書きが出る
 	bool on_phones(int x, int y) const;
+	// 電源スイッチ。押すと「起動し直す」の品書きが出る（絵に無いレイアウトでは当たらない）
+	bool on_power(int x, int y) const;
 
 	// ---- 入力。窓からそのまま渡す。戻り値は「描き直しが要るか」
 

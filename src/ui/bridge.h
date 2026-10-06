@@ -396,6 +396,9 @@ public:
 	// gui から。選ばれていれば番号（-1 = 無し）、無ければ -2
 	int take_ain_request() { return m_ain_want.exchange(-2, std::memory_order_relaxed); }
 	void request_ain_list() { m_ain_list_want.store(true, std::memory_order_relaxed); }
+	// 本体の電源を入れ直してほしい（架空のボードを挿した・外したとき。アプリの側が受けて engine::restart を回す）
+	void request_restart() { m_restart_want.store(true, std::memory_order_relaxed); }
+	bool take_restart_request() { return m_restart_want.exchange(false, std::memory_order_relaxed); }
 	bool take_ain_list_request() { return m_ain_list_want.exchange(false, std::memory_order_relaxed); }
 
 	// SmartMedia の差し込み口（サンプリングの窓の「カード」）。差しているカードの場所は gui・プラグインが
@@ -464,6 +467,7 @@ private:
 	bool m_ain_known = false;
 	std::atomic<int> m_ain_want{-2};
 	std::atomic<bool> m_ain_list_want{false};
+	std::atomic<bool> m_restart_want{false};
 	mutable std::mutex m_wave_lock;
 	overview_req m_wave_want;
 	std::array<overview_req, DETAIL_SLOTS> m_detail_want{};

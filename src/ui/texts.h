@@ -55,6 +55,7 @@ struct ui_texts {
 	const char *engine_boot_saved_fmt;    // %s: snapshot path
 	const char *engine_boot_failed;       // shown in the window's message area
 	const char *engine_resetting;         // shown in the window's message area
+	const char *engine_restarting;
 	const char *engine_reset_done;
 	const char *bootcache_read_error_fmt; // %s
 	// Top strip buttons (toolbar.h)
@@ -85,6 +86,7 @@ struct ui_texts {
 	const char *menu_native_fx;
 	const char *menu_native_engine;
 	const char *menu_factory;
+	const char *menu_restart;
 	const char *menu_card_new;
 	const char *menu_card_open;
 	const char *menu_card_eject;
@@ -319,6 +321,7 @@ struct ui_texts {
 	const char *me_board_fc;
 	const char *me_board_tip;
 	const char *me_board_part;
+	const char *me_board_booting;
 	const char *me_board_idle;
 	const char *me_board_unknown;
 	const char *me_board_off;

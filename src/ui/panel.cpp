@@ -313,6 +313,14 @@ bool panel::on_phones(int x, int y) const
 	return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 }
 
+bool panel::on_power(int x, int y) const
+{
+	if (m_page != page::front || m_lay.power[2] <= 0)
+		return false;
+	const RECT r = scale(m_lay.power[0], m_lay.power[1], m_lay.power[2], m_lay.power[3]);
+	return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
 // 論理座標の点を実座標へ
 POINT panel::at(double x, double y) const
 {

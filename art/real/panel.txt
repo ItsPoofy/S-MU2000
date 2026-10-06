@@ -42,6 +42,7 @@ card   52.37 326.56 187.92 44.36
 card.slot 57.92 353.66 177.45 12.94
 adin   36.97 50.52 58.53 141.71
 phones 200.25 247.69 43.13 43.13
+power 8.01 232.89 77.63 44.36
 
 mode.art  "btn.png" "btn-on.png" "btn-down.png"
 mode.on sampling "btn-on-red.png"

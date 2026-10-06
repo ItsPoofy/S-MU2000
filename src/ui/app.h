@@ -154,6 +154,8 @@ public:
 	void frame_work()
 	{
 		run_deferred();
+		if (br.take_restart_request())
+			defer_outside_paint([this] { do_restart(); });
 		poll();
 		serve_ain_requests();
 		pc_frame_all(list, pc, fx, shapes, master, sampling, panel.xg(), panel.ram(), br,
@@ -244,7 +246,7 @@ public:
 		// The jacks and the card slot are pressed, not clicked: they open a
 		// menu instead of moving a panel control
 		if (panel.on_midi_jack(x, y) || panel.on_ad_input(x, y) ||
-		    panel.on_card_slot(x, y) || panel.on_phones(x, y)) {
+		    panel.on_card_slot(x, y) || panel.on_phones(x, y) || panel.on_power(x, y)) {
 			h.handled = true;
 			h.menu = true;
 			return h;
@@ -349,6 +351,8 @@ public:
 			return menu_card(menu_snapshot());
 		if (panel.on_phones(x, y))
 			return menu_phones(menu_snapshot());
+		if (panel.on_power(x, y))
+			return menu_power(menu_snapshot());
 		if (panel.on_ad_input(x, y))
 			return menu_ain_only(audio_in::list(), ain_name);
 		return menu_ports(menu_snapshot());
@@ -410,7 +414,7 @@ public:
 		if (lcd_only)
 			return false;
 		return panel.on_midi_jack(x, y) || panel.on_ad_input(x, y) ||
-		       panel.on_card_slot(x, y) || panel.on_phones(x, y);
+		       panel.on_card_slot(x, y) || panel.on_phones(x, y) || panel.on_power(x, y);
 	}
 
 	// ---- per-platform acts (thin shells implement these)
@@ -884,6 +888,18 @@ public:
 		reboot = std::thread([this] { eng->factory_reset(); });
 	}
 
+	// Power the machine off and on. The settings carry over (as with the real
+	// unit's battery-backed memory); the firmware boots from scratch, which is
+	// also when it looks for plug-in boards
+	void do_restart()
+	{
+		if (!eng || !state || state->load() != 1)
+			return;
+		play.stop();
+		join_reboot();
+		reboot = std::thread([this] { eng->restart(); });
+	}
+
 	void set_fold34(bool on)
 	{
 		play.set_fold_extra_ports(on);
@@ -975,6 +991,7 @@ public:
 		else if (id == ID_NATIVE_FX)                                  toggle_fx();
 		else if (id == ID_NATIVE_ENGINE)                              toggle_engine();
 		else if (id == ID_FACTORY)                                    do_factory_reset();
+		else if (id == ID_RESTART)                                    do_restart();
 		else if (id == ID_PC_EDITOR)                                  open_window_by_kind(BAR_EDITOR);
 		else if (id == ID_OVERVIEW)                                   open_window_by_kind(BAR_LIST);
 		else if (id == ID_OUTPUT_DIGITAL || id == ID_OUTPUT_ANALOG)   set_analog(id == ID_OUTPUT_ANALOG);
@@ -1290,6 +1307,15 @@ public:
 		// The sound has stopped by now. Keep the machine's settings only if
 		// it came up
 		if (eng) {
+			// The imaginary board is not kept across sessions. Left on the board's
+			// bank, its part would come back silent next time, so put that part
+			// back on bank 0 before the settings are saved
+			if (eng->state.load() == 1 && eng->mu.virtual_board_kind() && eng->mu.virtual_board_playing()) {
+				const int p = eng->mu.virtual_board_part();
+				const u8 ch = u8(p % 16);
+				for (int b : { 0xb0 | ch, 0, 0, 0xb0 | ch, 32, 0, 0xc0 | ch, 0 })
+					eng->mu.midi_in(u8(b), p / 16);
+			}
 			eng->settle_for_save();
 			if (eng->state.load() == 1 && !smu2000::nvram::save(eng->mu))
 				std::fprintf(stderr, CLI_T("Could not save the settings: %s\n", "設定を残せなかった: %s\n"),

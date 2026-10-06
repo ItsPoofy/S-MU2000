@@ -43,6 +43,7 @@ private:
 	// MU のメニュー（UTIL → PLG）でパートを変えられるので、ときどき聞いて欄を合わせる
 	std::shared_ptr<std::atomic<int>> m_board_seen = std::make_shared<std::atomic<int>>(-1);
 	double m_board_asked = 0, m_board_touched = -10;
+	bool m_board_booting = false;         // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
 	bool m_diff_only = true;              // 既定と違うものだけ書き出す
 	bool m_export_waiting = false;        // 既定値ができるのを待っている（bridge の request_defaults）
 	std::vector<u8> m_import;             // 読み込んだ中身。1 通ずつ音源へ流す

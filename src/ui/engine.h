@@ -102,11 +102,14 @@ struct engine {
 			std::printf(UI_TEXT(engine_nvram_fmt, "Settings: %s\n"), smu2000::nvram::path(mu).c_str());
 		// 鍵は起動に使うワーク RAM も混ぜるので、reset() の前に作る
 		const u64 key = smu2000::bootcache::key(mu);
+		// 架空のボードが挿さっているときは写しを使わない（写しはボード無しで起動したもの。firmware が
+		// 「Checking PLG」でボードを見つけるところを通らせる）
+		const bool cache = !mu.virtual_board_kind();
 		mu.reset();
 		// 前に起動し切った姿を取ってあれば、そこから始める（bootcache.h）。
 		// 回した結果と 1 ビットも違わないので、音は同じ。
 		// **reset() のあとで読むこと**（タイマが揃っていないと形が合わない）
-		if (smu2000::bootcache::load(mu, key)) {
+		if (cache && smu2000::bootcache::load(mu, key)) {
 			std::printf(UI_TEXT(engine_boot_cached_fmt, "Booted from snapshot (%s)\n"), smu2000::bootcache::path(key).c_str());
 			publish();
 			return true;
@@ -120,7 +123,7 @@ struct engine {
 			message = UI_TEXT(engine_boot_failed, "Boot failed");
 			return false;
 		}
-		if (smu2000::bootcache::save(mu, key))
+		if (cache && smu2000::bootcache::save(mu, key))
 			std::printf(UI_TEXT(engine_boot_saved_fmt, "Saved boot snapshot: %s\n"), smu2000::bootcache::path(key).c_str());
 		publish();
 		return true;
@@ -169,6 +172,22 @@ struct engine {
 		std::printf("%s", UI_TEXT(engine_reset_done, "Factory reset done\n"));
 		std::fflush(stdout);
 		state.store(1);
+		publish();
+	}
+
+	// 電源を入れ直す。設定（ワーク RAM）は今のまま持ち越す（実機の電池で残る分と同じ扱い）
+	void restart()
+	{
+		state.store(0);
+		message = UI_TEXT(engine_restarting, "Restarting...");
+		publish();
+		while (in_fill.load())
+			smu2000::sleep_ms(1);
+		const bool keep = use_nvram;
+		use_nvram = false;
+		const bool ok = boot();
+		use_nvram = keep;
+		state.store(ok ? 1 : 2);
 		publish();
 	}
 

@@ -3262,8 +3262,16 @@ void mu2000::plg_tx_byte(int chan, u8 targets, u8 byte)
 {
 	if (m_plg_user)
 		m_plg_user(chan == 3 ? targets & 7 : 0x10 << chan, byte);      // 別々の 3 本の線（chan 0-2）は 0x10・0x20・0x40
+	if (!m_vb_kind)
+		return;
+	// chan 0 は、本体が自分で作った演奏をボードへ聞かせる線（[AUDITION] の音符など。外から来た MIDI はここには
+	// 出てこない。実機ではコネクターの手前で MIDI IN A と合わさってボードに届くと思われる）。口 A の MIDI として聞く
+	if (chan == 0) {
+		vb_tap(byte, 0);
+		return;
+	}
 	// 架空のボードは PLG1 に挿さっている。PLG1 宛ての SysEx を 1 つずつ組み立てて読む
-	if (chan != 3 || !(targets & 1) || !m_vb_kind)
+	if (chan != 3 || !(targets & 1))
 		return;
 	if (byte == 0xf0)
 		m_vb_msg.clear();
