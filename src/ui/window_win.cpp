@@ -199,6 +199,10 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 
 	case WM_SIZE:
+		// 最小化は 0 × 0 で来る。大きさが変わったわけではないので、配置も
+		// 字も作り直さない（戻したときに同じ大きさでもう一度来る）
+		if (wp == SIZE_MINIMIZED)
+			return 0;
 		g_im.resize_w = LOWORD(lp);
 		g_im.resize_h = HIWORD(lp);
 		g_win->resized(LOWORD(lp), HIWORD(lp));

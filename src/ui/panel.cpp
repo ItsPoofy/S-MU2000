@@ -671,6 +671,13 @@ struct panel::lcd_canvas {
 		t = std::max(t, 0);
 		r = std::min(r, w);
 		b = std::min(b, h);
+		// Wholly outside. Each edge is clipped on its own, so a rect past the
+		// right edge comes out with l > r, and std::fill from a first beyond
+		// its last does not stop: it writes on through the heap. A minimized
+		// window gets there -- the LCD is a few dozen pixels then, and the
+		// dot grid (a pitch of at least one pixel) no longer fits inside it
+		if (l >= r || t >= b)
+			return;
 		const uint32_t v = 0xff000000u | (uint32_t(GetRValue(c)) << 16) |
 		                   (uint32_t(GetGValue(c)) << 8) | uint32_t(GetBValue(c));
 		for (int y = t; y < b; y++)
