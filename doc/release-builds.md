@@ -95,10 +95,19 @@ S-MU2000.AppDir/
   usr/bin/gui live render panel verify ...   # + bundled *.so* under usr/lib/
 ```
 
-Deps collected with `ldd` on `gui` (+ `libSDL3/cairo/asound/fontconfig` chain) and copied
-in; loader/`libc`/`libm`/NSS and the whole display stack (`libX*`, `xcb`, GL/EGL/Vulkan,
-Wayland, `xkbcommon`) are excluded and come from the host — bundling those breaks other
-distros. `appimagetool` produces `S-MU2000-x86_64.AppImage`. Only `gui` is the AppImage entry;
+Deps collected with `ldd` on `gui` (SDL3, cairo and what they pull in) and copied in. Left to the host:
+loader/`libc`/`libm`/NSS; the whole display stack (`libX*`, `xcb`, GL/EGL/Vulkan, Wayland, `xkbcommon`);
+**ALSA** (`libasound` reads the host's plug-ins and configuration to find the default device — a bundled
+copy answered "No such device" on openSUSE Tumbleweed, issue #135); and **fontconfig/freetype/expat/zlib and
+the compiler runtime** (an older bundled fontconfig cannot read a newer host's `/etc/fonts`). Bundling those
+breaks other distros; they are on the AppImage project's excludelist for the same reasons.
+
+The programs find the bundled libraries through an **rpath** (`$ORIGIN/../lib`, written by `patchelf`), not
+`LD_LIBRARY_PATH`: an exported path leaks into every program the gui starts, and SDL opens file dialogs by
+running the host's `zenity`, which then loaded our libraries and died with a symbol lookup error (#135).
+Without `patchelf` the script falls back to `LD_LIBRARY_PATH` and says so.
+
+`appimagetool` produces `S-MU2000-x86_64.AppImage`. Only `gui` is the AppImage entry;
 CLI/plug-in users take the tarball. AppImage is `chmod +x` and runs without `apt install`.
 
 ## Testing
