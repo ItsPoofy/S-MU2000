@@ -495,6 +495,14 @@ public:
 	              (unsigned long long)m_swp_w32, (unsigned long long)m_swp_r8); }
 
 	// SWP30 への書き込みを全部書き出す（MAME と突き合わせるため）
+	// PLG ボード用のシリアル（SCI4）のレジスタの読み書きを書き出す（調べもの用）
+	void set_plg_trace(std::FILE *f) { if (m_sci4) m_sci4->set_trace(f); }
+	// ---- PLG ボードの側をこちらで演じる（firmware にボードが挿さっていると思わせる。調べている途中）
+	// firmware がボードへ送ったバイト（slots はどのスロット宛てか。bit0 = PLG1）。音を作る糸から呼ばれる
+	using plg_tx_fn = std::function<void(int slots, u8 byte)>;
+	void set_plg_tx(plg_tx_fn fn);
+	// スロット（0-2）のボードから本体へ送るバイトを積む。本体がそのスロットを聞いているときに、31250bps の間隔で届く
+	void plg_reply(int slot, const std::vector<u8> &bytes);
 	void set_swp_trace(std::FILE *f, bool with_reads = false)
 	{ m_swp_trace = f; m_swp_trace_reads = with_reads; }
 
@@ -992,6 +1000,9 @@ private:
 	u32 m_vb_tick = 0;
 	float m_vb_gain[6] = { 0, 0, 0, 0, 0, 0 };   // dry 左右・reverb 左右・chorus 左右
 	bool m_vb_live = false;            // 入口にボードの音を入れてある（鳴りやんだら 1 度だけ空にする）
+	std::deque<u8> m_plg_rx[3];        // ボード → 本体の、まだ届けていないバイト
+	u32 m_plg_tick = 0;
+	void plg_pump();
 	void vb_tap(u8 byte, int port);
 	void vb_render();
 	bool m_mute_live = false;          // SWP30 に声のミュートを入れてある

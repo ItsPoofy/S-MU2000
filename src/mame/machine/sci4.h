@@ -10,6 +10,8 @@
 
 // S-MU2000: MAME 本体の代わりに互換層を使う
 #include "state.h"
+#include <cstdio>
+#include <functional>
 #include "../../compat/mamecompat.h"
 
 class sci4_device : public device_t
@@ -28,7 +30,19 @@ public:
 	template<int irq> auto write_irq() { return m_irq[irq].bind(); }
 
 	// S-MU2000: address_map の代わりに素の振り分け。中身は sci4.cpp の末尾
+	// S-MU2000: レジスタの読み書きを 1 行ずつ書き出す（PLG ボードとのやり取りを調べるとき。nullptr で止める）
+	void set_trace(std::FILE *f) { m_trace = f; }
+	// S-MU2000: PLG ボードの側をこちらで演じるための口（線の 1 ビットずつではなく、1 バイトずつ）。
+	//   tx_tap     firmware が送り出したバイト（chan 0-3、そのときの行き先の印 = targets の下 4 ビット）
+	//   rx_ready   その chan が次の 1 バイトを受け取れるか（受信が有効で、前のバイトを読み終えている）
+	//   rx_inject  1 バイト届いたことにする（受信完了の割り込みを上げる）
+	//   targets    chan 3 の行き先（下 4 ビット）と聞く相手（上 4 ビット）
+	void set_tx_tap(std::function<void(int chan, u8 targets, u8 byte)> fn) { m_tx_tap = std::move(fn); }
+	bool rx_ready(int chan) const { return (m_enable[chan] & 1) && m_status[chan] != 4 && m_status[chan] != 6; }
+	void rx_inject(int chan, u8 byte);
+	u8 targets() const { return m_targets; }
 	u8   read8 (offs_t offset);
+	u8   read8_raw(offs_t offset);
 	void write8(offs_t offset, u8 data);
 
 protected:
@@ -47,6 +61,8 @@ protected:
 	std::array<u8, 4> m_tdr, m_tsr, m_tdr_full, m_tx_step, m_tx_active;
 	std::array<u8, 4> m_rdr, m_rsr, m_rdr_full, m_rx_step, m_rx_active;
 	u8 m_targets = 0;
+	std::FILE *m_trace = nullptr;
+	std::function<void(int, u8, u8)> m_tx_tap;
 
 	void do_rx_w(int sci, int state);
 

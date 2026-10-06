@@ -3244,6 +3244,47 @@ void mu2000::clear_external_audio()
 	}
 }
 
+// ---- PLG ボードの側をこちらで演じる
+
+void mu2000::set_plg_tx(plg_tx_fn fn)
+{
+	if (!m_sci4)
+		return;
+	if (!fn) {
+		m_sci4->set_tx_tap(nullptr);
+		return;
+	}
+	// ボードへ行くのは chan 3（4 本に分かれる線。行き先の印の下 3 ビットが PLG1-3）
+	m_sci4->set_tx_tap([fn](int chan, u8 targets, u8 byte) {
+		if (chan == 3)
+			fn(targets & 7, byte);
+	});
+}
+
+void mu2000::plg_reply(int slot, const std::vector<u8> &bytes)
+{
+	if (slot < 0 || slot > 2)
+		return;
+	m_plg_rx[slot].insert(m_plg_rx[slot].end(), bytes.begin(), bytes.end());
+}
+
+// 積んであるバイトを 1 つ届ける。31250bps の 1 バイト（320 マイクロ秒）= 14 サンプルごとに、本体が聞いているスロットから
+void mu2000::plg_pump()
+{
+	if (m_plg_rx[0].empty() && m_plg_rx[1].empty() && m_plg_rx[2].empty())
+		return;
+	if (++m_plg_tick < 14 || !m_sci4->rx_ready(3))
+		return;
+	const u8 listen = m_sci4->targets() >> 4;
+	for (int s = 0; s < 3; s++)
+		if (((listen >> s) & 1) && !m_plg_rx[s].empty()) {
+			m_sci4->rx_inject(3, m_plg_rx[s].front());
+			m_plg_rx[s].pop_front();
+			m_plg_tick = 0;
+			return;
+		}
+}
+
 // ---- 架空のプラグインボード（src/vboard.h）
 
 void mu2000::set_virtual_board(int kind, int part)
@@ -3327,6 +3368,7 @@ void mu2000::run_sample(s32 &left, s32 &right)
 {
 	if (m_vb_kind)
 		vb_render();
+	plg_pump();
 	// S-MU2000: 軽量モードでは、XG の設定をときどき読み直す
 	if (m_nfx_on && !(++m_nfx_tick & 0x1ff))
 		native_fx_update();

@@ -23,6 +23,14 @@ sci4_device::sci4_device(const machine_config &mconfig, const char *tag, device_
 
 u8 sci4_device::read8(offs_t offset)
 {
+	const u8 v = read8_raw(offset);
+	if(m_trace)
+		std::fprintf(m_trace, "r %02x %02x\n", unsigned(offset), v);
+	return v;
+}
+
+u8 sci4_device::read8_raw(offs_t offset)
+{
 	if(offset < 0x20) {
 		switch(offset & 7) {
 		case 0: return data_r(offset);
@@ -37,6 +45,8 @@ u8 sci4_device::read8(offs_t offset)
 
 void sci4_device::write8(offs_t offset, u8 data)
 {
+	if(m_trace)
+		std::fprintf(m_trace, "w %02x %02x\n", unsigned(offset), data);
 	if(offset == 0x20) {
 		target_w(data);
 		return;
@@ -228,8 +238,17 @@ void sci4_device::tx_set(int chan, int state)
 
 }
 
+void sci4_device::rx_inject(int chan, u8 byte)
+{
+	m_rdr[chan] = byte;
+	m_status[chan] = 4;
+	m_irq[chan](1);
+}
+
 void sci4_device::fifo_w(int chan, u8 data)
 {
+	if(m_tx_tap && !(m_tdr_full[chan] && (m_enable[chan] & 4)))
+		m_tx_tap(chan, m_targets, data);
 	if(m_tdr_full[chan] && (m_enable[chan] & 4)) {
 		m_status[chan] = 6;
 		m_irq[chan](1);
