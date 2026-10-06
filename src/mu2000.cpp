@@ -3244,8 +3244,89 @@ void mu2000::clear_external_audio()
 	}
 }
 
+// ---- 架空のプラグインボード（src/vboard.h）
+
+void mu2000::set_virtual_board(int kind, int part)
+{
+	kind = kind == VBOARD_FC ? VBOARD_FC : VBOARD_NONE;
+	part = std::clamp(part, 0, 63);
+	if (kind == m_vb_kind && part == m_vb_part)
+		return;
+	m_vb_fc.reset();
+	for (vb_parse &p : m_vb_parse)
+		p = vb_parse();
+	m_vb_kind = kind;
+	m_vb_part = part;
+	m_vb_tick = 0;
+	if (m_vb_live) {
+		clear_external_audio();
+		m_vb_live = false;
+	}
+}
+
+// 入ってきた MIDI を 1 バイトずつ。チャンネルメッセージが揃ったら、ボードのパートのものだけを渡す
+void mu2000::vb_tap(u8 byte, int port)
+{
+	if (byte >= 0xf8 || port < 0 || port >= MIDI_PORTS)
+		return;
+	vb_parse &p = m_vb_parse[port];
+	if (byte & 0x80) {
+		p.status = byte < 0xf0 ? byte : 0;         // SysEx などの間は聞かない
+		p.n = 0;
+		return;
+	}
+	if (!p.status)
+		return;
+	p.d[p.n++] = byte;
+	const int need = (p.status & 0xe0) == 0xc0 ? 1 : 2;       // プログラムチェンジとチャンネルプレッシャーは 1 バイト
+	if (p.n < need)
+		return;
+	p.n = 0;
+	if (port != m_vb_part / 16)
+		return;
+	// そのパートの受信チャンネル（XG 08 pp 04。0-15、0x7f は受けない）
+	const u8 rcv = m_ram[xg::ram::part_base(m_vb_part) + 0x04];
+	if ((p.status & 15) != rcv)
+		return;
+	m_vb_fc.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
+}
+
+// 1 サンプルぶんのボードの音を、MU のエフェクトの入口へ入れる
+void mu2000::vb_render()
+{
+	if (!m_vb_fc.sounding()) {
+		if (m_vb_live) {
+			clear_external_audio();
+			m_vb_live = false;
+		}
+		return;
+	}
+	// パートの設定を 64 サンプル（1.5ms）ごとに読む。音量（08 pp 0B）× エクスプレッション、パン（0E）、
+	// コーラスの送り（12）、リバーブの送り（13）
+	if (!(m_vb_tick++ & 63)) {
+		const u32 pb = xg::ram::part_base(m_vb_part);
+		const float vol = smu2000::vboard::level_of(m_ram[pb + 0x0b]) * smu2000::vboard::level_of(m_ram[pb + xg::ram::PART_EXP]);
+		float pl = 1, pr = 1;
+		smu2000::vboard::pan_of(m_ram[pb + 0x0e], pl, pr);
+		const float cho = smu2000::vboard::level_of(m_ram[pb + 0x12]), rev = smu2000::vboard::level_of(m_ram[pb + 0x13]);
+		m_vb_gain[0] = vol * pl;
+		m_vb_gain[1] = vol * pr;
+		m_vb_gain[2] = vol * pl * rev;
+		m_vb_gain[3] = vol * pr * rev;
+		m_vb_gain[4] = vol * pl * cho;
+		m_vb_gain[5] = vol * pr * cho;
+	}
+	const float s = m_vb_fc.render();
+	set_external_audio(ext_bus::dry, s * m_vb_gain[0], s * m_vb_gain[1]);
+	set_external_audio(ext_bus::reverb, s * m_vb_gain[2], s * m_vb_gain[3]);
+	set_external_audio(ext_bus::chorus, s * m_vb_gain[4], s * m_vb_gain[5]);
+	m_vb_live = true;
+}
+
 void mu2000::run_sample(s32 &left, s32 &right)
 {
+	if (m_vb_kind)
+		vb_render();
 	// S-MU2000: 軽量モードでは、XG の設定をときどき読み直す
 	if (m_nfx_on && !(++m_nfx_tick & 0x1ff))
 		native_fx_update();
@@ -3255,7 +3336,8 @@ void mu2000::run_sample(s32 &left, s32 &right)
 		scope_refresh_owner();
 
 	// パートのミュート。消すパートの声を SWP30 に伝える（外したときは 1 度だけ空にする）
-	if (const u64 pm = m_part_mute.load(std::memory_order_relaxed); pm || m_mute_live) {
+	// 架空のボードを挿したパートは、内蔵の音を消す（ボードが代わりに鳴る）
+	if (const u64 pm = m_part_mute.load(std::memory_order_relaxed) | (m_vb_kind ? u64(1) << m_vb_part : 0); pm || m_mute_live) {
 		if (!pm || !(++m_mute_tick & 0x1f)) {
 			u64 vm[2] = { 0, 0 };
 			if (pm) {

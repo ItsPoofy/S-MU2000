@@ -115,8 +115,9 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	const ImVec2 avail = ImGui::GetContentRegionAvail();
 	const float row_h = ImGui::GetFrameHeightWithSpacing();
-	// 上の段はシステムエフェクトの表の行数（区画の見出し + 表の見出し + 7 行）で高さを決める
-	const float top_h = std::min(avail.y * 0.55f, row_h * 9.0f + fs * 1.5f);
+	// 上の段は、左の区画（システム・SysEx・架空のボード）が巻かずに収まる行数で高さを決める
+	// （システムエフェクトの表は 区画の見出し + 表の見出し + 7 行で、それより低い）
+	const float top_h = std::min(avail.y * 0.6f, row_h * 12.0f + fs * 1.5f);
 
 	// ---- 上の左: システム
 	const float sys_w = std::min(fs * 22.0f, avail.x * 0.35f);
@@ -131,6 +132,8 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_tune_note, "Tune moves in 0.1 cent steps,\ntranspose in semitones"));
 		ImGui::Spacing();
 		sysex_pane(ram, br);
+		ImGui::Spacing();
+		board_pane(br);
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
@@ -382,6 +385,35 @@ void master_editor::sysex_pane(const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_reading_defaults, "Reading defaults..."));
 	else if (!xgui::file_note().empty())
 		ImGui::TextDisabled("%s", xgui::file_note().c_str());
+}
+
+// 架空のプラグインボードを挿す・外す。実在しないボードを挿したことにして、選んだパートの MIDI で鳴らす。
+// 音は MU のミキサーとエフェクトを通り、そのパートの音量・パン・リバーブ／コーラスの送りが効く（src/vboard.h）
+void master_editor::board_pane(bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
+	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0';
+	bool changed = false;
+	ImGui::SetNextItemWidth(-fs * 9.5f);
+	changed |= ImGui::Combo("##board", &m_board_kind, kinds.c_str());
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. It plays from the MIDI of the part chosen below, in place of that part's own voice, and its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. The MU itself does not know the board is there (no PLG mark on the display).\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
+	ImGui::SameLine();
+	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::InputInt("##boardpart", &m_board_part)) {
+		m_board_part = std::clamp(m_board_part, 1, 64);
+		changed = true;
+	}
+	if (changed) {
+		const int kind = m_board_kind, part = m_board_part - 1;
+		br.post([kind, part](mu2000 &mu) {
+			mu.set_virtual_board(kind, part);
+			return std::string();
+		});
+	}
 }
 
 } // namespace ui

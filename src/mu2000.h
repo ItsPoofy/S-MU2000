@@ -13,6 +13,7 @@
 
 #include "compat/cli_text.h"
 #include "sampling.h"
+#include "vboard.h"
 #include "smartmedia.h"
 #include "state.h"
 #include "xg/native_driver.h"
@@ -143,6 +144,9 @@ public:
 	{
 		if (port < 0 || port >= MIDI_PORTS)
 			port = 0;
+		// 架空のボードが挿さっていれば、そのパートが受ける MIDI を聞かせる（firmware にも今までどおり渡す）
+		if (m_vb_kind)
+			vb_tap(byte, m_cable[port]);
 		// native の口が動いているときは、鍵の上げ下げをこちらで処理する
 		// （firmware に渡さない）。詳しくは xg/native_driver.h
 		if (m_native_engine && native_midi(byte, port))
@@ -275,6 +279,15 @@ public:
 	enum class ext_bus { dry, reverb, chorus, variation, insertion1, insertion2, insertion3, insertion4, count };
 	void set_external_audio(ext_bus bus, float left, float right);
 	void clear_external_audio();
+
+	// ---- 架空のプラグインボード（src/vboard.h）。kind は 0 = 挿さない、1 = FC ボード。part は 0-63（XG のパート番号）。
+	// ボードはそのパートが受ける MIDI で鳴り、内蔵の音はそのパートだけ消える。ボードの音には、そのパートの音量・
+	// エクスプレッション・パン・リバーブ／コーラスの送りが掛かる（ワーク RAM の XG の値を 64 サンプルごとに読む）。
+	// 挿している間、上の set_external_audio の dry・reverb・chorus はボードが使う。音を作る糸から呼ぶこと
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1 };
+	void set_virtual_board(int kind, int part);
+	int virtual_board_kind() const { return m_vb_kind; }
+	int virtual_board_part() const { return m_vb_part; }
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、
@@ -971,6 +984,16 @@ private:
 	std::array<std::atomic<u32>, 2> m_scope_w{};          // チップごとの書いた数
 	u32 m_scope_tick = 0;
 	std::atomic<u64> m_part_mute{0};   // set_part_mute
+	// 架空のボード
+	int m_vb_kind = 0, m_vb_part = 0;
+	smu2000::vboard::fc_board m_vb_fc;
+	struct vb_parse { u8 status = 0; u8 d[2] = { 0, 0 }; int n = 0; };
+	vb_parse m_vb_parse[MIDI_PORTS];
+	u32 m_vb_tick = 0;
+	float m_vb_gain[6] = { 0, 0, 0, 0, 0, 0 };   // dry 左右・reverb 左右・chorus 左右
+	bool m_vb_live = false;            // 入口にボードの音を入れてある（鳴りやんだら 1 度だけ空にする）
+	void vb_tap(u8 byte, int port);
+	void vb_render();
 	bool m_mute_live = false;          // SWP30 に声のミュートを入れてある
 	u32 m_mute_tick = 0;
 	static void scope_tap_fn(void *ctx, const s32 *samples);

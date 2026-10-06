@@ -1783,6 +1783,80 @@ int main(int argc, char **argv)
 				      std::to_string(level(ins_off, on, len) / in_rms) + "）、dry を止めた後 " + std::to_string(level(dry, off, tail) / in_rms));
 			}
 
+			// 架空のプラグインボード（src/vboard.h。mu2000::set_virtual_board）。FC ボードをパート 1 に挿して A4 を鳴らす:
+			// 矩形波なので 440Hz と、その 3 倍（3 分の 1 の大きさ）が出る。パートの音量を 0 にすると消える（内蔵の音も鳴らない）。
+			// パンを左に振ると右が消える。リバーブの送りを上げると、離した後に尾が残る。外すと内蔵の音に戻る
+			{
+				m.pump(3000);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int b : msg)
+						m.mu.midi_in(u8(b), 0);
+				};
+				struct shot { std::vector<double> l, r, mono; };
+				auto play = [&](u32 hold_ms, u32 tail_ms, int ch = 0) {
+					shot o;
+					m.pump(200);
+					send({ 0x90 | ch, 69, 127 });
+					for (u32 i = 0; i < RATE * (hold_ms + tail_ms) / 1000; i++) {
+						if (i == RATE * hold_ms / 1000)
+							send({ 0x80 | ch, 69, 0 });
+						m.pump(0);
+						s32 l, r;
+						m.mu.run_sample(l, r);
+						o.l.push_back(double(l) / mu2000::DAC_FULL_SCALE);
+						o.r.push_back(double(r) / mu2000::DAC_FULL_SCALE);
+						o.mono.push_back((double(l) + double(r)) * 0.5 / mu2000::DAC_FULL_SCALE);
+					}
+					m.pump(1500);
+					return o;
+				};
+				auto rms = [](const std::vector<double> &x, size_t from, size_t n) {
+					double q = 0;
+					for (size_t i = from; i < from + n && i < x.size(); i++)
+						q += x[i] * x[i];
+					return std::sqrt(q / double(n));
+				};
+				auto part_of = [](const std::vector<double> &x, size_t from, size_t n) {
+					return std::vector<double>(x.begin() + long(from), x.begin() + long(std::min(x.size(), from + n)));
+				};
+				const size_t on = RATE / 20, len = RATE / 5;
+				// XG の初期値に（音量 100・パン真ん中・リバーブ 40・コーラス 0）。プログラム 0 = 矩形波 50%
+				send({ 0xb0, 0, 0, 0xb0, 32, 0, 0xc0, 0, 0xb0, 7, 100, 0xb0, 10, 64, 0xb0, 11, 127, 0xb0, 91, 0, 0xb0, 93, 0 });
+				m.mu.set_virtual_board(mu2000::VBOARD_FC, 0);
+				const shot sq = play(300, 100);
+				const double f1 = tone(part_of(sq.mono, on, len), 440), f3 = tone(part_of(sq.mono, on, len), 1320),
+				             f2 = tone(part_of(sq.mono, on, len), 880);
+				send({ 0xb0, 7, 0 });
+				const shot quiet = play(300, 100);
+				send({ 0xb0, 7, 100, 0xb0, 10, 1 });
+				const shot left = play(300, 100);
+				send({ 0xb0, 10, 64 });
+				const shot dry_tail = play(200, 500);
+				send({ 0xb0, 91, 127 });
+				const shot rev_tail = play(200, 500);
+				send({ 0xb0, 91, 0 });
+				// ほかのチャンネルの音符では鳴らない（ボードはパート 1 の受信チャンネルだけ）
+				m.mu.set_part_mute(u64(1) << 2);              // 内蔵のパート 3 の音は消して、ボードが鳴っていないことだけを見る
+				const shot other = play(300, 100, 2);
+				m.mu.set_part_mute(0);
+				m.mu.set_virtual_board(mu2000::VBOARD_NONE, 0);
+				const shot inner = play(300, 100);
+				const size_t tail_at = RATE * 500 / 1000, tail_n = RATE / 10;
+				check(f1 > 0.01 && std::fabs(f3 / f1 - 1.0 / 3.0) < 0.05 && f2 < 0.05 * f1 &&
+				      rms(quiet.mono, on, len) < 0.002 * rms(sq.mono, on, len) &&
+				      rms(left.r, on, len) < 0.01 * rms(left.l, on, len) && rms(left.l, on, len) > 0.5 * rms(sq.l, on, len) &&
+				      rms(rev_tail.mono, tail_at, tail_n) > 10 * rms(dry_tail.mono, tail_at, tail_n) &&
+				      rms(other.mono, on, len) < 0.002 * rms(sq.mono, on, len) &&
+				      rms(inner.mono, on, len) > 0.003,
+				      "架空のボード（FC ボード）がパートの設定どおりに鳴る",
+				      "440Hz " + std::to_string(f1) + "、3 倍音 " + std::to_string(f3 / f1) + " 倍、音量 0 で " +
+				      std::to_string(rms(quiet.mono, on, len) / rms(sq.mono, on, len)) + " 倍、左に振って右は左の " +
+				      std::to_string(rms(left.r, on, len) / std::max(1e-12, rms(left.l, on, len))) + " 倍、尾 リバーブあり " +
+				      std::to_string(rms(rev_tail.mono, tail_at, tail_n)) + " / なし " + std::to_string(rms(dry_tail.mono, tail_at, tail_n)) +
+				      "、別のチャンネル " + std::to_string(rms(other.mono, on, len)) + "、外すと内蔵の音 " +
+				      std::to_string(rms(inner.mono, on, len)));
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])
