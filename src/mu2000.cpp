@@ -1086,6 +1086,11 @@ void mu2000::start_devices()
 void mu2000::reset()
 {
 	std::memset(m_cc_last, 0xff, sizeof(m_cc_last));
+	// ボードとのやり取りは起動のたびにやり直す
+	for (auto &q : m_plg_rx)
+		q.clear();
+	m_vb_msg.clear();
+	m_vb_known = false;
 	// 実機の M37640 は、PC に繋がっていると「ホストが居る」を知らせてくる
 	// （状態の bit6 を立てて F4 03 01 01 01。0x43810 が受け、0x43DAD1 を 1 にする）。
 	// これが来ないと、HOST SELECT が USB のとき firmware は起動の途中（0x1167CE）で
@@ -1165,6 +1170,7 @@ void mu2000::reset()
 	m_sci4->write_irq<0>().set([this](int s) { m_sci_irq[0] = s; update_sci_irq(); });
 	m_sci4->write_irq<1>().set([this](int s) { m_sci_irq[1] = s; update_sci_irq(); });
 	m_sci4->write_irq<3>().set([this](int s) { m_cpu->execute_set_input(1, s); });
+	m_sci4->set_tx_tap([this](int chan, u8 targets, u8 byte) { plg_tx_byte(chan, targets, byte); });
 
 	// 2 個のチップで乱数の数列を分ける。同じ種だと雑音まで揃ってしまう
 	m_swpm.set_rand_seed(0x9d14abd7);
@@ -3248,19 +3254,30 @@ void mu2000::clear_external_audio()
 
 void mu2000::set_plg_tx(plg_tx_fn fn)
 {
-	if (!m_sci4)
+	m_plg_user = std::move(fn);
+}
+
+// firmware が SCI4 へ書いた 1 バイト。ボードへ行くのは chan 3（4 本に分かれる線。行き先の印の下 3 ビットが PLG1-3）
+void mu2000::plg_tx_byte(int chan, u8 targets, u8 byte)
+{
+	if (m_plg_user)
+		m_plg_user(chan == 3 ? targets & 7 : 0x10 << chan, byte);      // 別々の 3 本の線（chan 0-2）は 0x10・0x20・0x40
+	// 架空のボードは PLG1 に挿さっている。PLG1 宛ての SysEx を 1 つずつ組み立てて読む
+	if (chan != 3 || !(targets & 1) || !m_vb_kind)
 		return;
-	if (!fn) {
-		m_sci4->set_tx_tap(nullptr);
+	if (byte == 0xf0)
+		m_vb_msg.clear();
+	else if (m_vb_msg.empty())
 		return;
+	if (byte >= 0xf8)
+		return;
+	m_vb_msg.push_back(byte);
+	if (byte == 0xf7) {
+		vb_from_firmware(m_vb_msg);
+		m_vb_msg.clear();
+	} else if (m_vb_msg.size() > 64) {
+		m_vb_msg.clear();
 	}
-	// ボードへ行くのは chan 3（4 本に分かれる線。行き先の印の下 3 ビットが PLG1-3）
-	m_sci4->set_tx_tap([fn](int chan, u8 targets, u8 byte) {
-		if (chan == 3)
-			fn(targets & 7, byte);
-		else
-			fn(0x10 << chan, byte);       // 別々の 3 本の線（chan 0-2）。0x10・0x20・0x40 で知らせる
-	});
 }
 
 void mu2000::plg_reply(int slot, const std::vector<u8> &bytes)
@@ -3293,18 +3310,102 @@ void mu2000::set_virtual_board(int kind, int part)
 {
 	kind = kind == VBOARD_FC ? VBOARD_FC : VBOARD_NONE;
 	part = std::clamp(part, 0, 63);
-	if (kind == m_vb_kind && part == m_vb_part)
+	if (kind == m_vb_kind && part == m_vb_part && m_vb_on)
 		return;
 	m_vb_fc.reset();
 	for (vb_parse &p : m_vb_parse)
 		p = vb_parse();
+	const bool moved = part != m_vb_part || !m_vb_on;
 	m_vb_kind = kind;
 	m_vb_part = part;
+	m_vb_on = true;
 	m_vb_tick = 0;
 	if (m_vb_live) {
 		clear_external_audio();
 		m_vb_live = false;
 	}
+	// firmware がボードを知っているなら、メニューの PartAssign も同じ値にする。
+	// XG の「プラグインボードのパートの割り当て」（4C 70 00 00）を MIDI で送ると firmware は控えを書き換える。
+	// 演奏の途中のメッセージに割り込みにくいよう、口 B から入れる（C・D は HOST SELECT が USB のときしか受けない）
+	if (kind && m_vb_known && moved && part < 16) {
+		const u8 msg[] = { 0xf0, 0x43, 0x10, 0x4c, 0x70, 0x00, 0x00, u8(part), 0xf7 };
+		for (u8 x : msg)
+			midi_in(x, 1);
+	}
+}
+
+// PartAssign の値（0-15、0x7f = off）。firmware のメニューか、MIDI の XG メッセージから来る
+void mu2000::vb_assign(u8 value)
+{
+	const bool on = value < 16;
+	if (on == m_vb_on && (!on || value == m_vb_part))
+		return;
+	m_vb_fc.reset();
+	m_vb_on = on;
+	if (on)
+		m_vb_part = value;
+	m_vb_tick = 0;
+}
+
+// firmware から PLG1 のボードへ来た SysEx に答える。形は doc/plg-protocol.md
+void mu2000::vb_from_firmware(const std::vector<u8> &m)
+{
+	if (m.size() < 8 || m[1] != 0x43)
+		return;
+	const u8 part = m_vb_on && m_vb_part < 16 ? u8(m_vb_part) : 0x7f;
+	const auto reply = [this](std::vector<u8> r) {
+		r.push_back(0xf7);
+		plg_reply(0, r);
+	};
+	// 機種 4E: ボードの素性
+	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4e && m.size() == 8) {
+		const u32 addr = u32(m[4]) << 16 | u32(m[5]) << 8 | m[6];
+		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4e, m[4], m[5], m[6] };
+		switch (addr) {
+		case 0x011000:                     // 種類（0 = 1 パートのボード）・番号・?
+			r.insert(r.end(), { 0x00, 0x01, 0x00 });
+			m_vb_known = true;
+			break;
+		case 0x010000: {                   // 名前 14 文字
+			static const char name[] = "FC BOARD      ";
+			r.insert(r.end(), name, name + 14);
+			break;
+		}
+		case 0x010010:                     // 48 バイト（意味は分かっていない。0 で通る）
+			r.insert(r.end(), 48, 0x00);
+			break;
+		case 0x011010:                     // SYS のパラメーターの数
+		case 0x011011:                     // PART のパラメーターの数（0 だと firmware が起動の途中で止まる）
+			r.push_back(0x01);
+			break;
+		default:                           // 残りは 1 バイトずつ。バンクの数（01 10 13）も 0
+			r.push_back(0x00);
+			break;
+		}
+		reply(std::move(r));
+		return;
+	}
+	// 機種 4F: パラメーターの表。番地 4 バイトと大きさ
+	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4f && m.size() == 9 && m[4] == 0x7f && m[5] == 0x00 && m[7] == 0x00) {
+		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4f, 0x7f, 0x00, m[6] };
+		if (m[6] == 0x00)
+			r.insert(r.end(), { 0x4c, 0x70, 0x00, 0x00, 0x01 });      // SYS: PartAssign
+		else if (m[6] == 0x01)
+			r.insert(r.end(), { 0x4c, 0x08, 0x00, 0x07, 0x01 });      // PART: 1 つは要る。パートのモードを挙げておく
+		else
+			return;
+		reply(std::move(r));
+		return;
+	}
+	// いまの値を聞かれた: F0 43 40 03 <番地 4> 40 <大きさ> 00 F7
+	if (m[2] == 0x40 && m[3] == 0x03 && m.size() == 12) {
+		const bool assign = m[4] == 0x4c && m[5] == 0x70;
+		reply({ 0xf0, 0x43, 0x40, 0x40, m[4], m[5], m[6], m[7], 0x01, assign ? part : u8(0x00) });
+		return;
+	}
+	// メニューで PartAssign が変わった: F0 43 1n 4C 70 00 00 <パート> F7
+	if ((m[2] & 0xf0) == 0x10 && m[3] == 0x4c && m[4] == 0x70 && m[5] == 0x00 && m[6] == 0x00 && m.size() == 9)
+		vb_assign(m[7]);
 }
 
 // 入ってきた MIDI を 1 バイトずつ。チャンネルメッセージが揃ったら、ボードのパートのものだけを渡す
@@ -3313,6 +3414,21 @@ void mu2000::vb_tap(u8 byte, int port)
 	if (byte >= 0xf8 || port < 0 || port >= MIDI_PORTS)
 		return;
 	vb_parse &p = m_vb_parse[port];
+	// SysEx は XG のパートの割り当て（F0 43 1n 4C 70 00 00 pp F7）だけ読む。firmware はこれをボードへは回してこない
+	std::vector<u8> &sx = m_vb_sx[port];
+	if (byte == 0xf0) {
+		sx.assign(1, byte);
+	} else if (!sx.empty()) {
+		if (byte == 0xf7) {
+			if (sx.size() == 8 && sx[1] == 0x43 && (sx[2] & 0xf0) == 0x10 && sx[3] == 0x4c && sx[4] == 0x70 && sx[5] == 0x00 && sx[6] == 0x00)
+				vb_assign(sx[7]);
+			sx.clear();
+		} else if ((byte & 0x80) || sx.size() >= 8) {
+			sx.clear();
+		} else {
+			sx.push_back(byte);
+		}
+	}
 	if (byte & 0x80) {
 		p.status = byte < 0xf0 ? byte : 0;         // SysEx などの間は聞かない
 		p.n = 0;
@@ -3325,7 +3441,7 @@ void mu2000::vb_tap(u8 byte, int port)
 	if (p.n < need)
 		return;
 	p.n = 0;
-	if (port != m_vb_part / 16)
+	if (!m_vb_on || port != m_vb_part / 16)
 		return;
 	// そのパートの受信チャンネル（XG 08 pp 04。0-15、0x7f は受けない）
 	const u8 rcv = m_ram[xg::ram::part_base(m_vb_part) + 0x04];
@@ -3381,7 +3497,7 @@ void mu2000::run_sample(s32 &left, s32 &right)
 
 	// パートのミュート。消すパートの声を SWP30 に伝える（外したときは 1 度だけ空にする）
 	// 架空のボードを挿したパートは、内蔵の音を消す（ボードが代わりに鳴る）
-	if (const u64 pm = m_part_mute.load(std::memory_order_relaxed) | (m_vb_kind ? u64(1) << m_vb_part : 0); pm || m_mute_live) {
+	if (const u64 pm = m_part_mute.load(std::memory_order_relaxed) | (m_vb_kind && m_vb_on ? u64(1) << m_vb_part : 0); pm || m_mute_live) {
 		if (!pm || !(++m_mute_tick & 0x1f)) {
 			u64 vm[2] = { 0, 0 };
 			if (pm) {

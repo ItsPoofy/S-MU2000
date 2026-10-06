@@ -398,7 +398,7 @@ void master_editor::board_pane(bridge &br)
 	ImGui::SetNextItemWidth(-fs * 9.5f);
 	changed |= ImGui::Combo("##board", &m_board_kind, kinds.c_str());
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. It plays from the MIDI of the part chosen below, in place of that part's own voice, and its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. The MU itself does not know the board is there (no PLG mark on the display).\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. It plays from the MIDI of the part chosen below, in place of that part's own voice, and its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. Plugged in while the MU starts, it answers the MU's plug-in board check: the MU lists it under UTIL > PLG, and PartAssign there moves it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
 	ImGui::SameLine();
 	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
 	ImGui::SameLine();
@@ -407,13 +407,37 @@ void master_editor::board_pane(bridge &br)
 		m_board_part = std::clamp(m_board_part, 1, 64);
 		changed = true;
 	}
+	const double now = ImGui::GetTime();
 	if (changed) {
 		const int kind = m_board_kind, part = m_board_part - 1;
 		br.post([kind, part](mu2000 &mu) {
 			mu.set_virtual_board(kind, part);
 			return std::string();
 		});
+		m_board_touched = now;
+		m_board_seen->store(-1);
 	}
+	if (!m_board_kind)
+		return;
+	// MU の側でパートが変わっていたら欄を合わせる（自分で変えた直後は、古い返事で戻さないよう少し待つ）
+	if (now - m_board_asked > 0.5) {
+		m_board_asked = now;
+		br.post([seen = m_board_seen](mu2000 &mu) {
+			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0));
+			return std::string();
+		});
+	}
+	const int seen = m_board_seen->load();
+	if (seen < 0 || now - m_board_touched < 1.0)
+		return;
+	if ((seen & 0xff) && (seen & 0xff) != m_board_part)
+		m_board_part = seen & 0xff;
+	if (!(seen & 0x100))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_unknown, "The MU has not noticed it yet: power the MU off and on to list it under UTIL > PLG"));
+	else if (!(seen & 0xff))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_off, "Listed under UTIL > PLG. PartAssign is off there, so the board is silent"));
+	else
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_known, "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)"));
 }
 
 } // namespace ui

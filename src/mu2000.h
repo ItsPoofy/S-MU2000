@@ -283,11 +283,18 @@ public:
 	// ---- 架空のプラグインボード（src/vboard.h）。kind は 0 = 挿さない、1 = FC ボード。part は 0-63（XG のパート番号）。
 	// ボードはそのパートが受ける MIDI で鳴り、内蔵の音はそのパートだけ消える。ボードの音には、そのパートの音量・
 	// エクスプレッション・パン・リバーブ／コーラスの送りが掛かる（ワーク RAM の XG の値を 64 サンプルごとに読む）。
-	// 挿している間、上の set_external_audio の dry・reverb・chorus はボードが使う。音を作る糸から呼ぶこと
+	// 挿している間、上の set_external_audio の dry・reverb・chorus はボードが使う。音を作る糸から呼ぶこと。
+	//
+	// 挿したまま reset すると、firmware の「Checking PLG」の問い合わせに PLG1 のボードとして答える
+	// （やり取りの形は doc/plg-protocol.md）。firmware は UTIL → PLG にボードを並べ、そこの PartAssign を変えると
+	// こちらのパートも変わる（virtual_board_part で読める。off にするとボードは黙り、内蔵の音が戻る）。
+	// 起動のあとで挿したときは firmware は知らないままで、パートはここで決めたとおりに鳴る
 	enum { VBOARD_NONE = 0, VBOARD_FC = 1 };
 	void set_virtual_board(int kind, int part);
 	int virtual_board_kind() const { return m_vb_kind; }
 	int virtual_board_part() const { return m_vb_part; }
+	bool virtual_board_assigned() const { return m_vb_on; }     // false: firmware の PartAssign が off
+	bool virtual_board_known() const { return m_vb_known; }     // firmware がボードを見つけている
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、
@@ -1003,6 +1010,14 @@ private:
 	bool m_vb_live = false;            // 入口にボードの音を入れてある（鳴りやんだら 1 度だけ空にする）
 	std::deque<u8> m_plg_rx[3];        // ボード → 本体の、まだ届けていないバイト
 	u32 m_plg_tick = 0;
+	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
+	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
+	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
+	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx
+	std::vector<u8> m_vb_sx[MIDI_PORTS];   // MIDI で来た SysEx（パートの割り当てだけ読む）
+	void plg_tx_byte(int chan, u8 targets, u8 byte);
+	void vb_from_firmware(const std::vector<u8> &m);
+	void vb_assign(u8 value);
 	void plg_pump();
 	void vb_tap(u8 byte, int port);
 	void vb_render();

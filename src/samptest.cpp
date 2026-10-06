@@ -1857,6 +1857,53 @@ int main(int argc, char **argv)
 				      std::to_string(rms(inner.mono, on, len)));
 			}
 
+			// 架空のボードを挿したまま起動すると、firmware の「Checking PLG」に答える（doc/plg-protocol.md）。
+			// firmware は UTIL → PLG にボードを並べ、そこの PartAssign を [VALUE] で変えるとボードのパートも動く。
+			// off まで回すとボードは外れた扱い。外から set_virtual_board で動かすと、メニューの値も付いてくる。
+			// XG のメッセージ（4C 70 00 00 pp）でも動く
+			{
+				using B = mu2000::button;
+				static rig p;
+				if (!p.mu.load_program(dir + "/mu2000_flash.bin") || !p.mu.load_wave(dir + "/dump"))
+					return 1;
+				p.mu.load_sintab(dir + "/standin/sin-table.bin");
+				p.mu.set_virtual_board(mu2000::VBOARD_FC, 2);
+				p.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !p.mu.midi_ready(); i += RATE / 100)
+					p.pump(10);
+				p.pump(3000);
+				const bool known = p.mu.virtual_board_known();
+				p.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					p.press(B::select_right, 150);
+				p.press(B::enter, 150);
+				const std::string list = p.lcd();
+				p.press(B::enter, 150);
+				const std::string page = p.lcd();
+				p.press(B::value_minus, 150);
+				const std::string down = p.lcd();
+				const int part_down = p.mu.virtual_board_part();
+				for (int i = 0; i < 20; i++)
+					p.press(B::value_plus, 150);
+				const std::string off = p.lcd();
+				const bool off_seen = !p.mu.virtual_board_assigned();
+				p.mu.set_virtual_board(mu2000::VBOARD_FC, 5);
+				p.pump(1000);
+				const std::string outside = p.lcd();
+				for (int x : { 0xf0, 0x43, 0x10, 0x4c, 0x70, 0x00, 0x00, 0x09, 0xf7 })
+					p.mu.midi_in(u8(x), 0);
+				p.pump(1000);
+				const std::string by_xg = p.lcd();
+				const int part_xg = p.mu.virtual_board_part();
+				auto has = [](const std::string &t, const char *what) { return t.find(what) != std::string::npos; };
+				check(known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
+				      has(down, "PartAssign=02") && part_down == 1 && has(off, "PartAssign=off") && off_seen &&
+				      has(outside, "PartAssign=06") && has(by_xg, "PartAssign=10") && part_xg == 9 && p.mu.virtual_board_assigned(),
+				      "架空のボードを firmware が見つけて、UTIL → PLG の PartAssign で動かせる",
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + list + "] [" + page + "] [" + down + "] パート " +
+				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])
