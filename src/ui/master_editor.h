@@ -17,6 +17,9 @@
 
 #include "xg_ui.h"
 
+#include <atomic>
+#include <memory>
+
 namespace ui {
 
 class master_editor : public imgui_view
@@ -27,12 +30,19 @@ public:
 		return get_lang() == lang::ja ? L"S-MU2000 マスター" : L"S-MU2000 Master";
 	}
 	int default_width() const override  { return 900; }
-	int default_height() const override { return 560; }
+	int default_height() const override { return 640; }
 	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
 
 private:
 	// .syx の書き出し・読み込み（issue #35）
 	void sysex_pane(const xg_snapshot &ram, bridge &br);
+	// 架空のプラグインボード（src/vboard.h）。挿すボードと、挿すパート（1-64）
+	void board_pane(bridge &br);
+	int m_board_kind = 0, m_board_part = 1;
+	// 音源の側のいまの様子（音声の糸が置く）。下 8 ビットがパート（1-64、0 は MU のメニューで off）、bit8 が「MU がボードを見つけている」。
+	// MU のメニュー（UTIL → PLG）でパートを変えられるので、ときどき聞いて欄を合わせる
+	std::shared_ptr<std::atomic<int>> m_board_seen = std::make_shared<std::atomic<int>>(-1);
+	double m_board_asked = 0, m_board_touched = -10;
 	bool m_diff_only = true;              // 既定と違うものだけ書き出す
 	bool m_export_waiting = false;        // 既定値ができるのを待っている（bridge の request_defaults）
 	std::vector<u8> m_import;             // 読み込んだ中身。1 通ずつ音源へ流す

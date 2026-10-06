@@ -115,8 +115,9 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	const ImVec2 avail = ImGui::GetContentRegionAvail();
 	const float row_h = ImGui::GetFrameHeightWithSpacing();
-	// 上の段はシステムエフェクトの表の行数（区画の見出し + 表の見出し + 7 行）で高さを決める
-	const float top_h = std::min(avail.y * 0.55f, row_h * 9.0f + fs * 1.5f);
+	// 上の段は、左の区画（システム・SysEx・架空のボード）が巻かずに収まる行数で高さを決める
+	// （システムエフェクトの表は 区画の見出し + 表の見出し + 7 行で、それより低い）
+	const float top_h = std::min(avail.y * 0.6f, row_h * 12.0f + fs * 1.5f);
 
 	// ---- 上の左: システム
 	const float sys_w = std::min(fs * 22.0f, avail.x * 0.35f);
@@ -131,6 +132,8 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_tune_note, "Tune moves in 0.1 cent steps,\ntranspose in semitones"));
 		ImGui::Spacing();
 		sysex_pane(ram, br);
+		ImGui::Spacing();
+		board_pane(br);
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
@@ -382,6 +385,75 @@ void master_editor::sysex_pane(const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_reading_defaults, "Reading defaults..."));
 	else if (!xgui::file_note().empty())
 		ImGui::TextDisabled("%s", xgui::file_note().c_str());
+}
+
+// 架空のプラグインボードを挿す・外す。実在しないボードを挿したことにして、選んだパートの MIDI で鳴らす。
+// 音は MU のミキサーとエフェクトを通り、そのパートの音量・パン・リバーブ／コーラスの送りが効く（src/vboard.h）
+void master_editor::board_pane(bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
+	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0';
+	bool changed = false;
+	ImGui::SetNextItemWidth(-fs * 9.5f);
+	changed |= ImGui::Combo("##board", &m_board_kind, kinds.c_str());
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. Plugged in while the MU starts, it answers the MU's plug-in board check: the MU lists it under UTIL > PLG, and PartAssign there moves it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
+	ImGui::SameLine();
+	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::InputInt("##boardpart", &m_board_part)) {
+		m_board_part = std::clamp(m_board_part, 1, 64);
+		changed = true;
+	}
+	const double now = ImGui::GetTime();
+	if (changed) {
+		const int kind = m_board_kind, part = m_board_part - 1;
+		br.post([kind, part](mu2000 &mu) {
+			// 実機と同じで、ボードは「割り当てたパートでボードのバンクを選んだとき」だけ鳴る。ここで挿したときは、
+			// 手間を省いてそのパートにボードのバンクを選んでおく。外した・動かしたときは、元のパートをふつうのバンクに戻す
+			// （ボードのバンクのままだと、内蔵の音源では無音になる）
+			const auto select = [&mu](int p, int msb, int lsb) {
+				const u8 ch = u8(p % 16);
+				for (int b : { 0xb0 | ch, 0, msb, 0xb0 | ch, 32, lsb, 0xc0 | ch, 0 })
+					mu.midi_in(u8(b), p / 16);
+			};
+			const int old_kind = mu.virtual_board_kind(), old_part = mu.virtual_board_part();
+			if (old_kind && mu.virtual_board_playing() && (!kind || old_part != part))
+				select(old_part, 0, 0);
+			mu.set_virtual_board(kind, part);
+			if (kind && (!old_kind || old_part != part))
+				select(part, mu2000::VBOARD_BANK_MSB, mu2000::VBOARD_BANK_LSB);
+			return std::string();
+		});
+		m_board_touched = now;
+		m_board_seen->store(-1);
+	}
+	if (!m_board_kind)
+		return;
+	// MU の側でパートが変わっていたら欄を合わせる（自分で変えた直後は、古い返事で戻さないよう少し待つ）
+	if (now - m_board_asked > 0.5) {
+		m_board_asked = now;
+		br.post([seen = m_board_seen](mu2000 &mu) {
+			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0) |
+			            (mu.virtual_board_playing() ? 0x200 : 0));
+			return std::string();
+		});
+	}
+	const int seen = m_board_seen->load();
+	if (seen < 0 || now - m_board_touched < 1.0)
+		return;
+	if ((seen & 0xff) && (seen & 0xff) != m_board_part)
+		m_board_part = seen & 0xff;
+	if ((seen & 0xff) && !(seen & 0x200))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB 90, LSB 0 there to hear the board"));
+	if (!(seen & 0x100))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_unknown, "The MU has not noticed it yet: power the MU off and on to list it under UTIL > PLG"));
+	else if (!(seen & 0xff))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_off, "Listed under UTIL > PLG. PartAssign is off there, so the board is silent"));
+	else
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_known, "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)"));
 }
 
 } // namespace ui

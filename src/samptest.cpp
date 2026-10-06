@@ -1846,6 +1846,146 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(level(ins_off, on, len) / in_rms) + "）、dry を止めた後 " + std::to_string(level(dry, off, tail) / in_rms));
 			}
 
+			// 架空のプラグインボード（src/vboard.h。mu2000::set_virtual_board）。FC ボードをパート 1 に挿して A4 を鳴らす:
+			// 矩形波なので 440Hz と、その 3 倍（3 分の 1 の大きさ）が出る。パートの音量を 0 にすると消える（内蔵の音も鳴らない）。
+			// パンを左に振ると右が消える。リバーブの送りを上げると、離した後に尾が残る。外すと内蔵の音に戻る
+			{
+				m.pump(3000);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int b : msg)
+						m.mu.midi_in(u8(b), 0);
+				};
+				struct shot { std::vector<double> l, r, mono; };
+				auto play = [&](u32 hold_ms, u32 tail_ms, int ch = 0) {
+					shot o;
+					m.pump(200);
+					send({ 0x90 | ch, 69, 127 });
+					for (u32 i = 0; i < RATE * (hold_ms + tail_ms) / 1000; i++) {
+						if (i == RATE * hold_ms / 1000)
+							send({ 0x80 | ch, 69, 0 });
+						m.pump(0);
+						s32 l, r;
+						m.mu.run_sample(l, r);
+						o.l.push_back(double(l) / mu2000::DAC_FULL_SCALE);
+						o.r.push_back(double(r) / mu2000::DAC_FULL_SCALE);
+						o.mono.push_back((double(l) + double(r)) * 0.5 / mu2000::DAC_FULL_SCALE);
+					}
+					m.pump(1500);
+					return o;
+				};
+				auto rms = [](const std::vector<double> &x, size_t from, size_t n) {
+					double q = 0;
+					for (size_t i = from; i < from + n && i < x.size(); i++)
+						q += x[i] * x[i];
+					return std::sqrt(q / double(n));
+				};
+				auto part_of = [](const std::vector<double> &x, size_t from, size_t n) {
+					return std::vector<double>(x.begin() + long(from), x.begin() + long(std::min(x.size(), from + n)));
+				};
+				const size_t on = RATE / 20, len = RATE / 5;
+				// XG の初期値に（音量 100・パン真ん中・リバーブ 40・コーラス 0）。プログラム 0 = 矩形波 50%
+				// ボードは、挿しただけでは鳴らない（内蔵の音のまま）。そのパートでボードのバンク（MSB 90）を選ぶと鳴る
+				send({ 0xb0, 0, 0, 0xb0, 32, 0, 0xc0, 0, 0xb0, 7, 100, 0xb0, 10, 64, 0xb0, 11, 127, 0xb0, 91, 0, 0xb0, 93, 0 });
+				m.mu.set_virtual_board(mu2000::VBOARD_FC, 0);
+				const shot before = play(300, 100);
+				const bool idle = !m.mu.virtual_board_playing();
+				send({ 0xb0, 0, int(mu2000::VBOARD_BANK_MSB), 0xb0, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0, 0 });
+				const shot sq = play(300, 100);
+				const bool live = m.mu.virtual_board_playing();
+				const double f1 = tone(part_of(sq.mono, on, len), 440), f3 = tone(part_of(sq.mono, on, len), 1320),
+				             f2 = tone(part_of(sq.mono, on, len), 880);
+				send({ 0xb0, 7, 0 });
+				const shot quiet = play(300, 100);
+				send({ 0xb0, 7, 100, 0xb0, 10, 1 });
+				const shot left = play(300, 100);
+				send({ 0xb0, 10, 64 });
+				const shot dry_tail = play(200, 500);
+				send({ 0xb0, 91, 127 });
+				const shot rev_tail = play(200, 500);
+				send({ 0xb0, 91, 0 });
+				// ほかのチャンネルの音符では鳴らない（ボードはパート 1 の受信チャンネルだけ）
+				m.mu.set_part_mute(u64(1) << 2);              // 内蔵のパート 3 の音は消して、ボードが鳴っていないことだけを見る
+				const shot other = play(300, 100, 2);
+				m.mu.set_part_mute(0);
+				// 同じパートでふつうのバンクに戻すと、ボードは挿したままでも内蔵の音に戻る
+				send({ 0xb0, 0, 0, 0xb0, 32, 0, 0xc0, 0 });
+				const shot inner = play(300, 100);
+				const double f1_inner = tone(part_of(inner.mono, on, len), 440), f2_inner = tone(part_of(inner.mono, on, len), 880);
+				m.mu.set_virtual_board(mu2000::VBOARD_NONE, 0);
+				const size_t tail_at = RATE * 500 / 1000, tail_n = RATE / 10;
+				check(f1 > 0.01 && std::fabs(f3 / f1 - 1.0 / 3.0) < 0.05 && f2 < 0.05 * f1 &&
+				      rms(quiet.mono, on, len) < 0.002 * rms(sq.mono, on, len) &&
+				      rms(left.r, on, len) < 0.01 * rms(left.l, on, len) && rms(left.l, on, len) > 0.5 * rms(sq.l, on, len) &&
+				      rms(rev_tail.mono, tail_at, tail_n) > 10 * rms(dry_tail.mono, tail_at, tail_n) &&
+				      rms(other.mono, on, len) < 0.002 * rms(sq.mono, on, len) &&
+				      rms(inner.mono, on, len) > 0.003 && idle && live && rms(before.mono, on, len) > 0.003 &&
+				      f2_inner > 0.05 * f1_inner,          // 矩形波には無い 2 倍音がある = 内蔵のピアノ
+				      "架空のボード（FC ボード）が、ボードのバンクを選んだパートで、パートの設定どおりに鳴る",
+				      "440Hz " + std::to_string(f1) + "、3 倍音 " + std::to_string(f3 / f1) + " 倍、音量 0 で " +
+				      std::to_string(rms(quiet.mono, on, len) / rms(sq.mono, on, len)) + " 倍、左に振って右は左の " +
+				      std::to_string(rms(left.r, on, len) / std::max(1e-12, rms(left.l, on, len))) + " 倍、尾 リバーブあり " +
+				      std::to_string(rms(rev_tail.mono, tail_at, tail_n)) + " / なし " + std::to_string(rms(dry_tail.mono, tail_at, tail_n)) +
+				      "、別のチャンネル " + std::to_string(rms(other.mono, on, len)) + "、ふつうのバンクに戻すと内蔵の音 " +
+				      std::to_string(rms(inner.mono, on, len)) + "（2 倍音 " + std::to_string(f2_inner / std::max(1e-12, f1_inner)) +
+				      " 倍）、バンクを選ぶ前 " + std::to_string(rms(before.mono, on, len)) + (idle ? "" : "（もう鳴っている）") + (live ? "" : "（選んでも鳴らない）"));
+			}
+
+			// 架空のボードを挿したまま起動すると、firmware の「Checking PLG」に答える（doc/plg-protocol.md）。
+			// firmware は UTIL → PLG にボードを並べ、そこの PartAssign を [VALUE] で変えるとボードのパートも動く。
+			// off まで回すとボードは外れた扱い。外から set_virtual_board で動かすと、メニューの値も付いてくる。
+			// XG のメッセージ（4C 70 00 00 pp）でも動く
+			{
+				using B = mu2000::button;
+				static rig p;
+				if (!p.mu.load_program(dir + "/mu2000_flash.bin") || !p.mu.load_wave(dir + "/dump"))
+					return 1;
+				p.mu.load_sintab(dir + "/standin/sin-table.bin");
+				p.mu.set_virtual_board(mu2000::VBOARD_FC, 2);
+				p.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !p.mu.midi_ready(); i += RATE / 100)
+					p.pump(10);
+				p.pump(3000);
+				const bool known = p.mu.virtual_board_known();
+				// パート 3 を出して MIDI でボードのバンクを選び、パネルで音色を 1 つ進める。液晶にボードが答えた名前が出る
+				p.press(B::part_plus, 150);
+				p.press(B::part_plus, 150);
+				for (int x : { 0xb2, 0, int(mu2000::VBOARD_BANK_MSB), 0xb2, 32, int(mu2000::VBOARD_BANK_LSB), 0xc2, 0 })
+					p.mu.midi_in(u8(x), 0);
+				p.pump(500);
+				p.press(B::value_plus, 150);
+				const std::string named = p.lcd();
+				const bool playing = p.mu.virtual_board_playing();
+				p.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					p.press(B::select_right, 150);
+				p.press(B::enter, 150);
+				const std::string list = p.lcd();
+				p.press(B::enter, 150);
+				const std::string page = p.lcd();
+				p.press(B::value_minus, 150);
+				const std::string down = p.lcd();
+				const int part_down = p.mu.virtual_board_part();
+				for (int i = 0; i < 20; i++)
+					p.press(B::value_plus, 150);
+				const std::string off = p.lcd();
+				const bool off_seen = !p.mu.virtual_board_assigned();
+				p.mu.set_virtual_board(mu2000::VBOARD_FC, 5);
+				p.pump(1000);
+				const std::string outside = p.lcd();
+				for (int x : { 0xf0, 0x43, 0x10, 0x4c, 0x70, 0x00, 0x00, 0x09, 0xf7 })
+					p.mu.midi_in(u8(x), 0);
+				p.pump(1000);
+				const std::string by_xg = p.lcd();
+				const int part_xg = p.mu.virtual_board_part();
+				auto has = [](const std::string &t, const char *what) { return t.find(what) != std::string::npos; };
+				check(has(named, "Square25") && playing && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
+				      has(down, "PartAssign=02") && part_down == 1 && has(off, "PartAssign=off") && off_seen &&
+				      has(outside, "PartAssign=06") && has(by_xg, "PartAssign=10") && part_xg == 9 && p.mu.virtual_board_assigned(),
+				      "架空のボードを firmware が見つけて、UTIL → PLG の PartAssign で動かせる",
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + named + "] [" + list + "] [" + page + "] [" + down + "] パート " +
+				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])

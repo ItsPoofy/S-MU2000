@@ -13,6 +13,7 @@
 
 #include "compat/cli_text.h"
 #include "sampling.h"
+#include "vboard.h"
 #include "voice_lib.h"
 #include "smartmedia.h"
 #include "state.h"
@@ -144,6 +145,9 @@ public:
 	{
 		if (port < 0 || port >= MIDI_PORTS)
 			port = 0;
+		// 架空のボードが挿さっていれば、そのパートが受ける MIDI を聞かせる（firmware にも今までどおり渡す）
+		if (m_vb_kind)
+			vb_tap(byte, m_cable[port]);
 		// native の口が動いているときは、鍵の上げ下げをこちらで処理する
 		// （firmware に渡さない）。詳しくは xg/native_driver.h
 		if (m_native_engine && native_midi(byte, port))
@@ -276,6 +280,27 @@ public:
 	enum class ext_bus { dry, reverb, chorus, variation, insertion1, insertion2, insertion3, insertion4, count };
 	void set_external_audio(ext_bus bus, float left, float right);
 	void clear_external_audio();
+
+	// ---- 架空のプラグインボード（src/vboard.h）。kind は 0 = 挿さない、1 = FC ボード。part は 0-63（XG のパート番号）。
+	// 実機のプラグインボードと同じ流儀で、**割り当てたパートでボードのバンク（MSB 90・LSB 0）を選んでいる間だけ**
+	// ボードが鳴り、内蔵の音はそのパートだけ消える。ほかのバンクなら内蔵の音のまま。バンクはボードが自分で追う
+	// （MIDI のバンクセレクトとプログラムチェンジ、パネルで変えたときに firmware が送ってくる 4C 08 pp 01-03）。
+	// ボードはそのパートが受ける MIDI で鳴る。ボードの音には、そのパートの音量・
+	// エクスプレッション・パン・リバーブ／コーラスの送りが掛かる（ワーク RAM の XG の値を 64 サンプルごとに読む）。
+	// 挿している間、上の set_external_audio の dry・reverb・chorus はボードが使う。音を作る糸から呼ぶこと。
+	//
+	// 挿したまま reset すると、firmware の「Checking PLG」の問い合わせに PLG1 のボードとして答える
+	// （やり取りの形は doc/plg-protocol.md）。firmware は UTIL → PLG にボードを並べ、そこの PartAssign を変えると
+	// こちらのパートも変わる（virtual_board_part で読める。off にするとボードは黙り、内蔵の音が戻る）。
+	// 起動のあとで挿したときは firmware は知らないままで、パートはここで決めたとおりに鳴る
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1 };
+	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号
+	bool virtual_board_playing() const { return vb_active(); }  // いまボードのバンクが選ばれている
+	void set_virtual_board(int kind, int part);
+	int virtual_board_kind() const { return m_vb_kind; }
+	int virtual_board_part() const { return m_vb_part; }
+	bool virtual_board_assigned() const { return m_vb_on; }     // false: firmware の PartAssign が off
+	bool virtual_board_known() const { return m_vb_known; }     // firmware がボードを見つけている
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、
@@ -488,6 +513,15 @@ public:
 	              (unsigned long long)m_swp_w32, (unsigned long long)m_swp_r8); }
 
 	// SWP30 への書き込みを全部書き出す（MAME と突き合わせるため）
+	// PLG ボード用のシリアル（SCI4）のレジスタの読み書きを書き出す（調べもの用）
+	void set_plg_trace(std::FILE *f) { if (m_sci4) m_sci4->set_trace(f); }
+	// ---- PLG ボードの側をこちらで演じる（firmware にボードが挿さっていると思わせる。調べている途中）
+	// firmware がボードへ送ったバイト（slots はどのスロット宛てか。bit0 = PLG1）。音を作る糸から呼ばれる。
+	// SCI4 の別々の 3 本の線（chan 0-2）に出たものは、slots = 0x10・0x20・0x40 で来る
+	using plg_tx_fn = std::function<void(int slots, u8 byte)>;
+	void set_plg_tx(plg_tx_fn fn);
+	// スロット（0-2）のボードから本体へ送るバイトを積む。本体がそのスロットを聞いているときに、31250bps の間隔で届く
+	void plg_reply(int slot, const std::vector<u8> &bytes);
 	void set_swp_trace(std::FILE *f, bool with_reads = false)
 	{ m_swp_trace = f; m_swp_trace_reads = with_reads; }
 
@@ -977,6 +1011,32 @@ private:
 	std::array<std::atomic<u32>, 2> m_scope_w{};          // チップごとの書いた数
 	u32 m_scope_tick = 0;
 	std::atomic<u64> m_part_mute{0};   // set_part_mute
+	// 架空のボード
+	int m_vb_kind = 0, m_vb_part = 0;
+	smu2000::vboard::fc_board m_vb_fc;
+	struct vb_parse { u8 status = 0; u8 d[2] = { 0, 0 }; int n = 0; };
+	vb_parse m_vb_parse[MIDI_PORTS];
+	u32 m_vb_tick = 0;
+	float m_vb_gain[6] = { 0, 0, 0, 0, 0, 0 };   // dry 左右・reverb 左右・chorus 左右
+	bool m_vb_live = false;            // 入口にボードの音を入れてある（鳴りやんだら 1 度だけ空にする）
+	std::deque<u8> m_plg_rx[3];        // ボード → 本体の、まだ届けていないバイト
+	u32 m_plg_tick = 0;
+	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
+	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
+	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
+	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
+	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
+	bool vb_active() const { return m_vb_kind && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
+	void vb_bank_from_ram();
+	void vb_set_bank(u8 msb, u8 lsb);
+	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx
+	std::vector<u8> m_vb_sx[MIDI_PORTS];   // MIDI で来た SysEx（パートの割り当てだけ読む）
+	void plg_tx_byte(int chan, u8 targets, u8 byte);
+	void vb_from_firmware(const std::vector<u8> &m);
+	void vb_assign(u8 value);
+	void plg_pump();
+	void vb_tap(u8 byte, int port);
+	void vb_render();
 	bool m_mute_live = false;          // SWP30 に声のミュートを入れてある
 	u32 m_mute_tick = 0;
 	static void scope_tap_fn(void *ctx, const s32 *samples);

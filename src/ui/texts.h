@@ -314,6 +314,15 @@ struct ui_texts {
 	const char *me_diff_only_tip;    // may contain \n
 	const char *me_reading_defaults;
 	const char *me_sysex_title;
+	const char *me_board_title;
+	const char *me_board_none;
+	const char *me_board_fc;
+	const char *me_board_tip;
+	const char *me_board_part;
+	const char *me_board_idle;
+	const char *me_board_unknown;
+	const char *me_board_off;
+	const char *me_board_known;
 	// Overview list (overview.cpp). Column headers that double as help
 	// keys keep their Japanese key (see headers_with_help call sites).
 	const char *ov_bighint;          // may start with \n
