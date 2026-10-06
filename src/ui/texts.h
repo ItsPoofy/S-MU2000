@@ -319,6 +319,7 @@ struct ui_texts {
 	const char *me_board_fc;
 	const char *me_board_tip;
 	const char *me_board_part;
+	const char *me_board_idle;
 	const char *me_board_unknown;
 	const char *me_board_off;
 	const char *me_board_known;

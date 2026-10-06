@@ -281,7 +281,10 @@ public:
 	void clear_external_audio();
 
 	// ---- 架空のプラグインボード（src/vboard.h）。kind は 0 = 挿さない、1 = FC ボード。part は 0-63（XG のパート番号）。
-	// ボードはそのパートが受ける MIDI で鳴り、内蔵の音はそのパートだけ消える。ボードの音には、そのパートの音量・
+	// 実機のプラグインボードと同じ流儀で、**割り当てたパートでボードのバンク（MSB 90・LSB 0）を選んでいる間だけ**
+	// ボードが鳴り、内蔵の音はそのパートだけ消える。ほかのバンクなら内蔵の音のまま。バンクはボードが自分で追う
+	// （MIDI のバンクセレクトとプログラムチェンジ、パネルで変えたときに firmware が送ってくる 4C 08 pp 01-03）。
+	// ボードはそのパートが受ける MIDI で鳴る。ボードの音には、そのパートの音量・
 	// エクスプレッション・パン・リバーブ／コーラスの送りが掛かる（ワーク RAM の XG の値を 64 サンプルごとに読む）。
 	// 挿している間、上の set_external_audio の dry・reverb・chorus はボードが使う。音を作る糸から呼ぶこと。
 	//
@@ -290,6 +293,8 @@ public:
 	// こちらのパートも変わる（virtual_board_part で読める。off にするとボードは黙り、内蔵の音が戻る）。
 	// 起動のあとで挿したときは firmware は知らないままで、パートはここで決めたとおりに鳴る
 	enum { VBOARD_NONE = 0, VBOARD_FC = 1 };
+	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号
+	bool virtual_board_playing() const { return vb_active(); }  // いまボードのバンクが選ばれている
 	void set_virtual_board(int kind, int part);
 	int virtual_board_kind() const { return m_vb_kind; }
 	int virtual_board_part() const { return m_vb_part; }
@@ -1013,6 +1018,11 @@ private:
 	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
 	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
 	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
+	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
+	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
+	bool vb_active() const { return m_vb_kind && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
+	void vb_bank_from_ram();
+	void vb_set_bank(u8 msb, u8 lsb);
 	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx
 	std::vector<u8> m_vb_sx[MIDI_PORTS];   // MIDI で来た SysEx（パートの割り当てだけ読む）
 	void plg_tx_byte(int chan, u8 targets, u8 byte);

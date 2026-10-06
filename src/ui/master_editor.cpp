@@ -398,7 +398,7 @@ void master_editor::board_pane(bridge &br)
 	ImGui::SetNextItemWidth(-fs * 9.5f);
 	changed |= ImGui::Combo("##board", &m_board_kind, kinds.c_str());
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. It plays from the MIDI of the part chosen below, in place of that part's own voice, and its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. Plugged in while the MU starts, it answers the MU's plug-in board check: the MU lists it under UTIL > PLG, and PartAssign there moves it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. Plugged in while the MU starts, it answers the MU's plug-in board check: the MU lists it under UTIL > PLG, and PartAssign there moves it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes."));
 	ImGui::SameLine();
 	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
 	ImGui::SameLine();
@@ -411,7 +411,20 @@ void master_editor::board_pane(bridge &br)
 	if (changed) {
 		const int kind = m_board_kind, part = m_board_part - 1;
 		br.post([kind, part](mu2000 &mu) {
+			// 実機と同じで、ボードは「割り当てたパートでボードのバンクを選んだとき」だけ鳴る。ここで挿したときは、
+			// 手間を省いてそのパートにボードのバンクを選んでおく。外した・動かしたときは、元のパートをふつうのバンクに戻す
+			// （ボードのバンクのままだと、内蔵の音源では無音になる）
+			const auto select = [&mu](int p, int msb, int lsb) {
+				const u8 ch = u8(p % 16);
+				for (int b : { 0xb0 | ch, 0, msb, 0xb0 | ch, 32, lsb, 0xc0 | ch, 0 })
+					mu.midi_in(u8(b), p / 16);
+			};
+			const int old_kind = mu.virtual_board_kind(), old_part = mu.virtual_board_part();
+			if (old_kind && mu.virtual_board_playing() && (!kind || old_part != part))
+				select(old_part, 0, 0);
 			mu.set_virtual_board(kind, part);
+			if (kind && (!old_kind || old_part != part))
+				select(part, mu2000::VBOARD_BANK_MSB, mu2000::VBOARD_BANK_LSB);
 			return std::string();
 		});
 		m_board_touched = now;
@@ -423,7 +436,8 @@ void master_editor::board_pane(bridge &br)
 	if (now - m_board_asked > 0.5) {
 		m_board_asked = now;
 		br.post([seen = m_board_seen](mu2000 &mu) {
-			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0));
+			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0) |
+			            (mu.virtual_board_playing() ? 0x200 : 0));
 			return std::string();
 		});
 	}
@@ -432,6 +446,8 @@ void master_editor::board_pane(bridge &br)
 		return;
 	if ((seen & 0xff) && (seen & 0xff) != m_board_part)
 		m_board_part = seen & 0xff;
+	if ((seen & 0xff) && !(seen & 0x200))
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB 90, LSB 0 there to hear the board"));
 	if (!(seen & 0x100))
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_unknown, "The MU has not noticed it yet: power the MU off and on to list it under UTIL > PLG"));
 	else if (!(seen & 0xff))
