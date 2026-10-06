@@ -510,6 +510,8 @@ int main(int argc, char **argv)
 	// 音色に割り当てる。firmware がそれを自分のサンプルとして扱う（一覧・試聴・REC の続き・音色として鳴る）かを見る
 	{
 		namespace sp = smu2000::sampling;
+
+static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめで取り出した音色（別の機械へ戻す）
 		static rig k;
 		if (!k.mu.load_program(dir + "/mu2000_flash.bin") || !k.mu.load_wave(dir + "/dump")) {
 			std::fprintf(stderr, "%s\n", k.mu.error().c_str());
@@ -784,6 +786,67 @@ int main(int argc, char **argv)
 				      "内蔵の音色をサンプル音色に写すと同じに鳴る・要素を 1 つずつ鳴らせる",
 				      vr.record_name(rec) + ": 元 " + std::to_string(preset) + "、写し " + std::to_string(copy) + "（" + std::to_string(db) +
 				      " dB）、要素 1 " + std::to_string(el1) + "、要素 2 " + std::to_string(el2) + "、無し " + std::to_string(none));
+			}
+
+			// 自作音色のライブラリ（voice_lib.h）。要素 1 がサンプル 1、要素 2 が内蔵ウェーブ 16 の音色を PGM040 に作り、
+			// 取り出してファイルの形にして読み直し、PGM041 へ戻す: 同じサンプルがあるので足さずに同じ番号を指し、同じ大きさで鳴る。
+			// サンプルの名前を変えてから戻すと「別物」なので 1 つ足して、その番号を指す
+			{
+				sp::voice w;
+				w.name = "LibVoice";
+				w.el[0].assigned = true;
+				w.el[0].sample = 1;
+				w.el[1].on = true;
+				w.el[1].rom_wave = 16;
+				w.el[1].coarse = 5;
+				std::string e;
+				k.mu.sampling_set_voice(39, w, e);
+				auto rms_of = [&](int pgm) {
+					for (int b : { 0xb0, 0x00, 0x10, 0xb0, 0x20, 0x00, 0xc0, pgm })
+						k.mu.midi_in(u8(b), 0);
+					k.pump(300);
+					k.out.clear();
+					k.collect = true;
+					for (u8 b : on)
+						k.mu.midi_in(b, 0);
+					k.pump(500);
+					k.collect = false;
+					for (u8 b : off)
+						k.mu.midi_in(b, 0);
+					k.pump(1200);
+					double sum = 0;
+					for (double v : k.out)
+						sum += v * v;
+					return std::sqrt(sum / std::max<size_t>(1, k.out.size()));
+				};
+				const double before = rms_of(39);
+				smu2000::voicelib::item it, back;
+				const bool exported = k.mu.sampling_export_voice(39, it, e);
+				it.memo = "memo";
+				const std::vector<u8> file = smu2000::voicelib::save(it);
+				const bool parsed = smu2000::voicelib::load(file, back, e);
+				smu2000::voicelib::item head;
+				size_t frames = 0;
+				const bool listed = smu2000::voicelib::load(file, head, e, false, &frames);
+				const size_t samples0 = k.mu.sampling_list().size();
+				int added = -1;
+				const bool imported = k.mu.sampling_import_voice(40, back, e, &added);
+				const double after = rms_of(40);
+				sp::voice got;
+				k.mu.sampling_voice(40, got);
+				const bool same = exported && parsed && listed && imported && added == 0 && k.mu.sampling_list().size() == samples0 &&
+				                  back.name() == "LibVoice" && back.memo == "memo" && back.samples.size() == 1 && back.el_sample[0] == 0 &&
+				                  back.el_sample[1] == -1 && back.el_rom_wave(1) == 16 && frames == back.samples[0].pcm.size() &&
+				                  head.samples.size() == 1 && head.samples[0].pcm.empty() &&
+				                  got.el[0].assigned && got.el[0].sample == 1 && got.el[1].rom_wave == 16 && got.el[1].coarse == 5;
+				const double db = 20 * std::log10(std::max(after, 1e-9) / std::max(before, 1e-9));
+				g_lib_item = back;          // 「無いサンプルは足す」は、後ろの別の機械で確かめる（ここで足すと後の確かめの数が狂う）
+				const std::vector<u8> broken(file.begin(), file.begin() + long(file.size() / 2));
+				smu2000::voicelib::item bad;
+				check(same && before > 0.003 && std::fabs(db) < 0.5 && !smu2000::voicelib::load(broken, bad, e),
+				      "音色のライブラリ: 取り出してファイルにし、読んで別の枠へ戻す",
+				      "元 " + std::to_string(before) + "、戻し " + std::to_string(after) + "（" + std::to_string(db) + " dB）、ファイル " +
+				      std::to_string(file.size()) + " バイト、足したサンプル " + std::to_string(added));
 			}
 
 			// サンプル音色を書く SysEx（機種 0x68）。PGM010 に組 16 と音程・エンベロープを書き、その記録を
@@ -1820,6 +1883,26 @@ int main(int argc, char **argv)
 			      "SysEx を直に読み込む",
 			      "直に書いた " + std::to_string(direct) + " 通、違い 波形 " + std::to_string(e_pcm) + " 表 " + std::to_string(e_tab) +
 			      " 音色 " + std::to_string(e_voice));
+			// 音色のライブラリの続き: この機械には同じ名前のサンプルが無いように名前を変えて戻すと、1 つ足して、その番号を指す
+			if (g_lib_item.samples.size() == 1) {
+				smu2000::voicelib::item it = g_lib_item;
+				it.samples[0].name = "LibOther";
+				const size_t n0 = m.mu.sampling_list().size();
+				int added = -1;
+				std::string e;
+				const bool ok = m.mu.sampling_import_voice(41, it, e, &added);
+				const auto now = m.mu.sampling_list();
+				sp::voice got;
+				m.mu.sampling_voice(41, got);
+				std::vector<s16> pcm;
+				if (!now.empty())
+					m.mu.sampling_pcm(now.back().number, pcm);
+				check(ok && added == 1 && now.size() == n0 + 1 && now.back().name == "LibOther" && pcm == it.samples[0].pcm &&
+				      got.el[0].assigned && got.el[0].sample == now.back().number && got.el[1].rom_wave == 16,
+				      "音色のライブラリ: 無いサンプルは足して、その番号を指す", e + " サンプル " + std::to_string(n0) + " → " + std::to_string(now.size()));
+			} else {
+				check(false, "音色のライブラリ: 無いサンプルは足して、その番号を指す", "取り出した音色が無い");
+			}
 		}
 	}
 
