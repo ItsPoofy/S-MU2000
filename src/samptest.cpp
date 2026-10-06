@@ -1952,6 +1952,7 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				for (int x : { 0xb2, 0, int(mu2000::VBOARD_BANK_MSB), 0xb2, 32, int(mu2000::VBOARD_BANK_LSB), 0xc2, 0 })
 					p.mu.midi_in(u8(x), 0);
 				p.pump(500);
+				const std::string by_midi = p.lcd();          // MIDI で選んだだけでも名前が出る（実機の PLG150-VL で確かめた動き）
 				p.press(B::value_plus, 150);
 				const std::string named = p.lcd();
 				const bool playing = p.mu.virtual_board_playing();
@@ -1978,11 +1979,11 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				const std::string by_xg = p.lcd();
 				const int part_xg = p.mu.virtual_board_part();
 				auto has = [](const std::string &t, const char *what) { return t.find(what) != std::string::npos; };
-				check(has(named, "Square25") && playing && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
+				check(has(by_midi, "Square50") && has(named, "Square25") && playing && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
 				      has(down, "PartAssign=02") && part_down == 1 && has(off, "PartAssign=off") && off_seen &&
 				      has(outside, "PartAssign=06") && has(by_xg, "PartAssign=10") && part_xg == 9 && p.mu.virtual_board_assigned(),
 				      "架空のボードを firmware が見つけて、UTIL → PLG の PartAssign で動かせる",
-				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + named + "] [" + list + "] [" + page + "] [" + down + "] パート " +
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + by_midi + "] [" + named + "] [" + list + "] [" + page + "] [" + down + "] パート " +
 				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
 			}
 
