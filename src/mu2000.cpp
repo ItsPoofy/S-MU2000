@@ -3406,13 +3406,12 @@ void mu2000::vb_from_firmware(const std::vector<u8> &m)
 		reply(std::move(r));
 		return;
 	}
-	// 機種 4F: バンクの表（MSB・LSB と、名前 16 文字を 4 ビットずつ）
+	// 機種 4F: バンクの表（MSB・LSB と、「どのプログラムに音色があるか」の 128 ビットを 4 ビットずつ。
+	// プログラム 0 が 1 バイト目の最上位ビット）。ビットが 0 のプログラムを選ぶと、本体は名前を聞かずに Silence と出す。
+	// FC ボードはどのプログラムでも鳴る（16 個のくり返し）ので、全部 1
 	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4f && m.size() == 9 && m[4] == 0x7f && m[5] == 0x10 && m[6] == 0x01 && m[7] == 0x00) {
 		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4f, 0x7f, 0x10, 0x01, VBOARD_BANK_MSB, VBOARD_BANK_LSB };
-		for (const char *c = "FC Board        "; *c; c++) {
-			r.push_back(u8(*c) >> 4);
-			r.push_back(u8(*c) & 15);
-		}
+		r.insert(r.end(), 32, 0x0f);
 		reply(std::move(r));
 		return;
 	}
