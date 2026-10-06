@@ -10,6 +10,7 @@
 // inside the audio callback.
 
 #include "midi_out.h"
+#include "compat/cli_text.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreMIDI/CoreMIDI.h>
@@ -85,7 +86,7 @@ bool midi_out::open(int device, std::string &err)
 	if (device < 0)
 		return true;
 	if (ItemCount(device) >= MIDIGetNumberOfDestinations()) {
-		err = "その番号の MIDI 出力は無い";
+		err = CLI_T("No MIDI output with that number", "その番号の MIDI 出力は無い");
 		return false;
 	}
 
@@ -94,13 +95,13 @@ bool midi_out::open(int device, std::string &err)
 
 	if (MIDIClientCreate(CFSTR("S-MU2000"), nullptr, nullptr, &c->client) != noErr) {
 		delete c;
-		err = "MIDI クライアントを作れない";
+		err = CLI_T("Cannot create the MIDI client", "MIDI クライアントを作れない");
 		return false;
 	}
 	if (MIDIOutputPortCreate(c->client, CFSTR("out"), &c->port) != noErr) {
 		MIDIClientDispose(c->client);
 		delete c;
-		err = "MIDI 出力を開けない";
+		err = CLI_T("Cannot open the MIDI output", "MIDI 出力を開けない");
 		return false;
 	}
 

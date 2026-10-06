@@ -13,6 +13,7 @@
 // その形式で開けなければ開かない（勝手に音を変えないため）。
 
 #include "audio_out.h"
+#include "compat/cli_text.h"
 
 #include <alsa/asoundlib.h>
 #include <pthread.h>
@@ -241,7 +242,7 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	// こちらが取り上げるわけではないので、頼まれても黙って既定の開き方をする
 	int rc = snd_pcm_open(&up->pcm, dev.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
 	if (rc < 0) {
-		err = std::string("音声の出口を開けない（") + dev + "）: " + snd_strerror(rc);
+		err = std::string(CLI_T("Cannot open the audio output (", "音声の出口を開けない（")) + dev + CLI_T("): ", "）: ") + snd_strerror(rc);
 		return false;
 	}
 
@@ -263,7 +264,7 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	    snd_pcm_hw_params_set_buffer_time_near(up->pcm, hw, &buffer_us, &dir) < 0 ||
 	    snd_pcm_hw_params_set_period_time_near(up->pcm, hw, &period_us, &dir) < 0 ||
 	    snd_pcm_hw_params(up->pcm, hw) < 0) {
-		err = std::string("音声の形式を決められない（") + dev + "）";
+		err = std::string(CLI_T("Cannot set the audio format (", "音声の形式を決められない（")) + dev + CLI_T(")", "）");
 		snd_pcm_close(up->pcm);
 		return false;
 	}
@@ -271,7 +272,7 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 		// MU2000 は 44100Hz でしか動かない。plug の付いた口（default など）なら
 		// ALSA が直してくれるので、ここへは来ない
 		char buf[128];
-		std::snprintf(buf, sizeof(buf), "この口は %u Hz でしか開けない（44100 が要る。default を使う）", rate);
+		std::snprintf(buf, sizeof(buf), CLI_T("This device only opens at %u Hz (44100 is needed; use \"default\")", "この口は %u Hz でしか開けない（44100 が要る。default を使う）"), rate);
 		err = buf;
 		snd_pcm_close(up->pcm);
 		return false;
@@ -286,7 +287,7 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	up->buffer_frames.store(up->period);
 
 	if ((rc = snd_pcm_prepare(up->pcm)) < 0) {
-		err = std::string("音声を用意できない: ") + snd_strerror(rc);
+		err = std::string(CLI_T("Cannot prepare the audio output: ", "音声を用意できない: ")) + snd_strerror(rc);
 		snd_pcm_close(up->pcm);
 		return false;
 	}
@@ -342,12 +343,12 @@ u64 audio_out::capture_frames() const
 bool audio_out::write_capture(std::string &err)
 {
 	if (m_cap_path.empty()) {
-		err = "書き出す先が決まっていない";
+		err = CLI_T("No output file was given", "書き出す先が決まっていない");
 		return false;
 	}
 	std::FILE *f = std::fopen(m_cap_path.c_str(), "wb");
 	if (!f) {
-		err = "書けない: " + m_cap_path;
+		err = CLI_T("Cannot write: ", "書けない: ") + m_cap_path;
 		return false;
 	}
 	write_wav_header(f, u32(m_cap.size() / 2));
@@ -355,7 +356,7 @@ bool audio_out::write_capture(std::string &err)
 	    ? 0 : std::fwrite(m_cap.data(), sizeof(s16), m_cap.size(), f);
 	const bool ok = std::fclose(f) == 0 && wrote == m_cap.size();
 	if (!ok)
-		err = "書き込みが途中で終わった: " + m_cap_path;
+		err = CLI_T("The write ended early: ", "書き込みが途中で終わった: ") + m_cap_path;
 	return ok;
 }
 

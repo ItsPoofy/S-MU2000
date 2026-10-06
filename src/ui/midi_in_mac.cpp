@@ -9,6 +9,7 @@
 // ring, because the audio thread still drains it one byte at a time.
 
 #include "midi_in.h"
+#include "compat/cli_text.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreMIDI/CoreMIDI.h>
@@ -86,7 +87,7 @@ bool midi_in::open(int device, std::string &err)
 	if (device < 0)
 		return true;
 	if (ItemCount(device) >= MIDIGetNumberOfSources()) {
-		err = "その番号の MIDI 入力は無い";
+		err = CLI_T("No MIDI input with that number", "その番号の MIDI 入力は無い");
 		return false;
 	}
 
@@ -95,20 +96,20 @@ bool midi_in::open(int device, std::string &err)
 
 	if (MIDIClientCreate(CFSTR("S-MU2000"), nullptr, nullptr, &c->client) != noErr) {
 		delete c;
-		err = "MIDI クライアントを作れない";
+		err = CLI_T("Cannot create the MIDI client", "MIDI クライアントを作れない");
 		return false;
 	}
 	if (MIDIInputPortCreate(c->client, CFSTR("in"), read_proc, this, &c->port) != noErr) {
 		MIDIClientDispose(c->client);
 		delete c;
-		err = "MIDI 入力を開けない";
+		err = CLI_T("Cannot open the MIDI input", "MIDI 入力を開けない");
 		return false;
 	}
 	if (MIDIPortConnectSource(c->port, c->source, nullptr) != noErr) {
 		MIDIPortDispose(c->port);
 		MIDIClientDispose(c->client);
 		delete c;
-		err = "MIDI 入力に繋げない";
+		err = CLI_T("Cannot connect to the MIDI input", "MIDI 入力に繋げない");
 		return false;
 	}
 

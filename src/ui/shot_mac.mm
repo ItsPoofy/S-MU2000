@@ -23,6 +23,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "ui/shot.h"
+#include "compat/cli_text.h"
 
 #include "ui/imgui_shell.h"
 
@@ -33,7 +34,7 @@ int write_shot_metal(int w, int h, std::vector<u8> &rgba, bool grid, bool lcd_on
 {
 	id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
 	if (!dev) {
-		std::fprintf(stderr, "Metal の装置が取れない\n");
+		std::fprintf(stderr, CLI_T("Cannot get a Metal device\n", "Metal の装置が取れない\n"));
 		return 0;
 	}
 	id<MTLCommandQueue> queue = [dev newCommandQueue];
@@ -54,7 +55,7 @@ int write_shot_metal(int w, int h, std::vector<u8> &rgba, bool grid, bool lcd_on
 	td.storageMode = MTLStorageModeShared;
 	id<MTLTexture> target = [dev newTextureWithDescriptor:td];
 	if (!target) {
-		std::fprintf(stderr, "書込み先の面を作れない\n");
+		std::fprintf(stderr, CLI_T("Cannot create the render target\n", "書込み先の面を作れない\n"));
 		return 0;
 	}
 

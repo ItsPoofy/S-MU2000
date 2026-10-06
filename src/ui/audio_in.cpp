@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 
 #include "audio_in.h"
+#include "compat/cli_text.h"
 #include "resampler.h"
 
 #include <windows.h>
@@ -110,7 +111,7 @@ void audio_in::stop()
 std::string audio_in::format_line() const
 {
 	char buf[160];
-	std::snprintf(buf, sizeof buf, "共有 / %u Hz %u ch %s%u → 44100 Hz", m_dev_rate, m_dev_channels,
+	std::snprintf(buf, sizeof buf, CLI_T("shared / %u Hz %u ch %s%u -> 44100 Hz", "共有 / %u Hz %u ch %s%u → 44100 Hz"), m_dev_rate, m_dev_channels,
 	              m_dev_float ? "float" : "int", m_dev_bits);
 	return buf;
 }
@@ -147,7 +148,7 @@ void audio_in::run()
 
 	auto fail = [&](const char *what, HRESULT h) {
 		char buf[128];
-		std::snprintf(buf, sizeof buf, "%s に失敗（0x%08lx）", what, (unsigned long)h);
+		std::snprintf(buf, sizeof buf, CLI_T("%s failed (0x%08lx)", "%s に失敗（0x%08lx）"), what, (unsigned long)h);
 		m_err = buf;
 		m_start_state = 2;
 	};
@@ -155,7 +156,7 @@ void audio_in::run()
 	const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
 	                      __uuidof(IMMDeviceEnumerator), (void **)&en);
-	if (FAILED(hr)) { fail("デバイス一覧", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Listing the devices", "デバイス一覧"), hr); goto done; }
 
 	if (!m_want.empty()) {
 		IMMDeviceCollection *all = nullptr;
@@ -173,32 +174,32 @@ void audio_in::run()
 			}
 			all->Release();
 		}
-		if (!dev) { m_err = "録音デバイスが見つからない: " + m_want; m_start_state = 2; goto done; }
+		if (!dev) { m_err = CLI_T("Recording device not found: ", "録音デバイスが見つからない: ") + m_want; m_start_state = 2; goto done; }
 	} else {
 		hr = en->GetDefaultAudioEndpoint(eCapture, eConsole, &dev);
-		if (FAILED(hr)) { fail("既定の録音デバイス", hr); goto done; }
+		if (FAILED(hr)) { fail(CLI_T("Getting the default recording device", "既定の録音デバイス"), hr); goto done; }
 	}
 	m_dev_name = endpoint_name(dev);
 
 	hr = dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&client);
-	if (FAILED(hr)) { fail("録音デバイスを開く", hr); goto done; }
-	if (FAILED(client->GetMixFormat(&mix)) || !mix) { fail("形式の取得", E_FAIL); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Opening the recording device", "録音デバイスを開く"), hr); goto done; }
+	if (FAILED(client->GetMixFormat(&mix)) || !mix) { fail(CLI_T("Reading the device format", "形式の取得"), E_FAIL); goto done; }
 	m_dev_rate = mix->nSamplesPerSec;
 	m_dev_channels = mix->nChannels;
 	m_dev_bits = mix->wBitsPerSample;
 	m_dev_float = format_is_float(mix);
 	if (!(m_dev_float && m_dev_bits == 32) && !(!m_dev_float && (m_dev_bits == 16 || m_dev_bits == 24 || m_dev_bits == 32))) {
-		fail("扱えない形式", E_FAIL);
+		fail(CLI_T("Unsupported device format", "扱えない形式"), E_FAIL);
 		goto done;
 	}
 
 	event = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 	hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
 	                        1000000 /* 100ms */, 0, mix, nullptr);
-	if (FAILED(hr)) { fail("録音の準備", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Preparing to record", "録音の準備"), hr); goto done; }
 	client->SetEventHandle(event);
 	hr = client->GetService(__uuidof(IAudioCaptureClient), (void **)&cap);
-	if (FAILED(hr)) { fail("録音の口", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Getting the capture interface", "録音の口"), hr); goto done; }
 
 	rs.configure(double(m_dev_rate), 44100.0);
 	{
@@ -206,7 +207,7 @@ void audio_in::run()
 		task = AvSetMmThreadCharacteristicsA("Pro Audio", &idx);
 	}
 	hr = client->Start();
-	if (FAILED(hr)) { fail("録音の開始", hr); goto done; }
+	if (FAILED(hr)) { fail(CLI_T("Starting to record", "録音の開始"), hr); goto done; }
 
 	m_running = true;
 	m_start_state = 1;

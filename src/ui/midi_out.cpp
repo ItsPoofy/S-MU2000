@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 
 #include "midi_out.h"
+#include "compat/cli_text.h"
 #include "mm_open.h"
 #include "text.h"
 
@@ -50,7 +51,7 @@ bool midi_out::open(int device, std::string &err)
 	if (device < 0)
 		return true;
 	if (UINT(device) >= midiOutGetNumDevs()) {
-		err = "その番号の MIDI 出力は無い";
+		err = CLI_T("No MIDI output with that number", "その番号の MIDI 出力は無い");
 		return false;
 	}
 
@@ -62,12 +63,12 @@ bool midi_out::open(int device, std::string &err)
 		},
 		[](HMIDIOUT late) { midiOutClose(late); }, h);
 	if (r == 2) {
-		err = "MIDI 出力が応答しない（loopMIDI やドライバが固まっているかもしれない。"
-		      "loopMIDI を起動し直すか、機器を挿し直す）";
+		err = CLI_T("The MIDI output does not respond (loopMIDI or the driver may be stuck; restart loopMIDI or replug the device)",
+		      "MIDI 出力が応答しない（loopMIDI やドライバが固まっているかもしれない。loopMIDI を起動し直すか、機器を挿し直す）");
 		return false;
 	}
 	if (r != 0) {
-		err = "MIDI 出力を開けない";
+		err = CLI_T("Cannot open the MIDI output", "MIDI 出力を開けない");
 		return false;
 	}
 	MIDIOUTCAPSW caps{};
