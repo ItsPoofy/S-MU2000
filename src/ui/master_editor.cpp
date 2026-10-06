@@ -440,14 +440,14 @@ void master_editor::board_pane(bridge &br)
 			br.request_restart();
 		}
 	}
-	if (!m_board_kind)
-		return;
-	// MU の側でパートが変わっていたら欄を合わせる（自分で変えた直後は、古い返事で戻さないよう少し待つ）
+	// MU の側の様子をときどき聞く。前の回から挿さったままのボードと、MU のメニューで変えたパートに欄を合わせる
+	// （自分で変えた直後は、古い返事で戻さないよう少し待つ）
 	if (now - m_board_asked > 0.5) {
 		m_board_asked = now;
 		br.post([seen = m_board_seen](mu2000 &mu) {
 			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0) |
-			            (mu.virtual_board_playing() ? 0x200 : 0) | (mu.midi_ready() ? 0x400 : 0));
+			            (mu.virtual_board_playing() ? 0x200 : 0) | (mu.midi_ready() ? 0x400 : 0) |
+			            (mu.virtual_board_kind() ? 0x800 : 0));
 			return std::string();
 		});
 	}
@@ -457,6 +457,11 @@ void master_editor::board_pane(bridge &br)
 		return;
 	}
 	if (seen < 0 || now - m_board_touched < 1.0)
+		return;
+	// 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）
+	if (!m_board_booting && !m_board_kind && (seen & 0x800))
+		m_board_kind = mu2000::VBOARD_FC;
+	if (!m_board_kind)
 		return;
 	// 起動し直しが済んだ（本体がボードを見つけて MIDI を受け始めた）。そのパートにボードのバンクを選ぶ
 	if (m_board_booting) {

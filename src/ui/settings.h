@@ -33,6 +33,8 @@ inline constexpr const char *SET_CARD = "smartmedia";
 inline constexpr const char *SET_PORTS34 = "ports34";
 inline constexpr const char *SET_THIN_BENDS = "thin_bends";   // 再生でピッチベンドを間引く（1 / 0）
 inline constexpr const char *SET_OUTPUT = "output";
+inline constexpr const char *SET_BOARD = "board";             // 架空のプラグインボード（fc。無ければ空）
+inline constexpr const char *SET_BOARD_PART = "board_part";   // そのパート（1-64）
 inline constexpr const char *SET_VOLUME = "volume";
 inline constexpr const char *SET_EDIT_OUT = "edit_out";   // 音色の窓の送り先（空はパネルの設定）
 
@@ -97,6 +99,8 @@ struct remembered {
 	bool thin_bends = false; // thin_bends=1 (the player thins dense pitch bends)
 	bool analog = false;  // output=analog (DC removed)
 	std::string edit_out; // edit_out= (the voice window's send-to port; empty = the panel's ports)
+	int board = 0;        // board=fc (the imaginary plug-in board, mu2000::VBOARD_FC; 0 = none)
+	int board_part = 1;   // board_part= (1-64)
 };
 
 // Struct to file rows, in file order
@@ -118,6 +122,8 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_THIN_BENDS, r.thin_bends ? "1" : "0");
 	kv.emplace_back(SET_OUTPUT, r.analog ? "analog" : "digital");
 	kv.emplace_back(SET_EDIT_OUT, r.edit_out);
+	kv.emplace_back(SET_BOARD, r.board == 1 ? "fc" : "");
+	kv.emplace_back(SET_BOARD_PART, std::to_string(r.board_part));
 	return kv;
 }
 
@@ -138,6 +144,11 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_THIN_BENDS)) r.thin_bends = *v == "1";
 	if (const std::string *v = find_setting(kv, SET_OUTPUT))  r.analog  = *v == "analog";
 	if (const std::string *v = find_setting(kv, SET_EDIT_OUT)) r.edit_out = *v;
+	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = *v == "fc" ? 1 : 0;
+	if (const std::string *v = find_setting(kv, SET_BOARD_PART)) {
+		const int n = std::atoi(v->c_str());
+		r.board_part = n >= 1 && n <= 64 ? n : 1;
+	}
 	if (const std::string *v = find_setting(kv, SET_VOLUME)) {
 		if (!v->empty())
 			r.volume = std::clamp(float(std::atof(v->c_str())), 0.0f, 1.0f);

@@ -455,6 +455,9 @@ public:
 		r.thin_bends = play.thin_bends();
 		r.analog    = eng && eng->analog.load();
 		r.edit_out  = edit_out_name.empty() ? edit_out_keep : edit_out_name;
+		// the imaginary plug-in board stays plugged in, like a real one
+		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
+		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1117,6 +1120,10 @@ public:
 				std::printf(CLI_T("Sound output: analogue (DC removed)\n", "音の出口: アナログ（直流を切る）\n"));
 			play.set_fold_extra_ports(r.fold34);
 			play.set_thin_bends(r.thin_bends);
+			// The imaginary plug-in board goes in before the firmware boots, so
+			// that its "Checking PLG" finds it (the boot then skips the snapshot)
+			if (eng && r.board)
+				eng->mu.set_virtual_board(r.board, r.board_part - 1);
 		}
 		// Only the window boots from remembered settings: --shot must give
 		// the same picture every time
@@ -1307,15 +1314,6 @@ public:
 		// The sound has stopped by now. Keep the machine's settings only if
 		// it came up
 		if (eng) {
-			// The imaginary board is not kept across sessions. Left on the board's
-			// bank, its part would come back silent next time, so put that part
-			// back on bank 0 before the settings are saved
-			if (eng->state.load() == 1 && eng->mu.virtual_board_kind() && eng->mu.virtual_board_playing()) {
-				const int p = eng->mu.virtual_board_part();
-				const u8 ch = u8(p % 16);
-				for (int b : { 0xb0 | ch, 0, 0, 0xb0 | ch, 32, 0, 0xc0 | ch, 0 })
-					eng->mu.midi_in(u8(b), p / 16);
-			}
 			eng->settle_for_save();
 			if (eng->state.load() == 1 && !smu2000::nvram::save(eng->mu))
 				std::fprintf(stderr, CLI_T("Could not save the settings: %s\n", "設定を残せなかった: %s\n"),
