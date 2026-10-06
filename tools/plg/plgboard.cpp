@@ -17,6 +17,8 @@
 //   PLG_PC=1                      9 秒から先で多く居た番地（1 サンプルに 1 回だけ見る粗いもの）
 //   PLG_PCSET=<ファイル>,<から>,<まで>  その間（秒 × 10）に入ったブロックを書き出す。2 回を比べて、キーを押したときだけ通る所を探す
 //   PLG_LCDHEX=1                  液晶の、文字でない所を <xx> で出す
+//   PLG_ITRACE=<ファイルの頭>,<から>  その時刻（秒 × 10）から命令を 1 つずつ書き出す（SMU2000_SH2_JIT=0 と一緒に使う）。
+//                                 0.01 秒ごとに <頭>0.txt と <頭>1.txt を交互に書き直し、例外の受け皿に入ったらそこで終わる
 // 例外の受け皿（0x0401FE）で止まって終わったときは、どの例外かとスタックを出す
 #include "mu2000.h"
 
@@ -26,7 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace smu2000 { extern u32 *g_pc_prof; }
+namespace smu2000 { extern u32 *g_pc_prof; extern std::FILE *g_pc_trace; extern u64 g_pc_trace_left; }
 static mu2000 M;
 static std::vector<u8> g_msg[0x80];       // 行き先の印（1-7）ごとの、組み立て中のメッセージ
 static std::map<std::vector<u8>, std::vector<u8>> g_table;   // 機種から番地の終わりまで → 返すデータ
@@ -177,6 +179,19 @@ int main(int argc, char **argv)
 	for (g_t = 0; g_t < 44100 * secs; g_t++) {
 		s32 l, r;
 		M.run_sample(l, r);
+		// 本体の音が出ているか（0.1 秒ごとの山。鳴り始めと鳴り終わりだけ出す）
+		{
+			static int peak = 0;
+			static bool was = false;
+			peak = std::max({ peak, std::abs(int(l)), std::abs(int(r)) });
+			if (g_t % 4410 == 4409) {
+				const bool on = peak > 200;
+				if (on != was)
+					std::printf("%5.2fs audio %s (peak %d)%c", g_t / 44100.0, on ? "on" : "off", peak, 10);
+				was = on;
+				peak = 0;
+			}
+		}
 		u8 b;
 		while (M.midi_out_take(b)) {}
 		if (g_pc_on && g_t > 44100 * 9)
@@ -215,6 +230,30 @@ int main(int argc, char **argv)
 					if (g_t == k.first * 4410)
 						std::printf("%5.2fs key %s\n", g_t / 44100.0, k.second.c_str());
 				}
+		}
+		{
+			static const char *itr = std::getenv("PLG_ITRACE");
+			static std::string head;
+			static int from = -1, which = 0;
+			if (itr && head.empty()) {
+				const std::string v = itr;
+				const size_t c = v.rfind(',');
+				head = v.substr(0, c);
+				from = std::stoi(v.substr(c + 1)) * 4410;
+			}
+			if (itr && g_t >= from && (g_t - from) % 441 == 0) {
+				if (smu2000::g_pc_trace)
+					std::fclose(smu2000::g_pc_trace);
+				which ^= 1;
+				smu2000::g_pc_trace = std::fopen((head + char('0' + which) + ".txt").c_str(), "w");
+				smu2000::g_pc_trace_left = ~u64(0);
+			}
+			if (itr && g_t >= from && M.cpu().pc() >= 0x0401f4 && M.cpu().pc() <= 0x040202) {
+				std::fclose(smu2000::g_pc_trace);
+				smu2000::g_pc_trace = nullptr;
+				std::printf("trapped at %.3fs, last trace file %d%c", g_t / 44100.0, which, 10);
+				break;
+			}
 		}
 		if (g_t % 4410 == 0) {
 			if (tr)
