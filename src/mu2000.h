@@ -338,6 +338,14 @@ public:
 		u32 note_ons = 0;
 	};
 	void board_parts(board_part out[16]);
+	// マルチパートのボードで選べる音色の並び（画面の音色の品書き用）。DLS のボードは読んだファイルの音色、
+	// FC ボードは 16 個、オリジナルのボードは波形の入っている番号。音を作る糸から呼ぶこと
+	struct board_voice {
+		bool drum = false;
+		u8 msb = 0, lsb = 0, program = 0;
+		char name[24] = {};
+	};
+	std::vector<board_voice> board_voices() const;
 	// マルチパートのボードのチャンネル（0-15）の音を、MU のインサーションへ通す。slot は 0 = 通さない（そのまま出す）、
 	// 1-4 = インサーション 1-4、5 = バリエーション（接続がインサーションのとき）。そのエフェクトは MU の側で
 	// どれかのパートに割り当ててあること（割り当ての無いインサーションは音を通さない）。

@@ -3186,6 +3186,115 @@ static void board_insert_set(int ch, int slot, xg::model &m, bridge &br)
 		br.send(m.set(P(FX_SLOTS[slot - 1].part_key), 0, 64));
 }
 
+// ボードのチャンネルの音色の品書き。本体のパートの品書き（xgui::program_menu）と同じ形:
+//   DLS のボード: 分類（GM の 16 組）→ 基本の音色 → バンク違い、その下にドラムキット
+//   FC ボード・オリジナルのボード: 持っている音色をそのまま並べる
+// 選ぶと、口 E のそのチャンネルへバンクセレクトとプログラムチェンジを送る。DLS のボードでは、ドラムキットを
+// 選ぶとそのチャンネルをドラムのパートに、メロディの音色を選ぶとメロディのパートにする（XG のパートのモード）
+void overview::board_program_menu(int kind, int ch, const mu2000::board_part &p, bridge &br)
+{
+	if (ImGui::IsWindowAppearing()) {
+		m_board.ask_voices(br);
+		m_board_voices.clear();
+	}
+	if (m_board_voices.empty())
+		m_board_voices = m_board.voices();
+	const std::vector<mu2000::board_voice> &all = m_board_voices;
+	const bool dls = kind == mu2000::VBOARD_DLS;
+	const auto pick = [&](const mu2000::board_voice &v) {
+		if (dls && v.drum != p.drum)
+			board_view::send(br, { 0xf0, 0x43, 0x10, 0x4c, 0x08, ch, 0x07, v.drum ? 1 : 0, 0xf7 });
+		board_view::send(br, { 0xb0 | ch, 0, v.msb, 0xb0 | ch, 32, v.lsb, 0xc0 | ch, v.program });
+	};
+	const auto is_now = [&](const mu2000::board_voice &v) {
+		return v.drum == p.drum && v.program == p.program && (v.drum || (v.msb == p.msb && v.lsb == p.lsb));
+	};
+
+	ImGui::TextDisabled(UI_TEXT(xgui_part_fmt, "Part %s"), (std::string("E") + (ch < 9 ? "0" : "") + std::to_string(ch + 1)).c_str());
+	ImGui::Separator();
+	if (all.empty()) {
+		ImGui::TextDisabled("%s", UI_TEXT(ov_board_no_voices, "The board has no voices yet"));
+		return;
+	}
+	if (!dls) {
+		for (const mu2000::board_voice &v : all) {
+			char label[48];
+			std::snprintf(label, sizeof(label), "%3d  %s", v.program + 1, v.name);
+			if (ImGui::MenuItem(label, nullptr, is_now(v)))
+				pick(v);
+		}
+		return;
+	}
+	// ---- 分類 → 基本の音色（プログラム番号）→ その音色のバンク違い
+	for (int g = 0; g < 16; g++) {
+		bool any = false;
+		for (const mu2000::board_voice &v : all)
+			any |= !v.drum && v.program / 8 == g;
+		if (!any)
+			continue;
+		if (ImGui::BeginMenu(gm_group_name(g))) {
+			for (int i = g * 8; i < g * 8 + 8; i++) {
+				// その番号の音色。先頭はバンク 0（基本の音色）
+				std::vector<const mu2000::board_voice *> list;
+				for (const mu2000::board_voice &v : all)
+					if (!v.drum && v.program == i) {
+						if (v.msb == 0 && v.lsb == 0)
+							list.insert(list.begin(), &v);
+						else
+							list.push_back(&v);
+					}
+				if (list.empty())
+					continue;
+				const bool current = !p.drum && p.program == i;
+				char label[64];
+				std::snprintf(label, sizeof(label), "%3d  %s", i + 1, list[0]->name);
+				if (list.size() == 1) {
+					if (ImGui::MenuItem(label, nullptr, current))
+						pick(*list[0]);
+					continue;
+				}
+				char with_count[80];
+				std::snprintf(with_count, sizeof(with_count), UI_TEXT(cap_count_fmt, "%s (%d)"), label, int(list.size()));
+				if (ImGui::BeginMenu(with_count)) {
+					for (const mu2000::board_voice *v : list) {
+						char item[64];
+						std::snprintf(item, sizeof(item), "%-10s  MSB %d / LSB %d", v->name, v->msb, v->lsb);
+						if (ImGui::MenuItem(item, nullptr, is_now(*v)))
+							pick(*v);
+					}
+					ImGui::EndMenu();
+				}
+				if (current) {
+					ImGui::SameLine();
+					ImGui::TextDisabled("●");
+				}
+			}
+			ImGui::EndMenu();
+		}
+		if (!p.drum && p.program / 8 == g) {          // いまの分類に印
+			ImGui::SameLine();
+			ImGui::TextDisabled("●");
+		}
+	}
+	// ---- ドラムキット
+	ImGui::Separator();
+	if (ImGui::BeginMenu(UI_TEXT(xgui_kit_drum, "Drum kit"))) {
+		for (const mu2000::board_voice &v : all) {
+			if (!v.drum)
+				continue;
+			char label[48];
+			std::snprintf(label, sizeof(label), "%3d  %s", v.program + 1, v.name);
+			if (ImGui::MenuItem(label, nullptr, is_now(v)))
+				pick(v);
+		}
+		ImGui::EndMenu();
+	}
+	if (p.drum) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("●");
+	}
+}
+
 // マルチパートの架空のボード（16 パートの FC ボード・DLS ボード・オリジナルのボード）が挿さっていれば、口 E の
 // 16 チャンネルを 64 パートの下に並べる。**本体のパートの行（row）と同じ並び・同じ絵**で描く:
 // 名前の欄に LCD の絵と音色名、VEL メーター、値の棒（上に棒、下に数。ドラッグ・ホイール・ダブルクリックで入力）、
@@ -3217,24 +3326,11 @@ void overview::board_rows(xg::model &m, bridge &br, float h)
 			const bool hovered = ImGui::IsItemHovered();
 			if (hovered)
 				dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_HeaderHovered, 0.4f));
-			// 音色を選ぶ（右クリック・ダブルクリック）。本体の音色の品書きは使えないので、番号で
+			// 音色を選ぶ品書き（右クリック・ダブルクリック）。本体のパートと同じ形で、ボードの音色を並べる
 			if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 				ImGui::OpenPopup("program");
 			if (ImGui::BeginPopupContextItem("program")) {
-				ImGui::TextDisabled("E%02d", ch + 1);
-				int msb = p.msb, prog = p.program + 1;
-				bool send = false;
-				if (banks && !p.drum) {
-					ImGui::SetNextItemWidth(fs * 6);
-					send |= ImGui::InputInt(UI_TEXT(me_bp_bank, "Bank"), &msb);
-				}
-				ImGui::SetNextItemWidth(fs * 6);
-				send |= ImGui::InputInt(UI_TEXT(me_bp_program, "Program"), &prog);
-				if (send) {
-					msb = std::clamp(msb, 0, 127);
-					prog = std::clamp(prog, 1, 128);
-					board_view::send(br, { 0xb0 | ch, 0, msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, prog - 1 });
-				}
+				board_program_menu(kind, ch, p, br);
 				ImGui::EndPopup();
 			}
 			char label[8];
@@ -3272,7 +3368,7 @@ void overview::board_rows(xg::model &m, bridge &br, float h)
 			dl->AddText(ImVec2(text_x, pos.y + fs * 1.15f), col(ImGuiCol_TextDisabled), sub);
 			dl->PopClipRect();
 			if (hovered)
-				ImGui::SetItemTooltip("%s", UI_TEXT(ov_board_row_tip, "A channel of the plug-in board on port E (not one of the MU's parts). Right-click or double-click to choose its voice by number."));
+				ImGui::SetItemTooltip("%s", UI_TEXT(ov_board_row_tip, "A channel of the plug-in board on port E (not one of the MU's parts). Right-click or double-click to choose its voice."));
 		}
 
 		// ---- VEL メーター
