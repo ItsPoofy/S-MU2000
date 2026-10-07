@@ -478,8 +478,14 @@ void master_editor::board_slot_pane(bridge &br, int slot, const std::string &kin
 		if (kind_changed) {
 			if (mu2000::board_is_multi(m_board_kind[slot]))
 				for (int o = 0; o < mu2000::PLG_SLOTS; o++)
-					if (o != slot && mu2000::board_is_multi(m_board_kind[o]))
+					if (o != slot && mu2000::board_is_multi(m_board_kind[o])) {
+						// マルチパートのボードは 1 枚だけ（音源の側で前のものが外れる）。その欄も外し、
+						// 古い返事で戻さないようにする
 						m_board_kind[o] = 0;
+						m_board_booting[o] = false;
+						m_board_touched[o] = now + 1.0;
+						m_board_seen[o]->store(-1);
+					}
 			m_board_booting[slot] = m_board_kind[slot] != 0;
 			m_board_touched[slot] = now + 1.0;           // 起動し直しが始まるまでの古い返事を読まない
 			br.request_restart();
@@ -503,8 +509,9 @@ void master_editor::board_slot_pane(bridge &br, int slot, const std::string &kin
 	}
 	if (seen < 0 || now - m_board_touched[slot] < 1.0)
 		return;
-	// 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）
-	if (!m_board_booting[slot] && !m_board_kind[slot] && (seen & 0x3800))
+	// 欄を音源の側に合わせる: 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）や、
+	// ほかの差込口にマルチパートのボードを挿して、ここのボードが外れたとき
+	if (!m_board_booting[slot] && m_board_kind[slot] != ((seen >> 11) & 7))
 		m_board_kind[slot] = (seen >> 11) & 7;
 	if (!m_board_kind[slot])
 		return;
@@ -529,6 +536,7 @@ void master_editor::board_slot_pane(bridge &br, int slot, const std::string &kin
 	if (m_board_kind[slot] == mu2000::VBOARD_USER || m_board_kind[slot] == mu2000::VBOARD_USER16)
 		board_user_pane(br);
 	if (mu2000::board_is_multi(m_board_kind[slot])) {
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_one_multi, "Only one 16-part board at a time (there is one port E): plugging another one in unplugs this one"));
 		ImGui::TextDisabled("%s", (seen & 0x100) ? UI_TEXT(me_board_port_e, "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels")
 		                                         : UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 		return;

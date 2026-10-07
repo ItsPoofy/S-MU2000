@@ -328,6 +328,7 @@ inline const ui_texts &ja_texts()
 		.me_board_part = "パート",
 		.me_board_booting = "ボードを見つけさせるため、MU を起動し直している…",
 		.me_board_idle = "いまは鳴らない: そのパートが別のバンクになっている。バンク MSB %d・LSB 0 を選ぶとボードが鳴る",
+		.me_board_one_multi = "16 パートのボードは 1 枚だけ（口 E は 1 つ）。別の差込口に挿すと、こちらは外れる",
 		.me_board_unknown = "MU はまだ気づいていない。電源スイッチを押して MU を起動し直すと UTIL → PLG に並ぶ",
 		.me_board_off = "UTIL → PLG に並んでいる。そこの PartAssign が off なので、ボードは鳴らない",
 		.me_board_known = "UTIL → PLG に並んでいる。そこの PartAssign でも動かせる（パート 1-16）",

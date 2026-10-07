@@ -328,6 +328,7 @@ inline const ui_texts &en_texts()
 		.me_board_part = "Part",
 		.me_board_booting = "Restarting the MU so that it finds the board...",
 		.me_board_idle = "Silent now: that part is on another bank. Select bank MSB %d, LSB 0 there to hear the board",
+		.me_board_one_multi = "Only one 16-part board at a time (there is one port E): plugging another one in unplugs this one",
 		.me_board_unknown = "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG",
 		.me_board_off = "Listed under UTIL > PLG. PartAssign is off there, so the board is silent",
 		.me_board_known = "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)",
