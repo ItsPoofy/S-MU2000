@@ -25,6 +25,7 @@
 #include "rom_search.h"
 #include "ui/app_ios.h"
 #include "ui/engine.h"
+#include "ui/file_ask_ios.h"
 #include "ui/rom_import_ios.h"
 #include "ui/layout.h"
 #include "ui/options.h"
@@ -166,6 +167,10 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	// Network MIDI endpoints only exist while the session is enabled, so apply
 	// the stored switch before anything enumerates ports.
 	ui::apply_stored_midi_setup();
+	// The editors' file requests have answers here (document pickers), which is
+	// what makes them offer buttons rather than the path box they fall back to
+	// when a platform has no dialogs.
+	ui::enable_file_dialogs();
 	// Creates the audio objects now (needs no firmware); opening them waits for
 	// boot below. Without this out stays null and start_audio refuses - which is
 	// exactly the silence with no log line, since nothing ever tried.

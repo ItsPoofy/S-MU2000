@@ -33,6 +33,7 @@
 #include "ui/master_editor.h"
 #include "ui/sampling_editor.h"
 #include "ui/menu.h"
+#include "ui/file_ask_ios.h"
 #include "ui/menu_ios.h"
 #include "ui/overview.h"
 #include "ui/part_shapes.h"
@@ -147,6 +148,9 @@
 		                         owner->repaint(dl, fonts,
 		                                        (int)b.size.width, (int)b.size.height);
 	                         });
+	// Same rule as the standalone: a file request is answered here, after the
+	// frame, where a picker may be presented.
+	ui::service_file_asks(self);
 }
 
 // The first taps, logged like the mac twin's noteClick: when touch does not

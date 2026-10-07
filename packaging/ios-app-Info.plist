@@ -114,6 +114,12 @@
 			</array>
 		</dict>
 	</dict>
+	<!-- Files the app keeps a copy of (a playlist's MIDI, a DLS bank, a card
+	     image) go in Documents, so they have to be somewhere the user can reach:
+	     this key is what puts "On My iPhone > S-MU2000" in Files. Without it the
+	     copies would sit in the container where nothing but the app can go. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

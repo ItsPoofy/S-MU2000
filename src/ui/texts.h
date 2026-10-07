@@ -166,6 +166,10 @@ struct ui_texts {
 	const char *note_export_fail;
 	const char *note_imported;
 	const char *note_import_fail;
+	// iOS only: a picked file cannot be kept where it is (the grant dies with
+	// the process), so a copy lands in the app's own Documents folder, which
+	// Files shows as "On My iPhone > S-MU2000". %s is the folder name
+	const char *note_kept_fmt;
 	const char *note_sysex_busy_fmt; // %zu
 	const char *note_sysex_idle;
 	// XG editor shared (xg_ui.cpp): part parameter groups, the voice

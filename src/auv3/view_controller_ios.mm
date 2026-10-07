@@ -15,6 +15,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
 
+#include "ui/file_ask_ios.h"
 #include "vst3/engine.h"
 #include "vst3/panel_uiview.h"
 
@@ -37,6 +38,11 @@
 
 - (void)loadView
 {
+	// The editors in this panel have file requests, and this process answers them
+	// with document pickers - which is what makes them offer buttons instead of
+	// the path box they fall back to without dialogs. The standalone's main does
+	// the same at start-up.
+	ui::enable_file_dialogs();
 	// CGSizeZero: the size is the panel's business (the AUv2 takes the host's
 	// word for it instead)
 	UIView *panel = _eng ? smu2000::vst3::make_panel_uiview(*_eng, CGSizeZero, _au) : nil;

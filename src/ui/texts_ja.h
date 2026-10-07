@@ -137,6 +137,7 @@ inline const ui_texts &ja_texts()
 		.note_export_fail = "書き出せない",
 		.note_imported = "読み込んだ",
 		.note_import_fail = "読めなかった",
+		.note_kept_fmt = "%s に入れた（Files の「On My iPhone > S-MU2000」で見える・消せる）",
 		.note_sysex_busy_fmt = "読み込み中（SysEx %zu 通）",
 		.note_sysex_idle = "SysEx が入っていない",
 		.xgui_group_voice = "音色",

@@ -137,6 +137,7 @@ inline const ui_texts &en_texts()
 		.note_export_fail = "Cannot export",
 		.note_imported = "Imported",
 		.note_import_fail = "Could not import",
+		.note_kept_fmt = "Copied into %s (Files: On My iPhone > S-MU2000)",
 		.note_sysex_busy_fmt = "Loading (%zu SysEx messages)",
 		.note_sysex_idle = "No SysEx found",
 		.xgui_group_voice = "Voice",

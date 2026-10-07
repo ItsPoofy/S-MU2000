@@ -842,6 +842,7 @@ MAC_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
 MAC_IMGUI_SRCS := $(IMGUI_CORE) \
                   $(IMGUI_DIR)/backends/imgui_impl_metal.mm
 MAC_PC_SRCS    := src/ui/pc_editor.cpp src/ui/pc_window_mac.mm src/ui/xg_ui.cpp \
+                  src/ui/file_ask_mac.mm \
                   src/ui/overview.cpp src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
                   src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp src/ui/sampling_library.cpp src/ui/fx_icons.cpp
 MAC_PC_OBJS    := $(MAC_IMGUI_SRCS) $(MAC_PC_SRCS)
@@ -1492,7 +1493,7 @@ IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
                src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
                src/ui/master_editor.cpp src/ui/sampling_editor.cpp \
                src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp \
-               src/ui/fx_icons.cpp
+               src/ui/sampling_library.cpp src/ui/fx_icons.cpp
 
 # The AUv3-UI: factory_ios.mm is the AUViewController + factory (one class,
 # like macOS), view_controller_ios.mm hosts the shared panel through
@@ -1507,7 +1508,7 @@ IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
                  src/mu2000.cpp \
                  src/vst3/engine.cpp src/vst3/iids.cpp src/vst3/view.cpp \
                  src/vst3/panel_uiview.mm src/vst3/view_ios.mm src/ui/menu_ios.mm src/ui/pc_window_ios.mm \
-                 src/ui/rom_import_ios.mm \
+                 src/ui/rom_import_ios.mm src/ui/file_ask_ios.mm \
                  $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
 IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
 IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
@@ -1715,7 +1716,7 @@ IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/xg/model.cpp \
                 src/ui/window_ios.mm src/ui/app_ios.cpp src/ui/pc_window_ios.mm \
                 src/ui/menu_ios.mm src/ui/presenter_ios.mm \
-                src/ui/rom_import_ios.mm \
+                src/ui/rom_import_ios.mm src/ui/file_ask_ios.mm \
                 src/ios/app.mm
 
 # MIDI: CoreMIDI, shared with macOS. CoreMIDI.h is complete on iOS -

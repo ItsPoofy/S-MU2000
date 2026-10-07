@@ -28,6 +28,7 @@
 #include "ui/window_ios.h"
 
 #include "ui/app_ios.h"
+#include "ui/file_ask_ios.h"
 #include "ui/menu_ios.h"
 #include "ui/presenter_ios.h"
 #include "ui/texts.h"
@@ -202,6 +203,10 @@
 	                     ^(ImDrawList *dl) {
 		                     app_->paint_main(dl, fonts_, (int)b.size.width);
 	                     });
+	// After the frame, never inside it: a picker must not open while ImGui is
+	// between NewFrame and Render (the shared layer's rule, and why Windows
+	// opens its dialogs from a window message).
+	ui::service_file_asks(self);
 	self->frames++;
 }
 
