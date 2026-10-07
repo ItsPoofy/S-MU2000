@@ -414,7 +414,8 @@ void master_editor::board_pane(bridge &br)
 	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0' +
 	                          UI_TEXT(me_board_dls, "DLS board, 16 parts on port E") + '\0' +
 	                          UI_TEXT(me_board_user, "Your own board (waves you made)") + '\0' +
-	                          UI_TEXT(me_board_user16, "Your own board, 16 parts on port E") + '\0';
+	                          UI_TEXT(me_board_user16, "Your own board, 16 parts on port E") + '\0' +
+	                          UI_TEXT(me_board_fm16, "FM board (4-operator FM), 16 parts on port E") + '\0';
 	// 差込口は実機と同じ 3 つ（PLG-1〜3）。1 段ずつ
 	for (int slot = 0; slot < mu2000::PLG_SLOTS; slot++) {
 		ImGui::PushID(slot);

@@ -3326,7 +3326,7 @@ void mu2000::set_virtual_board(int kind, int part, int slot)
 	if (slot < 0 || slot >= PLG_SLOTS)
 		return;
 	vb_slot &s = m_vbs[size_t(slot)];
-	kind = kind >= VBOARD_FC && kind <= VBOARD_USER16 ? kind : VBOARD_NONE;
+	kind = kind >= VBOARD_FC && kind < VBOARD_KINDS ? kind : VBOARD_NONE;
 	part = std::clamp(part, 0, 63);
 	if (kind == s.kind && part == s.part && s.on)
 		return;
@@ -3421,7 +3421,7 @@ void mu2000::vb_from_firmware(vb_slot &s, const std::vector<u8> &m)
 			if (s.kind == VBOARD_USER || s.kind == VBOARD_USER16)
 				std::snprintf(name, sizeof(name), "%-14.14s", m_vb_user_board ? m_vb_user_board->name : "MY BOARD");
 			else if (s.kind != VBOARD_FC)
-				std::snprintf(name, sizeof(name), "%-14.14s", s.kind == VBOARD_DLS ? "DLS BOARD" : "FC16 BOARD");
+				std::snprintf(name, sizeof(name), "%-14.14s", s.kind == VBOARD_DLS ? "DLS BOARD" : s.kind == VBOARD_FM16 ? "FM BOARD" : "FC16 BOARD");
 			r.insert(r.end(), name, name + 14);
 			break;
 		}
@@ -3594,6 +3594,7 @@ void mu2000::vb16_reset(bool voices)
 	if (voices) {
 		m_vb_dls.reset();
 		m_vb_user16.reset();
+		m_vb_fm.reset();
 		m_vb16_parse = vb_parse();
 		m_vb16_sx.clear();
 	}
@@ -3627,7 +3628,7 @@ void mu2000::board_midi_in(u8 byte)
 {
 	if (!(multi_kind() != 0) || byte >= 0xf8)
 		return;
-	const bool dls = multi_kind() == VBOARD_DLS, user = multi_kind() == VBOARD_USER16;
+	const bool dls = multi_kind() == VBOARD_DLS, user = multi_kind() == VBOARD_USER16, fm = multi_kind() == VBOARD_FM16;
 	// SysEx は、リセット（XG System On F0 43 1n 4C 00 00 7E 00 F7、GM System On F0 7E 7F 09 01 F7、
 	// GS リセット F0 41 dd 42 12 40 00 7F 00 41 F7）と、DLS のボードではドラムのパートの指定を読む:
 	//   GS「リズムパートに使う」 F0 41 dd 42 12 40 1x 15 vv 和 F7（x = 0 はチャンネル 10、1-9 は 1-9、A-F は 11-16。vv = 0 でメロディ）
@@ -3646,8 +3647,10 @@ void mu2000::board_midi_in(u8 byte)
 			} else if (gs && (sx[6] & 0xf0) == 0x10 && sx[7] == 0x15) {
 				const int x = sx[6] & 15;
 				m_vb_dls.set_drum(x == 0 ? 9 : x <= 9 ? x - 1 : x, sx[8] != 0);
+				m_vb_fm.set_drum(x == 0 ? 9 : x <= 9 ? x - 1 : x, sx[8] != 0);
 			} else if (xg && sx[4] == 0x08 && sx[5] < 16 && sx[6] == 0x07) {
 				m_vb_dls.set_drum(sx[5], sx[7] != 0);
+				m_vb_fm.set_drum(sx[5], sx[7] != 0);
 			}
 			m_vb16_sx.clear();
 		} else if ((byte & 0x80) || m_vb16_sx.size() >= 12) {
@@ -3716,6 +3719,8 @@ void mu2000::board_midi_in(u8 byte)
 				m_vb_dls.midi(p.status, 121, 0);
 			} else if (user) {
 				m_vb_user16.midi(p.status, 121, 0);
+			} else if (fm) {
+				m_vb_fm.midi(p.status, 121, 0);
 			} else {
 				c.fc.midi(0xe0, 0x00, 0x40);
 				c.fc.midi(0xb0, 1, 0);
@@ -3728,6 +3733,8 @@ void mu2000::board_midi_in(u8 byte)
 		m_vb_dls.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
 	else if (user)
 		m_vb_user16.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
+	else if (fm)
+		m_vb_fm.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
 	else
 		c.fc.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
 }
@@ -3752,6 +3759,11 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 	} else if (kind == VBOARD_FC16) {
 		for (int i = 0; i < 16; i++)
 			add(false, 0, 0, u8(i), smu2000::vboard::fc_program_name(i));
+	} else if (kind == VBOARD_FM16) {
+		// プログラム番号は GM の並び（分類ごとに 2 つの音色を 4 つずつ）。ドラムは 1 つ
+		for (int i = 0; i < 128; i++)
+			add(false, 0, 0, u8(i), smu2000::vboard::fm_patch_of(i).name);
+		add(true, 0, 0, 0, "FM Kit");
 	} else if (kind == VBOARD_USER16 && m_vb_user_board) {
 		for (int i = 0; i < smu2000::vboard::user_board::PROGRAMS; i++)
 			if (const auto &p = m_vb_user_board->program[size_t(i)])
@@ -3788,6 +3800,10 @@ void mu2000::board_parts(board_part out[16])
 			m_vb_dls.channel_voice(i, o.msb, o.lsb, o.program, o.drum, ins);
 			if (ins)
 				name = ins->name.c_str();
+		} else if (multi_kind() == VBOARD_FM16) {
+			o.program = m_vb_fm.program(i);
+			o.drum = m_vb_fm.drum(i);
+			name = o.drum ? "FM Kit" : smu2000::vboard::fm_patch_of(o.program).name;
 		} else if (multi_kind() == VBOARD_USER16) {
 			o.program = m_vb_user16.program(i);
 			name = m_vb_user16.program_name(o.program);
@@ -3847,6 +3863,15 @@ bool mu2000::vb16_mix(float bus[][2])
 			for (int i = 0; i < 16; i++)
 				if (ch[i][0] != 0.0f || ch[i][1] != 0.0f)
 					mix(m_vb16[size_t(i)], ch[i][0], ch[i][1]);
+		}
+	} else if (multi_kind() == VBOARD_FM16) {
+		if (m_vb_fm.sounding()) {
+			any = true;
+			float ch[16] = {};
+			m_vb_fm.render(ch);
+			for (int i = 0; i < 16; i++)
+				if (ch[i] != 0.0f)
+					mix(m_vb16[size_t(i)], ch[i], ch[i]);
 		}
 	} else if (multi_kind() == VBOARD_USER16) {
 		if (m_vb_user16.sounding()) {

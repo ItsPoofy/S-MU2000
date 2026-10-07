@@ -292,6 +292,7 @@ inline const ui_texts &en_texts()
 		.me_board_dls = "DLS board, 16 parts on port E",
 		.me_board_user = "Your own board (waves you made)",
 		.me_board_user16 = "Your own board, 16 parts on port E",
+		.me_board_fm16 = "FM board (4-operator FM), 16 parts on port E",
 		.me_board_user_none = "(no board)",
 		.me_board_user_tip = "A board of your own: waves made on the Sampling window's \"Make a wave\" tab, one per program number. Program change picks the wave; the display shows the names you gave. Only waves computed there can go in (no built-in waves, no recordings). Boards are kept in the \"boards\" folder of the settings folder, one file each.",
 		.me_board_user_empty = "No board yet: make one in Sampling > Make a wave",

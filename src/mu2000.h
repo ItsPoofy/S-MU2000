@@ -15,6 +15,7 @@
 #include "sampling.h"
 #include "vboard.h"
 #include "vboard_dls.h"
+#include "vboard_fm.h"
 #include "vboard_user.h"
 #include "voice_lib.h"
 #include "smartmedia.h"
@@ -314,8 +315,12 @@ public:
 	// VBOARD_USER と VBOARD_USER16 は**オリジナルのボード**（src/vboard_user.h）。使う人が「波形を作る」で計算した波形を
 	// プログラム番号に割り当てたもの（set_user_board で渡す）。VBOARD_USER は FC ボードと同じ 1 パートのボードで、
 	// 本体のパートを 1 つ借り、音色名は液晶に出る。VBOARD_USER16 は口 E の 16 パート
-	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2, VBOARD_DLS = 3, VBOARD_USER = 4, VBOARD_USER16 = 5 };
-	static bool board_is_multi(int kind) { return kind == VBOARD_FC16 || kind == VBOARD_DLS || kind == VBOARD_USER16; }
+	//
+	// VBOARD_FM16 は **FM ボード**（src/vboard_fm.h）。4 オペレーターの FM 音源で、口 E の 16 パート。音色は 32 個
+	// （プログラム番号は GM の並び）、チャンネル 10 は FM のドラム
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2, VBOARD_DLS = 3, VBOARD_USER = 4, VBOARD_USER16 = 5, VBOARD_FM16 = 6,
+	       VBOARD_KINDS };
+	static bool board_is_multi(int kind) { return kind == VBOARD_FC16 || kind == VBOARD_DLS || kind == VBOARD_USER16 || kind == VBOARD_FM16; }
 	// オリジナルのボードの中身と、そのファイルの場所（設定に覚えるため。空でもよい）。音を作る糸から呼ぶこと
 	void set_user_board(std::shared_ptr<const smu2000::vboard::user_board> board, const std::string &path);
 	const std::string &user_board_path() const { return m_vb_user_path; }
@@ -1149,6 +1154,7 @@ private:
 	std::string m_vb_dls_path;
 	// オリジナルのボード。16 パートのときの音源（1 パートのときの音源は差込口ごとに持つ）と、中身
 	smu2000::vboard::user_synth m_vb_user16;
+	smu2000::vboard::fm_synth m_vb_fm;         // VBOARD_FM16 の音源
 	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
 	std::string m_vb_user_path;
 	vb_parse m_vb16_parse;
