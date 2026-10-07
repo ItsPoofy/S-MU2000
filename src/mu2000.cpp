@@ -3562,8 +3562,12 @@ void mu2000::vb16_reset(bool voices)
 		c.rev = 40;
 		c.cho = 0;
 		c.var = 0;
-		if (voices)
+		c.mod = c.hold = 0;
+		c.bend = 0;
+		if (voices) {
 			c.insert = 0;
+			c.notes[0] = c.notes[1] = 0;
+		}
 		vb16_gain(c);
 	}
 	if (voices) {
@@ -3645,6 +3649,37 @@ void mu2000::board_midi_in(u8 byte)
 		return;
 	p.n = 0;
 	vb_chan &c = m_vb16[p.status & 15];
+	// 画面に見せる演奏の様子
+	switch (p.status & 0xf0) {
+	case 0x90:
+		if (p.d[1]) {
+			c.notes[p.d[0] >> 6] |= u64(1) << (p.d[0] & 63);
+			c.velocity = p.d[1];
+			c.note_ons++;
+			break;
+		}
+		[[fallthrough]];
+	case 0x80:
+		c.notes[p.d[0] >> 6] &= ~(u64(1) << (p.d[0] & 63));
+		break;
+	case 0xe0:
+		c.bend = s16(((p.d[1] << 7) | p.d[0]) - 8192);
+		break;
+	case 0xb0:
+		if (p.d[0] == 1)
+			c.mod = p.d[1];
+		else if (p.d[0] == 64)
+			c.hold = p.d[1];
+		else if (p.d[0] == 120 || p.d[0] == 123)
+			c.notes[0] = c.notes[1] = 0;
+		else if (p.d[0] == 121) {
+			c.mod = c.hold = 0;
+			c.bend = 0;
+		}
+		break;
+	default:
+		break;
+	}
 	if ((p.status & 0xf0) == 0xb0) {
 		switch (p.d[0]) {
 		case 7:   c.vol = p.d[1]; vb16_gain(c); return;
@@ -3689,6 +3724,13 @@ void mu2000::board_parts(board_part out[16])
 		o.cho = c.cho;
 		o.var = c.var;
 		o.insert = c.insert;
+		o.notes[0] = c.notes[0];
+		o.notes[1] = c.notes[1];
+		o.velocity = c.velocity;
+		o.mod = c.mod;
+		o.hold = c.hold;
+		o.bend = c.bend;
+		o.note_ons = c.note_ons;
 		o.level = c.peak;
 		c.peak *= 0.6f;                    // 読むたびに下げる（画面は 1 秒に 30 回ほど読む）
 		const char *name = "";

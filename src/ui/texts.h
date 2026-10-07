@@ -344,6 +344,8 @@ struct ui_texts {
 	const char *me_bp_variation;
 	const char *me_bp_insert_tip;
 	const char *ov_board_row_tip;
+	const char *ov_board_sub_fmt;
+	const char *ov_board_ins_none;
 	const char *me_board_dls_open;
 	const char *me_board_dls_path;
 	const char *me_board_dls_load;

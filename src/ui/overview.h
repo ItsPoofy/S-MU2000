@@ -148,6 +148,9 @@ private:
 	// マルチパートの架空のボードの 16 チャンネル（口 E）を、64 パートの下に並べる
 	void board_rows(xg::model &m, bridge &br, float h);
 	board_view m_board;
+	float m_board_level[16] = {};           // VEL メーターの今の高さ
+	u32 m_board_seen_ons[16] = {};
+	int m_board_playing[16] = {};           // 画面の鍵盤で鳴らしている鍵 + 1（0 = 無し）
 	// INS 列の 1 マス。掛かっているエフェクトの印（1-4、V）を横に並べる。names なら種類の名前も。
 	// which で並べるものを絞る（パートの音色の窓はインサーションとバリエーションを別の場所に出す）。
 	// 右クリックで掛ける・外す・種類、印のドラッグで別のパートへ、印のダブルクリックで設定の窓
