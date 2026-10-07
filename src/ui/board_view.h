@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace ui {
 
@@ -43,6 +44,21 @@ public:
 		std::copy(std::begin(m_info->part), std::end(m_info->part), out);
 		return m_info->kind;
 	}
+	// ボードで選べる音色の並びを聞く（品書きを開くとき）。答えは次のコマから voices で読める
+	void ask_voices(bridge &br)
+	{
+		br.post([info = m_info](mu2000 &mu) {
+			std::vector<mu2000::board_voice> v = mu.board_voices();
+			std::lock_guard<std::mutex> g(info->lock);
+			info->voices = std::move(v);
+			return std::string();
+		});
+	}
+	std::vector<mu2000::board_voice> voices() const
+	{
+		std::lock_guard<std::mutex> g(m_info->lock);
+		return m_info->voices;
+	}
 	// 口 E へ MIDI を送る
 	static void send(bridge &br, std::initializer_list<int> bytes)
 	{
@@ -63,7 +79,7 @@ public:
 	}
 
 private:
-	struct info { std::mutex lock; mu2000::board_part part[16]; int kind = 0; };
+	struct info { std::mutex lock; mu2000::board_part part[16]; int kind = 0; std::vector<mu2000::board_voice> voices; };
 	std::shared_ptr<info> m_info = std::make_shared<info>();
 };
 
