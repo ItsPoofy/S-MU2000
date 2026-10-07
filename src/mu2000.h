@@ -148,8 +148,9 @@ public:
 		if (port < 0 || port >= MIDI_PORTS)
 			port = 0;
 		// 架空のボードが挿さっていれば、そのパートが受ける MIDI を聞かせる（firmware にも今までどおり渡す）
-		if (vb_single())
-			vb_tap(byte, m_cable[port]);
+		for (vb_slot &vs : m_vbs)
+			if (vs.single())
+				vb_tap(vs, byte, m_cable[port]);
 		// native の口が動いているときは、鍵の上げ下げをこちらで処理する
 		// （firmware に渡さない）。詳しくは xg/native_driver.h
 		if (m_native_engine && native_midi(byte, port))
@@ -350,20 +351,27 @@ public:
 	// どれかのパートに割り当ててあること（割り当ての無いインサーションは音を通さない）。
 	// バリエーションへの送り（接続がシステムのとき）は CC94。音を作る糸から呼ぶこと
 	void set_board_insert(int channel, int slot);
-	int virtual_board_multi() const { return vb_multi() ? m_vb_kind : 0; }
+	int virtual_board_multi() const { return multi_kind(); }
 	const std::string &board_dls_path() const { return m_vb_dls_path; }
 	// 読んである DLS の音色の数・波形の数（読んでいなければ 0）
 	int board_dls_instruments() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->instruments.size()) : 0; }
 	int board_dls_waves() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->waves.size()) : 0; }
 	// 口 E に来た MIDI を 1 バイト（VBOARD_FC16 が挿さっているときだけ鳴る）。音を作る糸から呼ぶこと
 	void board_midi_in(u8 byte);
-	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号
-	bool virtual_board_playing() const { return vb_active(); }  // いまボードのバンクが選ばれている
-	void set_virtual_board(int kind, int part);
-	int virtual_board_kind() const { return m_vb_kind; }
-	int virtual_board_part() const { return m_vb_part; }
-	bool virtual_board_assigned() const { return m_vb_on; }     // false: firmware の PartAssign が off
-	bool virtual_board_known() const { return m_vb_known; }     // firmware がボードを見つけている
+	//
+	// **差込口は 3 つ**（実機の PLG-1〜3。slot は 0-2）。1 パートのボードは 3 枚まで挿せて、それぞれ別のパートを借りる。
+	// ボードのバンクは差込口ごとに違う（MSB 90・91・92、LSB 0。board_bank_msb）。マルチパートのボードは口 E を
+	// 1 つしか持てないので 1 枚だけ（別の差込口に挿すと、前のものは外れる）
+	enum { PLG_SLOTS = 3 };
+	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号（差込口 1。2・3 は 91・92）
+	static int board_bank_msb(int slot) { return VBOARD_BANK_MSB + std::clamp(slot, 0, PLG_SLOTS - 1); }
+	bool virtual_board_playing(int slot = 0) const { return vbs(slot).active(); }  // いまボードのバンクが選ばれている
+	void set_virtual_board(int kind, int part, int slot = 0);
+	int virtual_board_kind(int slot = 0) const { return vbs(slot).kind; }
+	int virtual_board_part(int slot = 0) const { return vbs(slot).part; }
+	bool virtual_board_assigned(int slot = 0) const { return vbs(slot).on; }     // false: firmware の PartAssign が off
+	bool virtual_board_known(int slot = 0) const { return vbs(slot).known; }     // firmware がボードを見つけている
+	bool virtual_board_any() const { return m_vb_any; }         // どれかの差込口に挿さっている
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、
@@ -1074,19 +1082,57 @@ private:
 	std::array<std::atomic<u32>, 2> m_scope_w{};          // チップごとの書いた数
 	u32 m_scope_tick = 0;
 	std::atomic<u64> m_part_mute{0};   // set_part_mute
-	// 架空のボード
-	int m_vb_kind = 0, m_vb_part = 0;
-	smu2000::vboard::fc_board m_vb_fc;
+	// 架空のボード。差込口（PLG-1〜3）ごとの様子
 	struct vb_parse { u8 status = 0; u8 d[2] = { 0, 0 }; int n = 0; };
-	vb_parse m_vb_parse[MIDI_PORTS];
-	u32 m_vb_tick = 0;
-	float m_vb_gain[6] = { 0, 0, 0, 0, 0, 0 };   // dry 左右・reverb 左右・chorus 左右
+	struct vb_slot {
+		int index = 0;                 // 差込口（0-2）
+		int kind = 0, part = 0;
+		bool on = true;                // パートが割り当たっている（firmware の PartAssign が off でない）
+		bool known = false;            // この起動で firmware に見つけてもらった
+		// 1 パートのボードの音源（FC か、オリジナル。オリジナルはチャンネル 0 だけ使う）
+		smu2000::vboard::fc_board fc;
+		smu2000::vboard::user_synth user;
+		vb_parse parse[MIDI_PORTS];
+		u32 tick = 0;
+		u32 resync = 0;                // 0 でなければ、このサンプル数のあとでバンクをワーク RAM から読み直す
+		float gain[6] = { 0, 0, 0, 0, 0, 0 };   // dry 左右・reverb 左右・chorus 左右
+		u8 bank[2] = { 0, 0 };         // そのパートでいま選ばれているバンク（MSB・LSB）
+		u8 bank_next[2] = { 0, 0 };    // バンクセレクトで届いた値（プログラムチェンジで効く）
+		std::vector<u8> msg;           // firmware → ボードの、組み立て中の SysEx
+		std::vector<u8> sx[MIDI_PORTS];    // MIDI で来た SysEx（パートの割り当てだけ読む）
+		bool single() const { return kind == VBOARD_FC || kind == VBOARD_USER; }
+		u8 bank_msb() const { return u8(VBOARD_BANK_MSB + index); }
+		// PartAssign の番地（4C 70 <ここ> 00）。差込口 1 は 00、2・3 は 41・42（ボードごとに違う番地にする）
+		u8 assign_mid() const { return index ? u8(0x40 + index) : u8(0x00); }
+		bool active() const { return single() && on && bank[0] == bank_msb() && bank[1] == VBOARD_BANK_LSB; }
+		void midi(u8 status, u8 d0, u8 d1)
+		{
+			if (kind == VBOARD_USER)
+				user.midi(status & 0xf0, d0, d1);
+			else
+				fc.midi(status, d0, d1);
+		}
+		void reset_voices()
+		{
+			fc.reset();
+			user.reset();
+		}
+	};
+	std::array<vb_slot, PLG_SLOTS> m_vbs = [] { std::array<vb_slot, PLG_SLOTS> a; for (int i = 0; i < PLG_SLOTS; i++) a[size_t(i)].index = i; return a; }();
+	const vb_slot &vbs(int slot) const { return m_vbs[size_t(std::clamp(slot, 0, PLG_SLOTS - 1))]; }
+	bool m_vb_any = false;             // どれかの差込口に挿さっている
+	// マルチパートのボードが挿さっていれば、その種類（1 枚だけ）
+	int multi_kind() const
+	{
+		for (const vb_slot &vs : m_vbs)
+			if (board_is_multi(vs.kind))
+				return vs.kind;
+		return 0;
+	}
 	bool m_vb_live = false;            // 入口にボードの音を入れてある（鳴りやんだら 1 度だけ空にする）
 	std::deque<u8> m_plg_rx[3];        // ボード → 本体の、まだ届けていないバイト
 	u32 m_plg_tick = 0;
 	plg_tx_fn m_plg_user;              // set_plg_tx で頼まれた先
-	bool m_vb_on = true;               // パートが割り当たっている（firmware の PartAssign が off でない）
-	bool m_vb_known = false;           // この起動で firmware に見つけてもらった
 	// 16 パートのボード（VBOARD_FC16）: チャンネルごとの音源と、ボードが自分で持つミキサーの値
 	struct vb_chan {
 		smu2000::vboard::fc_board fc;
@@ -1101,44 +1147,24 @@ private:
 	std::array<vb_chan, 16> m_vb16;
 	smu2000::vboard::dls_synth m_vb_dls;      // VBOARD_DLS の音源（ミキサーの値は m_vb16 のものを使う）
 	std::string m_vb_dls_path;
-	bool vb_multi() const { return board_is_multi(m_vb_kind); }
-	bool vb_single() const { return m_vb_kind == VBOARD_FC || m_vb_kind == VBOARD_USER; }
-	// オリジナルのボードの音源（1 パートのときはチャンネル 0 だけ、16 パートのときは 16 チャンネルを使う）
-	smu2000::vboard::user_synth m_vb_user;
+	// オリジナルのボード。16 パートのときの音源（1 パートのときの音源は差込口ごとに持つ）と、中身
+	smu2000::vboard::user_synth m_vb_user16;
 	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
 	std::string m_vb_user_path;
-	// 1 パートのボードの音源（FC か、オリジナル）へ
-	void vb1_midi(u8 status, u8 d0, u8 d1)
-	{
-		if (m_vb_kind == VBOARD_USER)
-			m_vb_user.midi(status & 0xf0, d0, d1);
-		else
-			m_vb_fc.midi(status, d0, d1);
-	}
-	void vb1_reset()
-	{
-		m_vb_fc.reset();
-		m_vb_user.reset();
-	}
 	vb_parse m_vb16_parse;
 	std::vector<u8> m_vb16_sx;
 	void vb16_reset(bool voices);
 	void vb16_gain(vb_chan &c);
-	void vb16_render();
-	u32 m_vb_resync = 0;               // 0 でなければ、このサンプル数のあとでバンクをワーク RAM から読み直す
-	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
-	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
-	bool vb_active() const { return vb_single() && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
-	void vb_bank_from_ram();
-	void vb_set_bank(u8 msb, u8 lsb);
-	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx
-	std::vector<u8> m_vb_sx[MIDI_PORTS];   // MIDI で来た SysEx（パートの割り当てだけ読む）
+	bool vb16_mix(float bus[][2]);
+	void vb_bank_from_ram(vb_slot &s);
+	void vb_set_bank(vb_slot &s, u8 msb, u8 lsb);
 	void plg_tx_byte(int chan, u8 targets, u8 byte);
-	void vb_from_firmware(const std::vector<u8> &m);
-	void vb_assign(u8 value);
+	void vb_from_firmware(vb_slot &s, const std::vector<u8> &m);
+	void vb_assign(vb_slot &s, u8 value);
 	void plg_pump();
-	void vb_tap(u8 byte, int port);
-	void vb_render();
+	void vb_tap(vb_slot &s, u8 byte, int port);
+	bool vb1_mix(vb_slot &s, float bus[][2]);
+	void vb_render_all();
 	bool m_mute_live = false;          // SWP30 に声のミュートを入れてある
 	u32 m_mute_tick = 0;
 	static void scope_tap_fn(void *ctx, const s32 *samples);
