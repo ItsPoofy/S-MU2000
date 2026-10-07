@@ -252,7 +252,7 @@ inline const ui_texts &en_texts()
 		.ps_about_route = "Which effects this part's sound goes through. Drag the send amounts up/down, wheel, or double-click to change. XG order is fixed VAR to CHO to REV; Flow opens and closes front-to-back sends to pick parallel or series order. Shift plus wheel scrolls sideways.",
 		.ps_tab_matrix = "Matrix",
 		.ps_hint_bar = "Hover over an item for an explanation here (uncheck Show help to hide this bar)",
-		.ps_board_note = "This is a channel of the plug-in board on port E, not one of the MU's parts. Pick its voice on the left. In the row above, drag the bars for volume, expression, pan, pitch bend, modulation and the variation / chorus / reverb sends; click INS to send the channel through an insertion effect; press the keys to play it.\n\nThe vibrato, filter, envelope and EQ pictures belong to the MU's own tone generator, so there are none for a board channel.",
+		.ps_board_note = "This is a channel of the plug-in board on port E, not one of the MU's parts. Pick its voice on the left. In the row above, drag the bars for volume, expression, pan, pitch bend, modulation and the variation / chorus / reverb sends; click INS to send the channel through an insertion effect; press the keys to play it, or play from the PC keyboard. Right-click keys to mark them: marked keys sound for a second each time you pick a voice.\n\nThe vibrato, filter, envelope and EQ pictures belong to the MU's own tone generator, so there are none for a board channel.",
 		.fxe_slider_tip_fmt = "%s  %s\nDrag up/down (Shift for fine), wheel, or double-click to type a value",
 		.fxe_noeffect = "NO EFFECT (pick a type to list its knobs here)",
 		.fxe_thru = "THRU (no parameters)",

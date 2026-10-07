@@ -148,7 +148,8 @@ private:
 	// マルチパートの架空のボードの 16 チャンネル（口 E）を、64 パートの下に並べる
 	void board_rows(xg::model &m, bridge &br, float h);
 	// その 1 行ぶん（表の行を始めた後に呼ぶ）
-	void board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h);
+	// strip は音色の窓の上のペイン: 鍵盤の右クリックは試聴の鍵の印、PC のキーボードで弾ける範囲の線も描く
+	void board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h, bool strip = false);
 	void board_pick(int kind, int ch, const mu2000::board_part &p, const mu2000::board_voice &v, bridge &br);
 	double m_board_voices_at = -10;         // 音色の並びを最後に聞いた時刻（出しっぱなしの面用）
 public:

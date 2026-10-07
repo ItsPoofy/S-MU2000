@@ -3205,6 +3205,7 @@ void overview::board_pick(int kind, int ch, const mu2000::board_part &p, const m
 // GM の並びのボードは分類の見出しで区切り、バンク違いは字下げして並べる。いまの音色に印
 void overview::board_voice_pane(int kind, int ch, const mu2000::board_part &p, bridge &br)
 {
+	audition_poll(br);                 // 試聴の鳴らし始めと止め
 	const double now = ImGui::GetTime();
 	if (now - m_board_voices_at > 1.0) {
 		m_board_voices_at = now;
@@ -3226,8 +3227,10 @@ void overview::board_voice_pane(int kind, int ch, const mu2000::board_part &p, b
 		else
 			std::snprintf(label, sizeof(label), "%3d  %s##%d.%d.%d.%d", v.program + 1, v.name, v.drum ? 1 : 0, v.msb, v.lsb, v.program);
 		const bool current = v.drum == p.drum && v.program == p.program && (v.drum || (v.msb == p.msb && v.lsb == p.lsb));
-		if (ImGui::Selectable(label, current))
+		if (ImGui::Selectable(label, current)) {
 			board_pick(kind, ch, p, v, br);
+			audition_board(ch, br);            // 鍵盤に印が付いていれば、替えた音色で鳴らす
+		}
 	};
 	if (!gm) {
 		for (const mu2000::board_voice &v : all)
@@ -3283,10 +3286,12 @@ void overview::board_strip(int kind, int ch, const mu2000::board_part &p, xg::mo
 		ImGui::TableSetupColumn("##keys", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableHeadersRow();
 		ImGui::TableNextRow(0, h);
-		board_row(kind, ch, p, m, br, h);
+		board_row(kind, ch, p, m, br, h, true);
 		ImGui::EndTable();
 	}
 	ImGui::PopStyleVar();
+	// PC のキーボードで弾く（口 E のそのチャンネルへ。本体のパートの鍵盤と同じ並び）
+	pc_keys(-1, PARTS + ch, br);
 }
 
 void overview::board_program_menu(int kind, int ch, const mu2000::board_part &p, bridge &br)
@@ -3409,7 +3414,7 @@ void overview::board_rows(xg::model &m, bridge &br, float h)
 	}
 }
 
-void overview::board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h)
+void overview::board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h, bool strip)
 {
 	ImGuiIO &io = ImGui::GetIO();
 	const float fs = ImGui::GetFontSize();
@@ -3639,7 +3644,14 @@ void overview::board_row(int kind, int ch, const mu2000::board_part &p, xg::mode
 		const float w = ImGui::GetContentRegionAvail().x;
 		const ImVec2 pos = ImGui::GetCursorScreenPos();
 		ImGui::InvisibleButton("##keys", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-		const bool down = ImGui::IsItemActive() && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right));
+		// 音色の窓では、右クリックは試聴の鍵の印を入れたり消したりするだけ（本体のパートの鍵盤と同じ）
+		if (strip && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+			int dummy = 0;
+			const int note = key_at(pos, w, h, io.MousePos, dummy);
+			if (note >= 0)
+				toggle_audition_key(PARTS + ch, note);
+		}
+		const bool down = ImGui::IsItemActive() && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || (!strip && ImGui::IsMouseDown(ImGuiMouseButton_Right)));
 		int vel = 100;
 		const int want = down ? key_at(pos, w, h, io.MousePos, vel) + 1 : 0;
 		if (want != m_board_playing[ch]) {
@@ -3649,11 +3661,34 @@ void overview::board_row(int kind, int ch, const mu2000::board_part &p, xg::mode
 			if (want)
 				board_view::send(br, { 0x90 | ch, want - 1, vel });
 		}
-		if (ImGui::IsItemHovered() && !down)
-			ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_play_tip, "Press to play (either mouse button). Lower is louder"));
+		if (ImGui::IsItemHovered() && !down) {
+			if (strip)
+				ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_audition_tip, "Left-click to play (lower is louder). Right-click to mark a key for voice audition, right-click again to clear it\n"
+				                                                  "Mark as many keys as you like for a chord; with no mark, changing voice plays nothing. Marks are per part and are not remembered\n"
+				                                                  "PC keyboard plays too, white keys only: the A row from C3, the Q row an octave up, the number row another octave up. Hold Z to flatten or X to sharpen what you play. Shift holds the modulation wheel up. PageUp / PageDown shift the octave"));
+			else
+				ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_play_tip, "Press to play (either mouse button). Lower is louder"));
+		}
 		draw_keys(dl, pos, w, h, [&](int note) -> ImU32 {
 			return ((p.notes[note >> 6] >> (note & 63)) & 1) ? NOTE_ON : 0;
 		});
+		if (strip) {
+			// PC のキーボードで弾ける範囲（鍵盤の下に細い線）と、試聴の鍵の目印（丸）
+			float a0, a1, ab, b0, b1, bb;
+			key_span(pos, w, h, m_pc_base, a0, a1, ab);
+			key_span(pos, w, h, std::min(127, m_pc_base + 16), b0, b1, bb);
+			dl->AddRectFilled(ImVec2(a0, pos.y + h - std::max(2.0f, fs * 0.12f)), ImVec2(b1, pos.y + h), IM_COL32(90, 170, 255, 200));
+			for (int n = 0; n < 128; n++) {
+				if (!audition_key(PARTS + ch, n))
+					continue;
+				float x0, x1, bottom;
+				key_span(pos, w, h, n, x0, x1, bottom);
+				const float r = std::max(2.0f, std::min((x1 - x0) * 0.45f, fs * 0.3f));
+				const ImVec2 c((x0 + x1) * 0.5f, bottom - r - fs * 0.15f);
+				dl->AddCircleFilled(c, r + 1.0f, IM_COL32(20, 20, 20, 255));
+				dl->AddCircleFilled(c, r, IM_COL32(60, 200, 120, 255));
+			}
+		}
 	}
 	ImGui::PopID();
 }

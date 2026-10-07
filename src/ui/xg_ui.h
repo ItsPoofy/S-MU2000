@@ -291,6 +291,11 @@ bool audition_key(int part, int note);
 void toggle_audition_key(int part, int note);
 // 印の付いた鍵を若い順に集める。戻りは数（out には最大 max 個）
 int  audition_keys(int part, int *out, int max);
+// 印は、マルチパートのボードのチャンネル（口 E の 0-15）にも付けられる。part に XG_PARTS + チャンネルを渡す。
+// audition_board は、そのチャンネルの音色を替えたときの試聴（印の付いた鍵を 1 秒鳴らす。印が無ければ鳴らさない）。
+// audition_poll は、鳴らし始めと止めを進める（描くたびに呼ぶ）
+void audition_board(int channel, bridge &br);
+void audition_poll(bridge &br);
 
 // ---- 説明（ヘルプ）。見出しや名前にカーソルを当てると、何に効くのかを出す（日本語・英語）。
 // 邪魔な人もいるので、窓の上のチェックボックスで消せる。選んだ状態は
