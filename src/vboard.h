@@ -93,6 +93,8 @@ public:
 		}
 	}
 
+	u8 program() const { return m_program; }
+
 	// 鳴っている声があるか（無ければ本体は入口を空にできる）
 	bool sounding() const
 	{
@@ -228,6 +230,16 @@ private:
 	double m_bend = 0.0, m_mod = 0.0, m_frame = 0.0, m_lfo = 0.0;
 	u32 m_age = 0;
 };
+
+// FC ボードのプログラム（0-15）の名前（8 文字。液晶と画面に出す）
+inline const char *fc_program_name(int program)
+{
+	static const char *const names[16] = {
+		"Square50", "Square25", "Square12", "Triangle", "Noise   ", "MetalNz ", "DutySwp ", "OctArp  ",
+		"Sq50 Dcy", "Sq25 Dcy", "Sq12 Dcy", "Tri Dcy ", "NoiseDcy", "MetalDcy", "SweepDcy", "ArpDcy  ",
+	};
+	return names[program & 15];
+}
 
 // パートの設定（MIDI の 0-127）を、ボードの音に掛ける倍率にする。本体の内蔵の音色と同じ「2 乗」の曲線（40log）
 inline float level_of(int value)

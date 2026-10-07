@@ -458,6 +458,7 @@ public:
 		// the imaginary plug-in board stays plugged in, like a real one
 		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
 		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
+		r.board_dls  = eng ? eng->mu.board_dls_path() : std::string();
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1123,6 +1124,11 @@ public:
 			play.set_thin_bends(r.thin_bends);
 			// The imaginary plug-in board goes in before the firmware boots, so
 			// that its "Checking PLG" finds it (the boot then skips the snapshot)
+			if (eng && !r.board_dls.empty()) {
+				std::string err;
+				if (!eng->mu.load_board_dls(r.board_dls, err))
+					std::fprintf(stderr, CLI_T("DLS board: %s (%s)\n", "DLS のボード: %s（%s）\n"), err.c_str(), r.board_dls.c_str());
+			}
 			if (eng && r.board)
 				eng->mu.set_virtual_board(r.board, r.board_part - 1);
 		}

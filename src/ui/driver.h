@@ -180,7 +180,7 @@ public:
 	{
 		sampling_tick(mu, br);
 		serve_defaults(mu, br);
-		br.set_board_port(mu.virtual_board_kind() == mu2000::VBOARD_FC16);
+		br.set_board_port(mu.virtual_board_kind() >= mu2000::VBOARD_FC16);
 		u8 b;
 		while (br.take_midi(b)) {
 			watch(b, mu.midi_in(b));

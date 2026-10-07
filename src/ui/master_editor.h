@@ -19,6 +19,8 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <string>
 
 namespace ui {
 
@@ -38,11 +40,20 @@ private:
 	void sysex_pane(const xg_snapshot &ram, bridge &br);
 	// 架空のプラグインボード（src/vboard.h）。挿すボードと、挿すパート（1-64）
 	void board_pane(bridge &br);
+	void board_dls_pane(bridge &br);
+	// マルチパートのボード（16 パートの FC ボード・DLS ボード）の 16 チャンネル: 音色・音量・パン・送り・メーター
+	void board_parts_pane(xg::model &m, bridge &br);
+	struct board_parts_info { std::mutex lock; mu2000::board_part part[16]; bool valid = false; };
+	std::shared_ptr<board_parts_info> m_board_parts = std::make_shared<board_parts_info>();
 	int m_board_kind = 0, m_board_part = 1;
 	// 音源の側のいまの様子（音声の糸が置く）。下 8 ビットがパート（1-64、0 は MU のメニューで off）、bit8 が「MU がボードを見つけている」。
 	// MU のメニュー（UTIL → PLG）でパートを変えられるので、ときどき聞いて欄を合わせる
 	std::shared_ptr<std::atomic<int>> m_board_seen = std::make_shared<std::atomic<int>>(-1);
 	double m_board_asked = 0, m_board_touched = -10;
+	// DLS のボードが読んでいるファイルの様子（音声の糸が置く）
+	struct board_dls_info { std::mutex lock; std::string path, error; int instruments = 0, waves = 0; };
+	std::shared_ptr<board_dls_info> m_board_dls = std::make_shared<board_dls_info>();
+	char m_board_dls_input[512] = {};
 	bool m_board_booting = false;         // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
 	bool m_diff_only = true;              // 既定と違うものだけ書き出す
 	bool m_export_waiting = false;        // 既定値ができるのを待っている（bridge の request_defaults）

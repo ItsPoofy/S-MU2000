@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 
+#include "board_view.h"
 #include "master_editor.h"
 
 #include "driver.h"
@@ -227,8 +228,22 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	ImGui::EndChild();
 
-	// ---- 下: マスター EQ
-	if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+	// ---- 下: マスター EQ。マルチパートのボードが挿さっているときは、タブで「ボードのパート」に切り替えられる
+	bool show_board = false;
+	if (m_board_kind >= mu2000::VBOARD_FC16 && ImGui::BeginTabBar("bottom")) {
+		if (ImGui::BeginTabItem(UI_TEXT(me_master_eq, "Master EQ")))
+			ImGui::EndTabItem();
+		if (ImGui::BeginTabItem(UI_TEXT(me_board_parts, "Board parts (port E)"))) {
+			show_board = true;
+			ImGui::EndTabItem();
+		}
+		ImGui::EndTabBar();
+	}
+	if (show_board) {
+		if (ImGui::BeginChild("boardparts", ImVec2(0, 0), ImGuiChildFlags_Borders))
+			board_parts_pane(m, br);
+		ImGui::EndChild();
+	} else if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextUnformatted(UI_TEXT(me_master_eq, "Master EQ"));
 		ImGui::SameLine(0, fs * 1.5f);
@@ -287,8 +302,10 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			}
 			ImGui::EndTable();
 		}
+		ImGui::EndChild();
+	} else {
+		ImGui::EndChild();
 	}
-	ImGui::EndChild();
 
 	ImGui::PopFont();
 	ImGui::End();
@@ -394,18 +411,19 @@ void master_editor::board_pane(bridge &br)
 	const float fs = ImGui::GetFontSize();
 	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
 	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
-	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0';
+	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0' +
+	                          UI_TEXT(me_board_dls, "DLS board, 16 parts on port E") + '\0';
 	bool changed = false;
 	ImGui::SetNextItemWidth(-fs * 9.5f);
 	const bool kind_changed = ImGui::Combo("##board", &m_board_kind, kinds.c_str());
 	changed |= kind_changed;
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05."));
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05.\n\nThe DLS board is the same kind of board with a different tone generator: it plays a DLS sound bank that you choose (for example Windows' gm.dls), 16 channels on port E, channel 10 for drums, voices picked by bank select and program change."));
 	ImGui::SameLine();
 	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
-	ImGui::BeginDisabled(m_board_kind == mu2000::VBOARD_FC16);       // 16 パートのボードは本体のパートを借りない
+	ImGui::BeginDisabled(m_board_kind >= mu2000::VBOARD_FC16);       // 16 パートのボードは本体のパートを借りない
 	if (ImGui::InputInt("##boardpart", &m_board_part)) {
 		m_board_part = std::clamp(m_board_part, 1, 64);
 		changed = true;
@@ -482,7 +500,9 @@ void master_editor::board_pane(bridge &br)
 		});
 		return;
 	}
-	if (m_board_kind == mu2000::VBOARD_FC16) {
+	if (m_board_kind == mu2000::VBOARD_DLS)
+		board_dls_pane(br);
+	if (m_board_kind >= mu2000::VBOARD_FC16) {
 		ImGui::TextDisabled("%s", (seen & 0x100) ? UI_TEXT(me_board_port_e, "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels")
 		                                         : UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 		return;
@@ -497,6 +517,176 @@ void master_editor::board_pane(bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_off, "Listed under UTIL > PLG. PartAssign is off there, so the board is silent"));
 	else
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_known, "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)"));
+}
+
+
+// ボードのチャンネルをインサーションへ通す欄（-・1-4・V）。選んだエフェクトがどのパートにも割り当たっていなければ、
+// 音が通らないので、A/D パート 1 に割り当てておく（A/D INPUT を使っていなければ、そのエフェクトはボード専用になる）
+static void board_insert_combo(int ch, const mu2000::board_part &p, xg::model &m, bridge &br)
+{
+	static const char *const marks[6] = { "-", "1", "2", "3", "4", "V" };
+	static const char *const keys[6] = { nullptr, "insertion1.part", "insertion2.part", "insertion3.part", "insertion4.part", "variation.part" };
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::BeginCombo("##ins", marks[std::min<int>(p.insert, 5)], ImGuiComboFlags_NoArrowButton)) {
+		for (int s = 0; s < 6; s++)
+			if (ImGui::Selectable(marks[s], p.insert == s)) {
+				board_view::set_insert(br, ch, s);
+				int who = 0;
+				if (s && m.get(P(keys[s]), 0, who) && who == 127)
+					br.send(m.set(P(keys[s]), 0, 64));
+			}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_bp_insert_tip, "Send this channel through one of the MU's insertion effects (1-4), or through the variation effect when its connection is Insertion (V), instead of straight to the output. If the effect is not assigned to any part it gets assigned to A/D part 1, so that it passes sound."));
+}
+
+// マルチパートのボードの 16 チャンネル。様子は音声の糸に聞き、動かした値は口 E へ MIDI で送る
+// （ボードは MIDI で動くので、外から送ったのと同じ結果になる）
+void master_editor::board_parts_pane(xg::model &m, bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	br.post([info = m_board_parts](mu2000 &mu) {
+		mu2000::board_part now[16];
+		mu.board_parts(now);
+		std::lock_guard<std::mutex> g(info->lock);
+		std::copy(std::begin(now), std::end(now), std::begin(info->part));
+		info->valid = true;
+		return std::string();
+	});
+	mu2000::board_part part[16];
+	{
+		std::lock_guard<std::mutex> g(m_board_parts->lock);
+		if (!m_board_parts->valid)
+			return;
+		std::copy(std::begin(m_board_parts->part), std::end(m_board_parts->part), std::begin(part));
+	}
+	const bool dls = m_board_kind == mu2000::VBOARD_DLS;
+	const auto send = [&br](std::initializer_list<int> bytes) {
+		u8 b[8];
+		size_t n = 0;
+		for (int x : bytes)
+			b[n++] = u8(x);
+		br.send_port(mu2000::MIDI_PORTS, b, n);
+	};
+	ImGui::TextDisabled("%s", UI_TEXT(me_board_parts_note, "The board's own 16 channels on port E. Variation, chorus and reverb sends go into the MU's effects; Ins puts a channel through an insertion effect. Changes here are sent to the board as MIDI."));
+	if (!ImGui::BeginTable("bparts", dls ? 11 : 10, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit))
+		return;
+	ImGui::TableSetupScrollFreeze(0, 1);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_ch, "Ch"), 0, fs * 1.6f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_voice, "Voice"), 0, fs * 8.5f);
+	if (dls)
+		ImGui::TableSetupColumn(UI_TEXT(me_bp_bank, "Bank"), 0, fs * 4.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_program, "Program"), 0, fs * 5.0f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_volume, "Volume"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_pan, "Pan"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_insert, "Ins"), 0, fs * 2.6f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_variation, "Variation"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_reverb, "Reverb"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_chorus, "Chorus"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_level, "Level"), ImGuiTableColumnFlags_WidthStretch);
+	ImGui::TableHeadersRow();
+	for (int ch = 0; ch < 16; ch++) {
+		const mu2000::board_part &p = part[ch];
+		ImGui::PushID(ch);
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("%d", ch + 1);
+		ImGui::TableNextColumn();
+		ImGui::TextUnformatted(p.name[0] ? p.name : (p.drum ? UI_TEXT(me_bp_drum, "(drums)") : "-"));
+		if (dls) {
+			ImGui::TableNextColumn();
+			int msb = p.msb;
+			ImGui::SetNextItemWidth(-1);
+			ImGui::BeginDisabled(p.drum);
+			if (ImGui::InputInt("##msb", &msb, 0, 0)) {
+				msb = std::clamp(msb, 0, 127);
+				send({ 0xb0 | ch, 0, msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, p.program });
+			}
+			ImGui::EndDisabled();
+		}
+		ImGui::TableNextColumn();
+		int prog = p.program + 1;
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::InputInt("##prog", &prog)) {
+			prog = std::clamp(prog, 1, 128);
+			send({ 0xb0 | ch, 0, p.msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, prog - 1 });
+		}
+		const auto slider = [&](const char *id, int value, int cc) {
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			int v = value;
+			if (ImGui::SliderInt(id, &v, 0, 127))
+				send({ 0xb0 | ch, cc, v });
+		};
+		slider("##vol", p.vol, 7);
+		slider("##pan", p.pan, 10);
+		ImGui::TableNextColumn();
+		board_insert_combo(ch, p, m, br);
+		slider("##var", p.var, 94);
+		slider("##rev", p.rev, 91);
+		slider("##cho", p.cho, 93);
+		ImGui::TableNextColumn();
+		ImGui::ProgressBar(std::min(1.0f, std::sqrt(p.level) * 1.4f), ImVec2(-1, 0), "");
+		ImGui::PopID();
+	}
+	ImGui::EndTable();
+}
+
+// DLS のボード: 読むファイルを選ぶ。選んだら音声の糸で読ませ、結果（音色と波形の数、または読めなかった訳）を出す
+void master_editor::board_dls_pane(bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	std::string picked;
+	if (xgui::file_dialogs()) {
+		if (ImGui::Button(UI_TEXT(me_board_dls_open, "DLS file...")))
+			xgui::ask_open_dls();
+	} else {
+		ImGui::SetNextItemWidth(-fs * 6);
+		ImGui::InputTextWithHint("##dlspath", UI_TEXT(me_board_dls_path, "Path of a DLS file"), m_board_dls_input, sizeof(m_board_dls_input));
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(me_board_dls_load, "Load")) && m_board_dls_input[0])
+			picked = m_board_dls_input;
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_dls_tip, "A DLS sound bank of your own, for example gm.dls in Windows' System32\\drivers folder. No sound bank comes with S-MU2000. The file is only read; its place is remembered."));
+	xgui::take_opened_dls(picked);
+	if (!picked.empty())
+		br.post([info = m_board_dls, picked](mu2000 &mu) {
+			std::string err;
+			const bool ok = mu.load_board_dls(picked, err);
+			std::lock_guard<std::mutex> g(info->lock);
+			info->error = ok ? std::string() : err;
+			return std::string();
+		});
+	// いま読んであるもの（設定から読んだものも含む）を聞いておく
+	br.post([info = m_board_dls](mu2000 &mu) {
+		std::lock_guard<std::mutex> g(info->lock);
+		info->path = mu.board_dls_path();
+		info->instruments = mu.board_dls_instruments();
+		info->waves = mu.board_dls_waves();
+		return std::string();
+	});
+	std::string path, error;
+	int instruments = 0, waves = 0;
+	{
+		std::lock_guard<std::mutex> g(m_board_dls->lock);
+		path = m_board_dls->path;
+		error = m_board_dls->error;
+		instruments = m_board_dls->instruments;
+		waves = m_board_dls->waves;
+	}
+	ImGui::SameLine();
+	if (!error.empty()) {
+		ImGui::TextDisabled(UI_TEXT(me_board_dls_error_fmt, "Could not load: %s"), error.c_str());
+	} else if (path.empty()) {
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_dls_empty, "No file yet: the board is silent"));
+	} else {
+		const size_t slash = path.find_last_of("/\\");
+		ImGui::TextDisabled(UI_TEXT(me_board_dls_loaded_fmt, "%s: %d instruments, %d waves"),
+		                    path.substr(slash == std::string::npos ? 0 : slash + 1).c_str(), instruments, waves);
+	}
 }
 
 } // namespace ui
