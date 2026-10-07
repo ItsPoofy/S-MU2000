@@ -2337,6 +2337,101 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      "（3 倍音 " + std::to_string(q3 / std::max(1e-12, q1)) + " 倍）");
 			}
 
+			// 差込口は 3 つ（PLG-1〜3）。FC ボード・オリジナルのボード・FC ボードをパート 1・2・3 に挿す。
+			// firmware は 3 枚とも見つけ、それぞれ自分のバンク（MSB 90・91・92）を選んだパートで鳴る:
+			// パート 1 と 3 は矩形（3 倍音が 3 分の 1）、パート 2 は正弦（倍音なし）。パート 2 に差込口 1 のバンク（90）を
+			// 選んでも、そのボードは鳴らない（内蔵の音になる）。3 枚を同時に鳴らすと、音は足し合わさる。
+			// UTIL → PLG には 3 枚が並び、差込口 2 のボードを外から動かすと、メニューの PartAssign も付いてくる
+			{
+				namespace vb = smu2000::vboard;
+				namespace wg = smu2000::wavegen;
+				using B = mu2000::button;
+				auto board = std::make_shared<vb::user_board>();
+				std::snprintf(board->name, sizeof(board->name), "SLOT2 BOARD");
+				auto q = std::make_shared<vb::user_program>();
+				vb::detail::clean_name(q->name, "MYSINE", 8, true);
+				q->pcm = std::make_shared<std::vector<s16>>(wg::render(wg::basic(wg::shape::sine)));
+				board->program[0] = q;
+
+				static rig t;
+				if (!t.mu.load_program(dir + "/mu2000_flash.bin") || !t.mu.load_wave(dir + "/dump"))
+					return 1;
+				t.mu.load_sintab(dir + "/standin/sin-table.bin");
+				t.mu.set_user_board(board, "");
+				t.mu.set_virtual_board(mu2000::VBOARD_FC, 0, 0);
+				t.mu.set_virtual_board(mu2000::VBOARD_USER, 1, 1);
+				t.mu.set_virtual_board(mu2000::VBOARD_FC, 2, 2);
+				t.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !t.mu.midi_ready(); i += RATE / 100)
+					t.pump(10);
+				t.pump(3000);
+				const bool known = t.mu.virtual_board_known(0) && t.mu.virtual_board_known(1) && t.mu.virtual_board_known(2);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						t.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](std::initializer_list<int> chans) {
+					t.pump(300);
+					t.out.clear();
+					t.collect = true;
+					for (int ch : chans)
+						send({ 0x90 | ch, 69, 127 });
+					t.pump(300);
+					t.collect = false;
+					for (int ch : chans)
+						send({ 0x80 | ch, 69, 0 });
+					std::vector<double> o = t.out;
+					t.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				for (int ch = 0; ch < 3; ch++)
+					send({ 0xb0 | ch, 91, 0, 0xb0 | ch, 0, mu2000::board_bank_msb(ch), 0xb0 | ch, 32, 0, 0xc0 | ch, 0 });
+				const std::vector<double> p1 = play({ 0 }), p2 = play({ 1 }), p3 = play({ 2 }), all = play({ 0, 1, 2 });
+				const double a1 = tone(p1, 440), a3 = tone(p1, 1320), b1 = tone(p2, 440), b3 = tone(p2, 1320), c1 = tone(p3, 440), c3 = tone(p3, 1320);
+				// パート 2 に差込口 1 のバンクを選ぶ: ボードは鳴らず、内蔵の音（倍音のある別の音）
+				send({ 0xb1, 0, mu2000::board_bank_msb(0), 0xb1, 32, 0, 0xc1, 0 });
+				const bool wrong_bank_idle = !t.mu.virtual_board_playing(1);
+				send({ 0xb1, 0, mu2000::board_bank_msb(1), 0xb1, 32, 0, 0xc1, 0 });
+				// メニュー: 3 枚が並ぶ
+				t.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					t.press(B::select_right, 150);
+				t.press(B::enter, 150);
+				const std::string list1 = t.lcd();
+				t.press(B::select_right, 150);
+				const std::string list2 = t.lcd();
+				t.press(B::select_right, 150);
+				const std::string list3 = t.lcd();
+				t.press(B::select_left, 150);
+				t.press(B::enter, 150);
+				const std::string page2 = t.lcd();
+				// 差込口 2 を外からパート 6 へ（XG の PartAssign を firmware に送る）。メニューの値も 06 になる
+				t.mu.set_virtual_board(mu2000::VBOARD_USER, 5, 1);
+				t.pump(500);
+				const std::string moved = t.lcd();
+				t.press(B::exit, 150);
+				t.press(B::exit, 150);
+				t.press(B::play, 150);
+				check(known && a1 > 0.01 && std::fabs(a3 / a1 - 1.0 / 3.0) < 0.05 && b1 > 0.01 && b3 < 0.02 * b1 &&
+				      c1 > 0.01 && std::fabs(c3 / c1 - 1.0 / 3.0) < 0.05 && tone(all, 440) > 0.9 * (a1 + b1 + c1) && wrong_bank_idle &&
+				      // 同じ名前のボードが 2 枚あると、firmware は名前の後ろに差込口の番号を付ける。名前は 10 文字まで
+				      list1.find("FC BOARD1") != std::string::npos && list2.find("SLOT2 BOAR") != std::string::npos &&
+				      list3.find("FC BOARD3") != std::string::npos && page2.find("PartAssign=02") != std::string::npos &&
+				      moved.find("PartAssign=06") != std::string::npos,
+				      "差込口 3 つ: 3 枚のボードがそれぞれのパートとバンクで鳴り、UTIL → PLG に 3 枚並ぶ",
+				      std::string("見つけた ") + (known ? "3 枚" : "足りない") + "、パート 1 矩形 " + std::to_string(a1) + "（3 倍音 " +
+				      std::to_string(a3 / std::max(1e-12, a1)) + " 倍）、パート 2 正弦 " + std::to_string(b1) + "（3 倍音 " +
+				      std::to_string(b3 / std::max(1e-12, b1)) + " 倍）、パート 3 矩形 " + std::to_string(c1) + "、3 枚いっしょ " +
+				      std::to_string(tone(all, 440)) + "、別の差込口のバンクでは" + (wrong_bank_idle ? "鳴らない" : "鳴る") + " [" + list1 +
+				      "] [" + list2 + "] [" + list3 + "] [" + page2 + "] [" + moved + "]");
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])

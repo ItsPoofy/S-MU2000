@@ -104,7 +104,7 @@ struct engine {
 		const u64 key = smu2000::bootcache::key(mu);
 		// 架空のボードが挿さっているときは写しを使わない（写しはボード無しで起動したもの。firmware が
 		// 「Checking PLG」でボードを見つけるところを通らせる）
-		const bool cache = !mu.virtual_board_kind();
+		const bool cache = !mu.virtual_board_any();
 		mu.reset();
 		// 前に起動し切った姿を取ってあれば、そこから始める（bootcache.h）。
 		// 回した結果と 1 ビットも違わないので、音は同じ。

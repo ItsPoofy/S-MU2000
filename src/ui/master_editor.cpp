@@ -231,7 +231,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// ---- 下: マスター EQ。マルチパートのボードが挿さっているときは、タブで「ボードのパート」に切り替えられる
 	bool show_board = false;
-	if (mu2000::board_is_multi(m_board_kind) && ImGui::BeginTabBar("bottom")) {
+	if (board_multi_kind() && ImGui::BeginTabBar("bottom")) {
 		if (ImGui::BeginTabItem(UI_TEXT(me_master_eq, "Master EQ")))
 			ImGui::EndTabItem();
 		if (ImGui::BeginTabItem(UI_TEXT(me_board_parts, "Board parts (port E)"))) {
@@ -409,33 +409,50 @@ void master_editor::sysex_pane(const xg_snapshot &ram, bridge &br)
 // 音は MU のミキサーとエフェクトを通り、そのパートの音量・パン・リバーブ／コーラスの送りが効く（src/vboard.h）
 void master_editor::board_pane(bridge &br)
 {
-	const float fs = ImGui::GetFontSize();
 	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
 	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
 	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0' +
 	                          UI_TEXT(me_board_dls, "DLS board, 16 parts on port E") + '\0' +
 	                          UI_TEXT(me_board_user, "Your own board (waves you made)") + '\0' +
 	                          UI_TEXT(me_board_user16, "Your own board, 16 parts on port E") + '\0';
+	// 差込口は実機と同じ 3 つ（PLG-1〜3）。1 段ずつ
+	for (int slot = 0; slot < mu2000::PLG_SLOTS; slot++) {
+		ImGui::PushID(slot);
+		board_slot_pane(br, slot, kinds);
+		ImGui::PopID();
+	}
+}
+
+// 差込口 1 つぶん。挿すボードと、挿すパート（1 パートのボード）。その下に、いまの様子
+void master_editor::board_slot_pane(bridge &br, int slot, const std::string &kinds)
+{
+	const float fs = ImGui::GetFontSize();
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("PLG-%d", slot + 1);
+	ImGui::SameLine();
 	bool changed = false;
-	ImGui::SetNextItemWidth(-fs * 9.5f);
-	const bool kind_changed = ImGui::Combo("##board", &m_board_kind, kinds.c_str());
+	ImGui::SetNextItemWidth(-fs * 6.5f);
+	const bool kind_changed = ImGui::Combo("##board", &m_board_kind[slot], kinds.c_str());
 	changed |= kind_changed;
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05.\n\nThe DLS board is the same kind of board with a different tone generator: it plays a DLS sound bank that you choose (for example Windows' gm.dls), 16 channels on port E, channel 10 for drums, voices picked by bank select and program change."));
 	ImGui::SameLine();
-	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
-	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
-	ImGui::BeginDisabled(mu2000::board_is_multi(m_board_kind));       // 16 パートのボードは本体のパートを借りない
-	if (ImGui::InputInt("##boardpart", &m_board_part)) {
-		m_board_part = std::clamp(m_board_part, 1, 64);
+	ImGui::BeginDisabled(mu2000::board_is_multi(m_board_kind[slot]));       // 16 パートのボードは本体のパートを借りない
+	if (ImGui::InputInt("##boardpart", &m_board_part[slot])) {
+		m_board_part[slot] = std::clamp(m_board_part[slot], 1, 64);
 		changed = true;
 	}
 	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_part, "Part"));
+	// 下の様子の文は、欄の幅で折り返す
+	ImGui::PushTextWrapPos(0.0f);
+	struct wrap_end { ~wrap_end() { ImGui::PopTextWrapPos(); } } wrap_guard;
 	const double now = ImGui::GetTime();
 	if (changed) {
-		const int kind = m_board_kind, part = m_board_part - 1;
-		br.post([kind, part](mu2000 &mu) {
+		const int kind = m_board_kind[slot], part = m_board_part[slot] - 1;
+		br.post([kind, part, slot](mu2000 &mu) {
 			// 実機と同じで、ボードは「割り当てたパートでボードのバンクを選んだとき」だけ鳴る。ここで挿したときは、
 			// 手間を省いてそのパートにボードのバンクを選んでおく。外した・動かしたときは、元のパートをふつうのバンクに戻す
 			// （ボードのバンクのままだと、内蔵の音源では無音になる）
@@ -444,78 +461,82 @@ void master_editor::board_pane(bridge &br)
 				for (int b : { 0xb0 | ch, 0, msb, 0xb0 | ch, 32, lsb, 0xc0 | ch, 0 })
 					mu.midi_in(u8(b), p / 16);
 			};
-			const int old_kind = mu.virtual_board_kind(), old_part = mu.virtual_board_part();
+			const int old_kind = mu.virtual_board_kind(slot), old_part = mu.virtual_board_part(slot);
 			// 挿す・外すときは、このあと本体を起動し直す（下の request_restart）。ボードのバンクは起動し終えてから選ぶ。
 			// 外すときは、ボードのバンクのままだと内蔵の音源では無音なので、先にふつうのバンクへ戻しておく
-			if (old_kind && mu.virtual_board_playing() && (!kind || old_part != part))
+			if (old_kind && mu.virtual_board_playing(slot) && (!kind || old_part != part))
 				select(old_part, 0, 0);
-			mu.set_virtual_board(kind, part);
+			mu.set_virtual_board(kind, part, slot);
 			if (kind && old_kind && old_part != part)
-				select(part, mu2000::VBOARD_BANK_MSB, mu2000::VBOARD_BANK_LSB);
+				select(part, mu2000::board_bank_msb(slot), mu2000::VBOARD_BANK_LSB);
 			return std::string();
 		});
-		m_board_touched = now;
-		m_board_seen->store(-1);
+		m_board_touched[slot] = now;
+		m_board_seen[slot]->store(-1);
 		// 挿した・外した: 実機と同じく電源を入れ直す。本体（firmware）がボードを探すのは起動のときだけで、
 		// 見つけていないと液晶は Silence のまま、[AUDITION] の音もボードへ送ってこない
 		if (kind_changed) {
-			m_board_booting = m_board_kind != 0;
-			m_board_touched = now + 1.0;           // 起動し直しが始まるまでの古い返事を読まない
+			if (mu2000::board_is_multi(m_board_kind[slot]))
+				for (int o = 0; o < mu2000::PLG_SLOTS; o++)
+					if (o != slot && mu2000::board_is_multi(m_board_kind[o]))
+						m_board_kind[o] = 0;
+			m_board_booting[slot] = m_board_kind[slot] != 0;
+			m_board_touched[slot] = now + 1.0;           // 起動し直しが始まるまでの古い返事を読まない
 			br.request_restart();
 		}
 	}
 	// MU の側の様子をときどき聞く。前の回から挿さったままのボードと、MU のメニューで変えたパートに欄を合わせる
 	// （自分で変えた直後は、古い返事で戻さないよう少し待つ）
-	if (now - m_board_asked > 0.5) {
-		m_board_asked = now;
-		br.post([seen = m_board_seen](mu2000 &mu) {
-			seen->store((mu.virtual_board_assigned() ? mu.virtual_board_part() + 1 : 0) | (mu.virtual_board_known() ? 0x100 : 0) |
-			            (mu.virtual_board_playing() ? 0x200 : 0) | (mu.midi_ready() ? 0x400 : 0) |
-			            (mu.virtual_board_kind() << 11));
+	if (now - m_board_asked[slot] > 0.5) {
+		m_board_asked[slot] = now;
+		br.post([seen = m_board_seen[slot], slot](mu2000 &mu) {
+			seen->store((mu.virtual_board_assigned(slot) ? mu.virtual_board_part(slot) + 1 : 0) | (mu.virtual_board_known(slot) ? 0x100 : 0) |
+			            (mu.virtual_board_playing(slot) ? 0x200 : 0) | (mu.midi_ready() ? 0x400 : 0) |
+			            (mu.virtual_board_kind(slot) << 11));
 			return std::string();
 		});
 	}
-	const int seen = m_board_seen->load();
-	if (m_board_booting && (seen < 0 || now - m_board_touched < 1.0 || (seen & 0x500) != 0x500)) {
+	const int seen = m_board_seen[slot]->load();
+	if (m_board_booting[slot] && (seen < 0 || now - m_board_touched[slot] < 1.0 || (seen & 0x500) != 0x500)) {
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_booting, "Restarting the MU so that it finds the board..."));
 		return;
 	}
-	if (seen < 0 || now - m_board_touched < 1.0)
+	if (seen < 0 || now - m_board_touched[slot] < 1.0)
 		return;
 	// 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）
-	if (!m_board_booting && !m_board_kind && (seen & 0x3800))
-		m_board_kind = (seen >> 11) & 7;
-	if (!m_board_kind)
+	if (!m_board_booting[slot] && !m_board_kind[slot] && (seen & 0x3800))
+		m_board_kind[slot] = (seen >> 11) & 7;
+	if (!m_board_kind[slot])
 		return;
 	// 起動し直しが済んだ（本体がボードを見つけて MIDI を受け始めた）。そのパートにボードのバンクを選ぶ
-	if (m_board_booting) {
-		m_board_booting = false;
-		m_board_touched = now;
-		m_board_seen->store(-1);
-		br.post([](mu2000 &mu) {
-			if (!mu.virtual_board_kind() || mu.virtual_board_multi())
+	if (m_board_booting[slot]) {
+		m_board_booting[slot] = false;
+		m_board_touched[slot] = now;
+		m_board_seen[slot]->store(-1);
+		br.post([slot](mu2000 &mu) {
+			if (!mu.virtual_board_kind(slot) || mu2000::board_is_multi(mu.virtual_board_kind(slot)))
 				return std::string();
-			const int p = mu.virtual_board_part();
+			const int p = mu.virtual_board_part(slot);
 			const u8 ch = u8(p % 16);
-			for (int b : { 0xb0 | ch, 0, int(mu2000::VBOARD_BANK_MSB), 0xb0 | ch, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0 | ch, 0 })
+			for (int b : { 0xb0 | ch, 0, mu2000::board_bank_msb(slot), 0xb0 | ch, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0 | ch, 0 })
 				mu.midi_in(u8(b), p / 16);
 			return std::string();
 		});
 		return;
 	}
-	if (m_board_kind == mu2000::VBOARD_DLS)
+	if (m_board_kind[slot] == mu2000::VBOARD_DLS)
 		board_dls_pane(br);
-	if (m_board_kind == mu2000::VBOARD_USER || m_board_kind == mu2000::VBOARD_USER16)
+	if (m_board_kind[slot] == mu2000::VBOARD_USER || m_board_kind[slot] == mu2000::VBOARD_USER16)
 		board_user_pane(br);
-	if (mu2000::board_is_multi(m_board_kind)) {
+	if (mu2000::board_is_multi(m_board_kind[slot])) {
 		ImGui::TextDisabled("%s", (seen & 0x100) ? UI_TEXT(me_board_port_e, "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels")
 		                                         : UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 		return;
 	}
-	if ((seen & 0xff) && (seen & 0xff) != m_board_part)
-		m_board_part = seen & 0xff;
+	if ((seen & 0xff) && (seen & 0xff) != m_board_part[slot])
+		m_board_part[slot] = seen & 0xff;
 	if ((seen & 0xff) && !(seen & 0x200))
-		ImGui::TextDisabled("%s", UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB 90, LSB 0 there to hear the board"));
+		ImGui::TextDisabled(UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB %d, LSB 0 there to hear the board"), mu2000::board_bank_msb(slot));
 	if (!(seen & 0x100))
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 	else if (!(seen & 0xff))
@@ -566,7 +587,7 @@ void master_editor::board_parts_pane(xg::model &m, bridge &br)
 			return;
 		std::copy(std::begin(m_board_parts->part), std::end(m_board_parts->part), std::begin(part));
 	}
-	const bool dls = m_board_kind == mu2000::VBOARD_DLS;
+	const bool dls = board_multi_kind() == mu2000::VBOARD_DLS;
 	const auto send = [&br](std::initializer_list<int> bytes) {
 		u8 b[8];
 		size_t n = 0;
