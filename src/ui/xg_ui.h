@@ -99,6 +99,11 @@ void request_part(int part);            // part は 0-63
 bool take_part_request();               // 頼みがあれば true（1 回だけ）
 int  shape_window_part();               // パートの音色の窓で見ているパート（一覧で行を選んでも替わる）
 void set_shape_window_part(int part);
+// 音色の窓で、マルチパートのボードのチャンネル（口 E の 0-15）を見ているとき、そのチャンネル。見ていなければ -1。
+// 本体のパートを選ぶ（set_shape_window_part・request_part）と -1 に戻る
+int  shape_window_board();
+void set_shape_window_board(int channel);
+void request_board(int channel);        // 音色の窓を、そのチャンネルで開く頼み
 
 // ---- マスターの窓（マスターボリューム・移調・システムエフェクトの戻り・マスター EQ）を開く頼み。
 // 一覧のマスターの行（MASTER の名前、MASTER EQ の絵）のダブルクリックから
@@ -286,6 +291,11 @@ bool audition_key(int part, int note);
 void toggle_audition_key(int part, int note);
 // 印の付いた鍵を若い順に集める。戻りは数（out には最大 max 個）
 int  audition_keys(int part, int *out, int max);
+// 印は、マルチパートのボードのチャンネル（口 E の 0-15）にも付けられる。part に XG_PARTS + チャンネルを渡す。
+// audition_board は、そのチャンネルの音色を替えたときの試聴（印の付いた鍵を 1 秒鳴らす。印が無ければ鳴らさない）。
+// audition_poll は、鳴らし始めと止めを進める（描くたびに呼ぶ）
+void audition_board(int channel, bridge &br);
+void audition_poll(bridge &br);
 
 // ---- 説明（ヘルプ）。見出しや名前にカーソルを当てると、何に効くのかを出す（日本語・英語）。
 // 邪魔な人もいるので、窓の上のチェックボックスで消せる。選んだ状態は

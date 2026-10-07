@@ -3191,6 +3191,109 @@ static void board_insert_set(int ch, int slot, xg::model &m, bridge &br)
 //   FC ボード・オリジナルのボード: 持っている音色をそのまま並べる
 // 選ぶと、口 E のそのチャンネルへバンクセレクトとプログラムチェンジを送る。DLS のボードでは、ドラムキットを
 // 選ぶとそのチャンネルをドラムのパートに、メロディの音色を選ぶとメロディのパートにする（XG のパートのモード）
+// ボードの音色を選ぶ: 口 E のそのチャンネルへバンクセレクトとプログラムチェンジ。GM の並びのボード（DLS・FM）では、
+// ドラムキットを選ぶとそのチャンネルをドラムのパートに、メロディの音色を選ぶとメロディのパートにする
+void overview::board_pick(int kind, int ch, const mu2000::board_part &p, const mu2000::board_voice &v, bridge &br)
+{
+	const bool gm = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;
+	if (gm && v.drum != p.drum)
+		board_view::send(br, { 0xf0, 0x43, 0x10, 0x4c, 0x08, ch, 0x07, v.drum ? 1 : 0, 0xf7 });
+	board_view::send(br, { 0xb0 | ch, 0, v.msb, 0xb0 | ch, 32, v.lsb, 0xc0 | ch, v.program });
+}
+
+// 出しっぱなしの音色選び（音色の窓の左の面）。押しても閉じないので、続けて選べる。
+// GM の並びのボードは分類の見出しで区切り、バンク違いは字下げして並べる。いまの音色に印
+void overview::board_voice_pane(int kind, int ch, const mu2000::board_part &p, bridge &br)
+{
+	audition_poll(br);                 // 試聴の鳴らし始めと止め
+	const double now = ImGui::GetTime();
+	if (now - m_board_voices_at > 1.0) {
+		m_board_voices_at = now;
+		m_board.ask_voices(br);
+	}
+	const std::vector<mu2000::board_voice> fresh = m_board.voices();
+	if (!fresh.empty() || now - m_board_voices_at > 0.5)
+		m_board_voices = fresh;
+	const std::vector<mu2000::board_voice> &all = m_board_voices;
+	if (all.empty()) {
+		ImGui::TextDisabled("%s", UI_TEXT(ov_board_no_voices, "The board has no voices yet"));
+		return;
+	}
+	const bool gm = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;
+	const auto item = [&](const mu2000::board_voice &v, bool variant) {
+		char label[64];
+		if (variant)
+			std::snprintf(label, sizeof(label), "      %s  (M %d / L %d)##%d.%d.%d", v.name, v.msb, v.lsb, v.msb, v.lsb, v.program);
+		else
+			std::snprintf(label, sizeof(label), "%3d  %s##%d.%d.%d.%d", v.program + 1, v.name, v.drum ? 1 : 0, v.msb, v.lsb, v.program);
+		const bool current = v.drum == p.drum && v.program == p.program && (v.drum || (v.msb == p.msb && v.lsb == p.lsb));
+		if (ImGui::Selectable(label, current)) {
+			board_pick(kind, ch, p, v, br);
+			audition_board(ch, br);            // 鍵盤に印が付いていれば、替えた音色で鳴らす
+		}
+	};
+	if (!gm) {
+		for (const mu2000::board_voice &v : all)
+			item(v, false);
+		return;
+	}
+	for (int g = 0; g < 16; g++) {
+		bool head = false;
+		for (int i = g * 8; i < g * 8 + 8; i++) {
+			// その番号の基本の音色（バンク 0）を先に、バンク違いをその下に
+			const mu2000::board_voice *base = nullptr;
+			for (const mu2000::board_voice &v : all)
+				if (!v.drum && v.program == i && (!base || (v.msb == 0 && v.lsb == 0)))
+					base = &v;
+			if (!base)
+				continue;
+			if (!head) {
+				ImGui::SeparatorText(gm_group_name(g));
+				head = true;
+			}
+			item(*base, false);
+			for (const mu2000::board_voice &v : all)
+				if (!v.drum && v.program == i && &v != base)
+					item(v, true);
+		}
+	}
+	bool head = false;
+	for (const mu2000::board_voice &v : all) {
+		if (!v.drum)
+			continue;
+		if (!head) {
+			ImGui::SeparatorText(UI_TEXT(xgui_kit_drum, "Drum kit"));
+			head = true;
+		}
+		item(v, false);
+	}
+}
+
+// 一覧と同じ並びの 1 行を、見出しつきで（音色の窓の上のペイン）
+void overview::board_strip(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	const float h = fs * 2.3f;
+	const ImGuiTableFlags flags = ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
+	ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(1, 1));
+	if (ImGui::BeginTable("bstrip", NCOLS + 4, flags)) {
+		ImGui::TableSetupColumn(UI_TEXT(ov_part_col, "Part (right-click for voice)"), ImGuiTableColumnFlags_WidthFixed, fs * 18.5f);
+		ImGui::TableSetupColumn("VEL", ImGuiTableColumnFlags_WidthFixed, fs * 2.2f);
+		ImGui::TableSetupColumn("##spec", ImGuiTableColumnFlags_WidthFixed, fs * 0.5f);
+		for (const column &c : COLUMNS)
+			ImGui::TableSetupColumn(wide(c.from) ? "" : c.title, ImGuiTableColumnFlags_WidthFixed,
+			                        wide(c.from) ? fs * 0.3f : c.from == src::ins ? fs * 4.0f : fs * 3.4f);
+		ImGui::TableSetupColumn("##keys", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableHeadersRow();
+		ImGui::TableNextRow(0, h);
+		board_row(kind, ch, p, m, br, h, true);
+		ImGui::EndTable();
+	}
+	ImGui::PopStyleVar();
+	// PC のキーボードで弾く（口 E のそのチャンネルへ。本体のパートの鍵盤と同じ並び）
+	pc_keys(-1, PARTS + ch, br);
+}
+
 void overview::board_program_menu(int kind, int ch, const mu2000::board_part &p, bridge &br)
 {
 	if (ImGui::IsWindowAppearing()) {
@@ -3202,11 +3305,7 @@ void overview::board_program_menu(int kind, int ch, const mu2000::board_part &p,
 	const std::vector<mu2000::board_voice> &all = m_board_voices;
 	// DLS のボードと FM ボードは GM の並びで、ドラムのパートを持つ
 	const bool dls = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;
-	const auto pick = [&](const mu2000::board_voice &v) {
-		if (dls && v.drum != p.drum)
-			board_view::send(br, { 0xf0, 0x43, 0x10, 0x4c, 0x08, ch, 0x07, v.drum ? 1 : 0, 0xf7 });
-		board_view::send(br, { 0xb0 | ch, 0, v.msb, 0xb0 | ch, 32, v.lsb, 0xc0 | ch, v.program });
-	};
+	const auto pick = [&](const mu2000::board_voice &v) { board_pick(kind, ch, p, v, br); };
 	const auto is_now = [&](const mu2000::board_voice &v) {
 		return v.drum == p.drum && v.program == p.program && (v.drum || (v.msb == p.msb && v.lsb == p.lsb));
 	};
@@ -3309,251 +3408,289 @@ void overview::board_rows(xg::model &m, bridge &br, float h)
 	const int kind = m_board.get(part);
 	if (!kind)
 		return;
+	for (int ch = 0; ch < 16; ch++) {
+		ImGui::TableNextRow(0, h);
+		board_row(kind, ch, part[ch], m, br, h);
+	}
+}
+
+void overview::board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h, bool strip)
+{
 	ImGuiIO &io = ImGui::GetIO();
 	const float fs = ImGui::GetFontSize();
 	ImDrawList *dl = ImGui::GetWindowDrawList();
 	const bool banks = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;       // GM の並び（楽器の絵が引ける）
-	for (int ch = 0; ch < 16; ch++) {
-		const mu2000::board_part &p = part[ch];
-		ImGui::TableNextRow(0, h);
-		ImGui::PushID(1000 + ch);
+	ImGui::PushID(1000 + ch);
 
-		// ---- パートと音色
-		ImGui::TableNextColumn();
-		{
-			const ImVec2 pos = ImGui::GetCursorScreenPos();
-			const float w = ImGui::GetContentRegionAvail().x;
-			ImGui::InvisibleButton("##name", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-			const bool hovered = ImGui::IsItemHovered();
-			if (hovered)
-				dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_HeaderHovered, 0.4f));
-			// 音色を選ぶ品書き（右クリック・ダブルクリック）。本体のパートと同じ形で、ボードの音色を並べる
+	// ---- パートと音色
+	ImGui::TableNextColumn();
+	{
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		const float w = ImGui::GetContentRegionAvail().x;
+		ImGui::InvisibleButton("##name", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+		const bool hovered = ImGui::IsItemHovered();
+		if (shape_window_board() == ch)
+			dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_Header));
+		else if (hovered)
+			dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_HeaderHovered, 0.4f));
+		// 右クリックで音色の品書き（本体のパートと同じ形）。ダブルクリックで音色の窓をこのチャンネルで開く
+		if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+			set_shape_window_board(ch);
+		if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+			request_board(ch);
+		if (ImGui::BeginPopupContextItem("program")) {
+			board_program_menu(kind, ch, p, br);
+			ImGui::EndPopup();
+		}
+		char label[8];
+		std::snprintf(label, sizeof(label), "E%02d", ch + 1);
+		dl->AddText(ImVec2(pos.x + fs * 0.3f, pos.y + fs * 0.1f), col(ImGuiCol_Text), label);
+		dl->PushClipRect(pos, ImVec2(pos.x + w, pos.y + h), true);
+		// 楽器の絵。DLS のボードは GM の並びなので、番号から本体の絵を引く。ほかのボードは LCD の枠だけ
+		const float icon_x = pos.x + fs * 2.2f;
+		const float dot = std::max(1.0f, std::floor((h - fs * 0.3f) / 16.0f));
+		const float dot_w = dot * 2;
+		if (const xg::voice_rom *vr = voices()) {
+			static const ImU32 LCD_BACK  = IM_COL32(150, 205, 45, 255);
+			static const ImU32 LCD_GHOST = IM_COL32(140, 194, 44, 255);
+			static const ImU32 LCD_DOT   = IM_COL32(18, 22, 14, 255);
+			u16 rows[16];
+			const bool has = banks && p.name[0] && vr->icon_gm(p.program, p.drum, rows);
+			const float top = pos.y + (h - dot * 16) * 0.5f;
+			const float frame = std::max(1.0f, dot);
+			dl->AddRectFilled(ImVec2(icon_x - frame, top - frame),
+			                  ImVec2(icon_x + dot_w * 16 + frame, top + dot * 16 + frame), LCD_BACK, 2.0f);
+			for (int y = 0; y < 16; y++)
+				for (int x = 0; x < 16; x++) {
+					const bool on = has && ((rows[y] >> (15 - x)) & 1);
+					dl->AddRectFilled(ImVec2(icon_x + x * dot_w, top + y * dot),
+					                  ImVec2(icon_x + (x + 1) * dot_w, top + (y + 1) * dot),
+					                  on ? LCD_DOT : LCD_GHOST);
+				}
+		}
+		const float text_x = icon_x + dot_w * 16 + fs * 0.4f;
+		char vt[48];
+		std::snprintf(vt, sizeof(vt), "%3d  %s", p.program + 1, p.name[0] ? p.name : "--");
+		dl->AddText(ImVec2(text_x, pos.y + fs * 0.1f), col(ImGuiCol_Text), vt);
+		char sub[64];
+		std::snprintf(sub, sizeof(sub), UI_TEXT(ov_board_sub_fmt, "Port E ch %d   M %d  L %d"), ch + 1, p.msb, p.lsb);
+		dl->AddText(ImVec2(text_x, pos.y + fs * 1.15f), col(ImGuiCol_TextDisabled), sub);
+		dl->PopClipRect();
+		if (hovered)
+			ImGui::SetItemTooltip("%s", UI_TEXT(ov_board_row_tip, "A channel of the plug-in board on port E (not one of the MU's parts). Right-click to choose its voice, double-click to open it in the Voice window."));
+	}
+
+	// ---- VEL メーター
+	ImGui::TableNextColumn();
+	{
+		if (p.note_ons != m_board_seen_ons[ch]) {
+			m_board_seen_ons[ch] = p.note_ons;
+			m_board_level[ch] = std::max(m_board_level[ch], p.velocity / 127.0f);
+		}
+		m_board_level[ch] = std::max(0.0f, m_board_level[ch] - io.DeltaTime * 1.6f);
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		const float w = ImGui::GetContentRegionAvail().x;
+		ImGui::Dummy(ImVec2(w, h));
+		const float pad = fs * 0.2f;
+		const ImVec2 a(pos.x + pad, pos.y + pad), b(pos.x + w - pad, pos.y + h - pad);
+		dl->AddRectFilled(a, b, col(ImGuiCol_FrameBg));
+		dl->AddRectFilled(ImVec2(a.x, b.y - (b.y - a.y) * m_board_level[ch]), b, NOTE_ON);
+	}
+
+	// ---- スペクトラム（ボードのチャンネルごとの音は取り出していない）
+	ImGui::TableNextColumn();
+	ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h));
+
+	// ---- 値の棒。本体のパートの欄（cell）と同じ見た目と触り方。変わったら新しい値を返す
+	const auto bar = [&](const char *title, int v, int lo, int hi, bool bipolar, bool editable,
+	                     const std::function<std::string(int)> &text_of, int wheel_step = 1, float drag_px = 200.0f) {
+		const float w = ImGui::GetContentRegionAvail().x;
+		ImGui::PushID(title);
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		ImGui::InvisibleButton("##cell", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft);
+		const ImGuiID id = ImGui::GetItemID();
+		const bool hovered = ImGui::IsItemHovered();
+		const bool active = ImGui::IsItemActive();
+		int nv = v;
+		if (editable) {
+			ImGuiStorage *st = ImGui::GetStateStorage();
+			if (active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+				float acc = st->GetFloat(id, 0.0f);
+				acc += (io.MouseDelta.x - io.MouseDelta.y) * float(hi - lo) / (io.KeyShift ? drag_px * 4.0f : drag_px);
+				const int step = int(acc);
+				if (step) { nv = std::clamp(nv + step, lo, hi); acc -= float(step); }
+				st->SetFloat(id, acc);
+			}
+			if (ImGui::IsItemDeactivated())
+				st->SetFloat(id, 0.0f);
+			if (hovered && ImGui::GetTime() - m_scrolled_at > 0.5) {
+				ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+				if (io.MouseWheel != 0.0f) {
+					nv = std::clamp(nv + (io.MouseWheel > 0 ? 1 : -1) * wheel_step * (io.KeyCtrl ? 10 : 1), lo, hi);
+					m_wheel_taken = true;
+				}
+			}
 			if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				ImGui::OpenPopup("program");
-			if (ImGui::BeginPopupContextItem("program")) {
-				board_program_menu(kind, ch, p, br);
+				ImGui::OpenPopup("##type");
+			if (ImGui::BeginPopup("##type")) {
+				char who[8];
+				std::snprintf(who, sizeof(who), "E%02d", ch + 1);
+				ImGui::TextDisabled(UI_TEXT(cap_range_fmt, "%s %s (%d-%d)"), who, title, lo, hi);
+				const ImGuiID typed_id = ImGui::GetID("typed");
+				int typed = st->GetInt(typed_id, v);
+				if (ImGui::IsWindowAppearing()) { typed = v; ImGui::SetKeyboardFocusHere(); }
+				ImGui::SetNextItemWidth(fs * 6);
+				if (ImGui::InputInt("##n", &typed, 1, 10, ImGuiInputTextFlags_EnterReturnsTrue)) {
+					nv = std::clamp(typed, lo, hi);
+					ImGui::CloseCurrentPopup();
+				}
+				st->SetInt(typed_id, typed);
 				ImGui::EndPopup();
 			}
-			char label[8];
-			std::snprintf(label, sizeof(label), "E%02d", ch + 1);
-			dl->AddText(ImVec2(pos.x + fs * 0.3f, pos.y + fs * 0.1f), col(ImGuiCol_Text), label);
-			dl->PushClipRect(pos, ImVec2(pos.x + w, pos.y + h), true);
-			// 楽器の絵。DLS のボードは GM の並びなので、番号から本体の絵を引く。ほかのボードは LCD の枠だけ
-			const float icon_x = pos.x + fs * 2.2f;
-			const float dot = std::max(1.0f, std::floor((h - fs * 0.3f) / 16.0f));
-			const float dot_w = dot * 2;
-			if (const xg::voice_rom *vr = voices()) {
-				static const ImU32 LCD_BACK  = IM_COL32(150, 205, 45, 255);
-				static const ImU32 LCD_GHOST = IM_COL32(140, 194, 44, 255);
-				static const ImU32 LCD_DOT   = IM_COL32(18, 22, 14, 255);
-				u16 rows[16];
-				const bool has = banks && p.name[0] && vr->icon_gm(p.program, p.drum, rows);
-				const float top = pos.y + (h - dot * 16) * 0.5f;
-				const float frame = std::max(1.0f, dot);
-				dl->AddRectFilled(ImVec2(icon_x - frame, top - frame),
-				                  ImVec2(icon_x + dot_w * 16 + frame, top + dot * 16 + frame), LCD_BACK, 2.0f);
-				for (int y = 0; y < 16; y++)
-					for (int x = 0; x < 16; x++) {
-						const bool on = has && ((rows[y] >> (15 - x)) & 1);
-						dl->AddRectFilled(ImVec2(icon_x + x * dot_w, top + y * dot),
-						                  ImVec2(icon_x + (x + 1) * dot_w, top + (y + 1) * dot),
-						                  on ? LCD_DOT : LCD_GHOST);
-					}
-			}
-			const float text_x = icon_x + dot_w * 16 + fs * 0.4f;
-			char vt[48];
-			std::snprintf(vt, sizeof(vt), "%3d  %s", p.program + 1, p.name[0] ? p.name : "--");
-			dl->AddText(ImVec2(text_x, pos.y + fs * 0.1f), col(ImGuiCol_Text), vt);
-			char sub[64];
-			std::snprintf(sub, sizeof(sub), UI_TEXT(ov_board_sub_fmt, "Port E ch %d   M %d  L %d"), ch + 1, p.msb, p.lsb);
-			dl->AddText(ImVec2(text_x, pos.y + fs * 1.15f), col(ImGuiCol_TextDisabled), sub);
-			dl->PopClipRect();
-			if (hovered)
-				ImGui::SetItemTooltip("%s", UI_TEXT(ov_board_row_tip, "A channel of the plug-in board on port E (not one of the MU's parts). Right-click or double-click to choose its voice."));
 		}
-
-		// ---- VEL メーター
-		ImGui::TableNextColumn();
-		{
-			if (p.note_ons != m_board_seen_ons[ch]) {
-				m_board_seen_ons[ch] = p.note_ons;
-				m_board_level[ch] = std::max(m_board_level[ch], p.velocity / 127.0f);
-			}
-			m_board_level[ch] = std::max(0.0f, m_board_level[ch] - io.DeltaTime * 1.6f);
-			const ImVec2 pos = ImGui::GetCursorScreenPos();
-			const float w = ImGui::GetContentRegionAvail().x;
-			ImGui::Dummy(ImVec2(w, h));
-			const float pad = fs * 0.2f;
-			const ImVec2 a(pos.x + pad, pos.y + pad), b(pos.x + w - pad, pos.y + h - pad);
-			dl->AddRectFilled(a, b, col(ImGuiCol_FrameBg));
-			dl->AddRectFilled(ImVec2(a.x, b.y - (b.y - a.y) * m_board_level[ch]), b, NOTE_ON);
-		}
-
-		// ---- スペクトラム（ボードのチャンネルごとの音は取り出していない）
-		ImGui::TableNextColumn();
-		ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h));
-
-		// ---- 値の棒。本体のパートの欄（cell）と同じ見た目と触り方。変わったら新しい値を返す
-		const auto bar = [&](const char *title, int v, int lo, int hi, bool bipolar, bool editable,
-		                     const std::function<std::string(int)> &text_of, int wheel_step = 1, float drag_px = 200.0f) {
-			const float w = ImGui::GetContentRegionAvail().x;
-			ImGui::PushID(title);
-			const ImVec2 pos = ImGui::GetCursorScreenPos();
-			ImGui::InvisibleButton("##cell", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft);
-			const ImGuiID id = ImGui::GetItemID();
-			const bool hovered = ImGui::IsItemHovered();
-			const bool active = ImGui::IsItemActive();
-			int nv = v;
-			if (editable) {
-				ImGuiStorage *st = ImGui::GetStateStorage();
-				if (active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
-					float acc = st->GetFloat(id, 0.0f);
-					acc += (io.MouseDelta.x - io.MouseDelta.y) * float(hi - lo) / (io.KeyShift ? drag_px * 4.0f : drag_px);
-					const int step = int(acc);
-					if (step) { nv = std::clamp(nv + step, lo, hi); acc -= float(step); }
-					st->SetFloat(id, acc);
-				}
-				if (ImGui::IsItemDeactivated())
-					st->SetFloat(id, 0.0f);
-				if (hovered && ImGui::GetTime() - m_scrolled_at > 0.5) {
-					ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
-					if (io.MouseWheel != 0.0f) {
-						nv = std::clamp(nv + (io.MouseWheel > 0 ? 1 : -1) * wheel_step * (io.KeyCtrl ? 10 : 1), lo, hi);
-						m_wheel_taken = true;
-					}
-				}
-				if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-					ImGui::OpenPopup("##type");
-				if (ImGui::BeginPopup("##type")) {
-					char who[8];
-					std::snprintf(who, sizeof(who), "E%02d", ch + 1);
-					ImGui::TextDisabled(UI_TEXT(cap_range_fmt, "%s %s (%d-%d)"), who, title, lo, hi);
-					const ImGuiID typed_id = ImGui::GetID("typed");
-					int typed = st->GetInt(typed_id, v);
-					if (ImGui::IsWindowAppearing()) { typed = v; ImGui::SetKeyboardFocusHere(); }
-					ImGui::SetNextItemWidth(fs * 6);
-					if (ImGui::InputInt("##n", &typed, 1, 10, ImGuiInputTextFlags_EnterReturnsTrue)) {
-						nv = std::clamp(typed, lo, hi);
-						ImGui::CloseCurrentPopup();
-					}
-					st->SetInt(typed_id, typed);
-					ImGui::EndPopup();
-				}
-			}
-			const std::string text = text_of(nv);
-			const float pad = fs * 0.2f;
-			const float bar_h = std::max(3.0f, fs * 0.45f);
-			const ImVec2 b0(pos.x + pad, pos.y + pad), b1(pos.x + w - pad, b0.y + bar_h);
-			dl->AddRectFilled(b0, b1, col(ImGuiCol_FrameBg));
-			if (hi > lo) {
-				const float frac = std::clamp(float(nv - lo) / float(hi - lo), 0.0f, 1.0f);
-				const ImU32 fill = editable ? col(active || hovered ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab)
-				                            : IM_COL32(200, 70, 60, 255);
-				const float x = b0.x + (b1.x - b0.x) * frac;
-				if (bipolar) {
-					const float mid = (b0.x + b1.x) * 0.5f;
-					dl->AddRectFilled(ImVec2(std::min(mid, x) - 1, b0.y), ImVec2(std::max(mid, x) + 1, b1.y), fill);
-				} else {
-					dl->AddRectFilled(b0, ImVec2(x, b1.y), fill);
-				}
-			}
-			if (hovered)
-				dl->AddRect(ImVec2(pos.x + 1, pos.y + 1), ImVec2(pos.x + w - 1, pos.y + h - 1), col(ImGuiCol_Border));
-			const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
-			dl->AddText(ImVec2(pos.x + w - pad - ts.x, b1.y + (pos.y + h - b1.y - ts.y) * 0.5f), col(ImGuiCol_Text), text.c_str());
-			if (hovered && !active)
-				hint(editable ? UI_TEXT(ov_slider_fmt, "%s  %s\nDrag sideways or up/down, wheel, or double-click to type a value")
-				              : UI_TEXT(ov_slider_ro_fmt, "%s  %s\nPlayed value (display only)"), title, text.c_str());
-			ImGui::PopID();
-			return nv;
-		};
-		const auto number = [](int v) { return std::to_string(v); };
-		// CC で動かす欄。表示はパートの同じ項目の書き方（パンは L63〜C〜R63 など）
-		const auto cc_bar = [&](const char *title, int v, int cc, const char *key) {
-			const xg::param *xp = key ? &P(key) : nullptr;
-			const int nv = bar(title, v, 0, 127, xp && (xp->how == xg::view::center || xp->how == xg::view::pan), true,
-			                   [&](int x) { return xp ? xg::format(*xp, x) : std::to_string(x); });
-			if (nv != v)
-				board_view::send(br, { 0xb0 | ch, cc, nv });
-		};
-		for (const column &c : COLUMNS) {
-			ImGui::TableNextColumn();
-			if (!std::strcmp(c.title, "VOL"))       cc_bar("VOL", p.vol, 7, "part.volume");
-			else if (!std::strcmp(c.title, "EXP"))  cc_bar("EXP", p.exp, 11, nullptr);
-			else if (!std::strcmp(c.title, "PAN"))  cc_bar("PAN", p.pan, 10, "part.pan");
-			else if (!std::strcmp(c.title, "MOD"))  cc_bar("MOD", p.mod, 1, nullptr);
-			else if (!std::strcmp(c.title, "VAR"))  cc_bar("VAR", p.var, 94, "part.variation_send");
-			else if (!std::strcmp(c.title, "CHO"))  cc_bar("CHO", p.cho, 93, "part.chorus_send");
-			else if (!std::strcmp(c.title, "REV"))  cc_bar("REV", p.rev, 91, "part.reverb_send");
-			else if (!std::strcmp(c.title, "P.BEND")) {
-				const int nv = bar("P.BEND", p.bend, -8192, 8191, true, true, [](int x) {
-					char buf[12];
-					std::snprintf(buf, sizeof(buf), "%+d", x);
-					return std::string(x == 0 ? "0" : buf);
-				}, 128, 600.0f);
-				if (nv != p.bend) {
-					const int raw = std::clamp(nv + 8192, 0, 16383);
-					board_view::send(br, { 0xe0 | ch, raw & 0x7f, (raw >> 7) & 0x7f });
-				}
-			} else if (!std::strcmp(c.title, "HOLD")) {
-				bar("HOLD", p.hold >= 64 ? 127 : 0, 0, 127, false, false, [](int x) { return std::string(x ? "ON" : "OFF"); });
-			} else if (!std::strcmp(c.title, "INS")) {
-				// 掛かっているエフェクトの印（本体のパートと同じ色と字）。クリックで選ぶ
-				const ImVec2 pos = ImGui::GetCursorScreenPos();
-				const float w = ImGui::GetContentRegionAvail().x;
-				ImGui::InvisibleButton("##ins", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-				if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
-					ImGui::OpenPopup("fxmenu");
-				if (ImGui::BeginPopupContextItem("fxmenu")) {
-					if (ImGui::MenuItem(UI_TEXT(ov_board_ins_none, "Straight to the output"), nullptr, p.insert == 0))
-						board_insert_set(ch, 0, m, br);
-					for (const fx_slot &f : FX_SLOTS) {
-						int type = 0;
-						char item[96];
-						std::snprintf(item, sizeof(item), "%s  (%s)", fx_slot_title(f), m.get(P(f.type_key), 0, type) ? xg::fx_name(type).c_str() : "--");
-						if (ImGui::MenuItem(item, nullptr, p.insert == f.id))
-							board_insert_set(ch, f.id, m, br);
-					}
-					ImGui::EndPopup();
-				}
-				if (ImGui::IsItemHovered())
-					ImGui::SetItemTooltip("%s", UI_TEXT(me_bp_insert_tip, "Send this channel through one of the MU's insertion effects (1-4), or through the variation effect when its connection is Insertion (V), instead of straight to the output. If the effect is not assigned to any part it gets assigned to A/D part 1, so that it passes sound."));
-				if (p.insert >= 1 && p.insert <= 5) {
-					const fx_slot &f = FX_SLOTS[p.insert - 1];
-					const float bw = fs * 1.0f, x = pos.x + fs * 0.2f, y = pos.y + (h - fs) * 0.5f;
-					dl->AddRectFilled(ImVec2(x, y + 1), ImVec2(x + bw, y + fs), f.color, 3.0f);
-					const ImVec2 ms = ImGui::CalcTextSize(f.mark);
-					dl->AddText(ImVec2(x + (bw - ms.x) * 0.5f, y), IM_COL32(20, 20, 20, 255), f.mark);
-				}
+		const std::string text = text_of(nv);
+		const float pad = fs * 0.2f;
+		const float bar_h = std::max(3.0f, fs * 0.45f);
+		const ImVec2 b0(pos.x + pad, pos.y + pad), b1(pos.x + w - pad, b0.y + bar_h);
+		dl->AddRectFilled(b0, b1, col(ImGuiCol_FrameBg));
+		if (hi > lo) {
+			const float frac = std::clamp(float(nv - lo) / float(hi - lo), 0.0f, 1.0f);
+			const ImU32 fill = editable ? col(active || hovered ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab)
+			                            : IM_COL32(200, 70, 60, 255);
+			const float x = b0.x + (b1.x - b0.x) * frac;
+			if (bipolar) {
+				const float mid = (b0.x + b1.x) * 0.5f;
+				dl->AddRectFilled(ImVec2(std::min(mid, x) - 1, b0.y), ImVec2(std::max(mid, x) + 1, b1.y), fill);
 			} else {
-				ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h));      // VIB・FILTER・EG・EQ はボードに無い
+				dl->AddRectFilled(b0, ImVec2(x, b1.y), fill);
 			}
 		}
-
-		// ---- 鍵盤。押さえている鍵が光り、押すと口 E のそのチャンネルで鳴る
-		ImGui::TableNextColumn();
-		{
-			const float w = ImGui::GetContentRegionAvail().x;
-			const ImVec2 pos = ImGui::GetCursorScreenPos();
-			ImGui::InvisibleButton("##keys", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-			const bool down = ImGui::IsItemActive() && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right));
-			int vel = 100;
-			const int want = down ? key_at(pos, w, h, io.MousePos, vel) + 1 : 0;
-			if (want != m_board_playing[ch]) {
-				if (m_board_playing[ch])
-					board_view::send(br, { 0x80 | ch, m_board_playing[ch] - 1, 64 });
-				m_board_playing[ch] = want;
-				if (want)
-					board_view::send(br, { 0x90 | ch, want - 1, vel });
-			}
-			if (ImGui::IsItemHovered() && !down)
-				ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_play_tip, "Press to play (either mouse button). Lower is louder"));
-			draw_keys(dl, pos, w, h, [&](int note) -> ImU32 {
-				return ((p.notes[note >> 6] >> (note & 63)) & 1) ? NOTE_ON : 0;
-			});
-		}
+		if (hovered)
+			dl->AddRect(ImVec2(pos.x + 1, pos.y + 1), ImVec2(pos.x + w - 1, pos.y + h - 1), col(ImGuiCol_Border));
+		const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
+		dl->AddText(ImVec2(pos.x + w - pad - ts.x, b1.y + (pos.y + h - b1.y - ts.y) * 0.5f), col(ImGuiCol_Text), text.c_str());
+		if (hovered && !active)
+			hint(editable ? UI_TEXT(ov_slider_fmt, "%s  %s\nDrag sideways or up/down, wheel, or double-click to type a value")
+			              : UI_TEXT(ov_slider_ro_fmt, "%s  %s\nPlayed value (display only)"), title, text.c_str());
 		ImGui::PopID();
+		return nv;
+	};
+	const auto number = [](int v) { return std::to_string(v); };
+	// CC で動かす欄。表示はパートの同じ項目の書き方（パンは L63〜C〜R63 など）
+	const auto cc_bar = [&](const char *title, int v, int cc, const char *key) {
+		const xg::param *xp = key ? &P(key) : nullptr;
+		const int nv = bar(title, v, 0, 127, xp && (xp->how == xg::view::center || xp->how == xg::view::pan), true,
+		                   [&](int x) { return xp ? xg::format(*xp, x) : std::to_string(x); });
+		if (nv != v)
+			board_view::send(br, { 0xb0 | ch, cc, nv });
+	};
+	for (const column &c : COLUMNS) {
+		ImGui::TableNextColumn();
+		if (!std::strcmp(c.title, "VOL"))       cc_bar("VOL", p.vol, 7, "part.volume");
+		else if (!std::strcmp(c.title, "EXP"))  cc_bar("EXP", p.exp, 11, nullptr);
+		else if (!std::strcmp(c.title, "PAN"))  cc_bar("PAN", p.pan, 10, "part.pan");
+		else if (!std::strcmp(c.title, "MOD"))  cc_bar("MOD", p.mod, 1, nullptr);
+		else if (!std::strcmp(c.title, "VAR"))  cc_bar("VAR", p.var, 94, "part.variation_send");
+		else if (!std::strcmp(c.title, "CHO"))  cc_bar("CHO", p.cho, 93, "part.chorus_send");
+		else if (!std::strcmp(c.title, "REV"))  cc_bar("REV", p.rev, 91, "part.reverb_send");
+		else if (!std::strcmp(c.title, "P.BEND")) {
+			const int nv = bar("P.BEND", p.bend, -8192, 8191, true, true, [](int x) {
+				char buf[12];
+				std::snprintf(buf, sizeof(buf), "%+d", x);
+				return std::string(x == 0 ? "0" : buf);
+			}, 128, 600.0f);
+			if (nv != p.bend) {
+				const int raw = std::clamp(nv + 8192, 0, 16383);
+				board_view::send(br, { 0xe0 | ch, raw & 0x7f, (raw >> 7) & 0x7f });
+			}
+		} else if (!std::strcmp(c.title, "HOLD")) {
+			bar("HOLD", p.hold >= 64 ? 127 : 0, 0, 127, false, false, [](int x) { return std::string(x ? "ON" : "OFF"); });
+		} else if (!std::strcmp(c.title, "INS")) {
+			// 掛かっているエフェクトの印（本体のパートと同じ色と字）。クリックで選ぶ
+			const ImVec2 pos = ImGui::GetCursorScreenPos();
+			const float w = ImGui::GetContentRegionAvail().x;
+			ImGui::InvisibleButton("##ins", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+				ImGui::OpenPopup("fxmenu");
+			if (ImGui::BeginPopupContextItem("fxmenu")) {
+				if (ImGui::MenuItem(UI_TEXT(ov_board_ins_none, "Straight to the output"), nullptr, p.insert == 0))
+					board_insert_set(ch, 0, m, br);
+				for (const fx_slot &f : FX_SLOTS) {
+					int type = 0;
+					char item[96];
+					std::snprintf(item, sizeof(item), "%s  (%s)", fx_slot_title(f), m.get(P(f.type_key), 0, type) ? xg::fx_name(type).c_str() : "--");
+					if (ImGui::MenuItem(item, nullptr, p.insert == f.id))
+						board_insert_set(ch, f.id, m, br);
+				}
+				ImGui::EndPopup();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetItemTooltip("%s", UI_TEXT(me_bp_insert_tip, "Send this channel through one of the MU's insertion effects (1-4), or through the variation effect when its connection is Insertion (V), instead of straight to the output. If the effect is not assigned to any part it gets assigned to A/D part 1, so that it passes sound."));
+			if (p.insert >= 1 && p.insert <= 5) {
+				const fx_slot &f = FX_SLOTS[p.insert - 1];
+				const float bw = fs * 1.0f, x = pos.x + fs * 0.2f, y = pos.y + (h - fs) * 0.5f;
+				dl->AddRectFilled(ImVec2(x, y + 1), ImVec2(x + bw, y + fs), f.color, 3.0f);
+				const ImVec2 ms = ImGui::CalcTextSize(f.mark);
+				dl->AddText(ImVec2(x + (bw - ms.x) * 0.5f, y), IM_COL32(20, 20, 20, 255), f.mark);
+			}
+		} else {
+			ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h));      // VIB・FILTER・EG・EQ はボードに無い
+		}
 	}
+
+	// ---- 鍵盤。押さえている鍵が光り、押すと口 E のそのチャンネルで鳴る
+	ImGui::TableNextColumn();
+	{
+		const float w = ImGui::GetContentRegionAvail().x;
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		ImGui::InvisibleButton("##keys", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+		// 音色の窓では、右クリックは試聴の鍵の印を入れたり消したりするだけ（本体のパートの鍵盤と同じ）
+		if (strip && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+			int dummy = 0;
+			const int note = key_at(pos, w, h, io.MousePos, dummy);
+			if (note >= 0)
+				toggle_audition_key(PARTS + ch, note);
+		}
+		const bool down = ImGui::IsItemActive() && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || (!strip && ImGui::IsMouseDown(ImGuiMouseButton_Right)));
+		int vel = 100;
+		const int want = down ? key_at(pos, w, h, io.MousePos, vel) + 1 : 0;
+		if (want != m_board_playing[ch]) {
+			if (m_board_playing[ch])
+				board_view::send(br, { 0x80 | ch, m_board_playing[ch] - 1, 64 });
+			m_board_playing[ch] = want;
+			if (want)
+				board_view::send(br, { 0x90 | ch, want - 1, vel });
+		}
+		if (ImGui::IsItemHovered() && !down) {
+			if (strip)
+				ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_audition_tip, "Left-click to play (lower is louder). Right-click to mark a key for voice audition, right-click again to clear it\n"
+				                                                  "Mark as many keys as you like for a chord; with no mark, changing voice plays nothing. Marks are per part and are not remembered\n"
+				                                                  "PC keyboard plays too, white keys only: the A row from C3, the Q row an octave up, the number row another octave up. Hold Z to flatten or X to sharpen what you play. Shift holds the modulation wheel up. PageUp / PageDown shift the octave"));
+			else
+				ImGui::SetItemTooltip("%s", UI_TEXT(ov_kb_play_tip, "Press to play (either mouse button). Lower is louder"));
+		}
+		draw_keys(dl, pos, w, h, [&](int note) -> ImU32 {
+			return ((p.notes[note >> 6] >> (note & 63)) & 1) ? NOTE_ON : 0;
+		});
+		if (strip) {
+			// PC のキーボードで弾ける範囲（鍵盤の下に細い線）と、試聴の鍵の目印（丸）
+			float a0, a1, ab, b0, b1, bb;
+			key_span(pos, w, h, m_pc_base, a0, a1, ab);
+			key_span(pos, w, h, std::min(127, m_pc_base + 16), b0, b1, bb);
+			dl->AddRectFilled(ImVec2(a0, pos.y + h - std::max(2.0f, fs * 0.12f)), ImVec2(b1, pos.y + h), IM_COL32(90, 170, 255, 200));
+			for (int n = 0; n < 128; n++) {
+				if (!audition_key(PARTS + ch, n))
+					continue;
+				float x0, x1, bottom;
+				key_span(pos, w, h, n, x0, x1, bottom);
+				const float r = std::max(2.0f, std::min((x1 - x0) * 0.45f, fs * 0.3f));
+				const ImVec2 c((x0 + x1) * 0.5f, bottom - r - fs * 0.15f);
+				dl->AddCircleFilled(c, r + 1.0f, IM_COL32(20, 20, 20, 255));
+				dl->AddCircleFilled(c, r, IM_COL32(60, 200, 120, 255));
+			}
+		}
+	}
+	ImGui::PopID();
 }
 
 void overview::row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h)
@@ -3575,7 +3712,7 @@ void overview::row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, f
 			program_menu(part, m, &ram, br);
 			ImGui::EndPopup();
 		}
-		if (m_part == part)
+		if (m_part == part && shape_window_board() < 0)
 			dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_Header));
 		else if (ImGui::IsItemHovered())
 			dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), col(ImGuiCol_HeaderHovered, 0.4f));
@@ -4925,6 +5062,10 @@ void overview::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		if (hovered_row >= 1 && hovered_row <= PARTS && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
 		    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
 			select_part(hovered_row - 1);
+		// ボードの行（64 パートの下）。音色の窓もそのチャンネルに替わる
+		else if (hovered_row > PARTS && hovered_row <= PARTS + 16 && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+		         ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+			set_shape_window_board(hovered_row - PARTS - 1);
 		ImGui::EndTable();
 	}
 	ImGui::PopStyleVar();

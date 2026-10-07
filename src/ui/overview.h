@@ -147,6 +147,23 @@ private:
 	void row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h);
 	// マルチパートの架空のボードの 16 チャンネル（口 E）を、64 パートの下に並べる
 	void board_rows(xg::model &m, bridge &br, float h);
+	// その 1 行ぶん（表の行を始めた後に呼ぶ）
+	// strip は音色の窓の上のペイン: 鍵盤の右クリックは試聴の鍵の印、PC のキーボードで弾ける範囲の線も描く
+	void board_row(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br, float h, bool strip = false);
+	void board_pick(int kind, int ch, const mu2000::board_part &p, const mu2000::board_voice &v, bridge &br);
+	double m_board_voices_at = -10;         // 音色の並びを最後に聞いた時刻（出しっぱなしの面用）
+public:
+	// ---- 音色の窓が使う。挿さっているマルチパートのボードの種類（無ければ 0）と 16 チャンネルの様子
+	int board_state(bridge &br, mu2000::board_part out[16])
+	{
+		m_board.poll(br);
+		return m_board.get(out);
+	}
+	// 一覧と同じ並びの 1 行（見出しつき）。音色の窓の上のペイン
+	void board_strip(int kind, int ch, const mu2000::board_part &p, xg::model &m, bridge &br);
+	// 出しっぱなしの音色選び（一覧の品書きと同じ並び）。音色の窓の左の面
+	void board_voice_pane(int kind, int ch, const mu2000::board_part &p, bridge &br);
+private:
 	// ボードのチャンネルの音色の品書き（本体のパートの program_menu と同じ形）
 	void board_program_menu(int kind, int ch, const mu2000::board_part &p, bridge &br);
 	std::vector<mu2000::board_voice> m_board_voices;
