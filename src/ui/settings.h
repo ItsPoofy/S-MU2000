@@ -134,11 +134,11 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_THIN_BENDS, r.thin_bends ? "1" : "0");
 	kv.emplace_back(SET_OUTPUT, r.analog ? "analog" : "digital");
 	kv.emplace_back(SET_EDIT_OUT, r.edit_out);
-	static const char *const BOARD_KINDS[6] = { "", "fc", "fc16", "dls", "user", "user16" };
-	kv.emplace_back(SET_BOARD, BOARD_KINDS[r.board >= 0 && r.board < 6 ? r.board : 0]);
-	kv.emplace_back(SET_BOARD2, BOARD_KINDS[r.board_more[0] >= 0 && r.board_more[0] < 6 ? r.board_more[0] : 0]);
+	static const char *const BOARD_KINDS[7] = { "", "fc", "fc16", "dls", "user", "user16", "fm16" };
+	kv.emplace_back(SET_BOARD, BOARD_KINDS[r.board >= 0 && r.board < 7 ? r.board : 0]);
+	kv.emplace_back(SET_BOARD2, BOARD_KINDS[r.board_more[0] >= 0 && r.board_more[0] < 7 ? r.board_more[0] : 0]);
 	kv.emplace_back(SET_BOARD2_PART, std::to_string(r.board_more_part[0]));
-	kv.emplace_back(SET_BOARD3, BOARD_KINDS[r.board_more[1] >= 0 && r.board_more[1] < 6 ? r.board_more[1] : 0]);
+	kv.emplace_back(SET_BOARD3, BOARD_KINDS[r.board_more[1] >= 0 && r.board_more[1] < 7 ? r.board_more[1] : 0]);
 	kv.emplace_back(SET_BOARD3_PART, std::to_string(r.board_more_part[1]));
 	kv.emplace_back(SET_BOARD_DLS, r.board_dls);
 	kv.emplace_back(SET_BOARD_FILE, r.board_file);
@@ -163,7 +163,7 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_THIN_BENDS)) r.thin_bends = *v == "1";
 	if (const std::string *v = find_setting(kv, SET_OUTPUT))  r.analog  = *v == "analog";
 	if (const std::string *v = find_setting(kv, SET_EDIT_OUT)) r.edit_out = *v;
-	const auto board_kind = [](const std::string &v) { return v == "fc" ? 1 : v == "fc16" ? 2 : v == "dls" ? 3 : v == "user" ? 4 : v == "user16" ? 5 : 0; };
+	const auto board_kind = [](const std::string &v) { return v == "fc" ? 1 : v == "fc16" ? 2 : v == "dls" ? 3 : v == "user" ? 4 : v == "user16" ? 5 : v == "fm16" ? 6 : 0; };
 	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = board_kind(*v);
 	if (const std::string *v = find_setting(kv, SET_BOARD2))  r.board_more[0] = board_kind(*v);
 	if (const std::string *v = find_setting(kv, SET_BOARD3))  r.board_more[1] = board_kind(*v);

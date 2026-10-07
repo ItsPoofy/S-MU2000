@@ -324,6 +324,7 @@ struct ui_texts {
 	const char *me_board_dls;
 	const char *me_board_user;
 	const char *me_board_user16;
+	const char *me_board_fm16;
 	const char *me_board_user_none;
 	const char *me_board_user_tip;
 	const char *me_board_user_empty;

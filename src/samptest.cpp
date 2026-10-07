@@ -2435,6 +2435,126 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      "] [" + list2 + "] [" + list3 + "] [" + page2 + "] [" + moved + "]");
 			}
 
+			// FM ボード（VBOARD_FM16。src/vboard_fm.h）。4 オペレーターの FM 音源で、口 E の 16 パート。
+			// まず音源だけで: 128 個のプログラムがどれも鳴り（振り切れず、数として壊れず）、離して 6 秒で全部消える。
+			// ドラム（チャンネル 10）は、ノートオンのすぐ後にノートオフが来ても鳴る。閉じたハイハットは開いた音を止める。
+			// 次に本体に挿して: firmware が見つけ、口 E のチャンネル 1 でオルガン（鍵 69 で 440Hz）が鳴り、
+			// 音量 0 で消える。チャンネル 10 でキックが鳴る
+			{
+				namespace vb = smu2000::vboard;
+				using B = mu2000::button;
+				vb::fm_synth syn;
+				auto run = [&](int samples, int ch, double &peak, bool &bad) {
+					double e = 0;
+					for (int i = 0; i < samples; i++) {
+						float o[16] = {};
+						syn.render(o);
+						const double v = o[ch];
+						if (!(v == v) || std::fabs(v) > 4.0)
+							bad = true;
+						peak = std::max(peak, std::fabs(v));
+						e += v * v;
+					}
+					return std::sqrt(e / samples);
+				};
+				int silent = 0, stuck = 0;
+				bool bad = false;
+				double loudest = 0;
+				for (int prog = 0; prog < 128; prog++) {
+					syn.reset();
+					syn.midi(0xc0, u8(prog), 0);
+					for (int k : { 48, 60, 64, 67 })
+						syn.midi(0x90, u8(k), 110);
+					double peak = 0;
+					if (run(4410, 0, peak, bad) < 0.002)
+						silent++;
+					loudest = std::max(loudest, peak);
+					for (int k : { 48, 60, 64, 67 })
+						syn.midi(0x80, u8(k), 0);
+					double dummy = 0;
+					run(44100 * 6, 0, dummy, bad);
+					if (syn.sounding())
+						stuck++;
+				}
+				syn.reset();
+				double dp = 0;
+				syn.midi(0x99, 36, 120);
+				const double kick_held = run(4410, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 36, 120);
+				syn.midi(0x89, 36, 0);
+				const double kick_tap = run(4410, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 46, 120);
+				run(2205, 9, dp, bad);
+				const double open_ring = run(2205, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 46, 120);
+				run(2205, 9, dp, bad);
+				syn.midi(0x99, 42, 30);                  // 弱く閉じる: 開いた音が止まる
+				run(2205, 9, dp, bad);
+				const double choked = run(2205, 9, dp, bad);
+
+				static rig f;
+				if (!f.mu.load_program(dir + "/mu2000_flash.bin") || !f.mu.load_wave(dir + "/dump"))
+					return 1;
+				f.mu.load_sintab(dir + "/standin/sin-table.bin");
+				f.mu.set_virtual_board(mu2000::VBOARD_FM16, 0);
+				f.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !f.mu.midi_ready(); i += RATE / 100)
+					f.pump(10);
+				f.pump(3000);
+				const bool known = f.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						f.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](int ch, int key) {
+					f.pump(300);
+					f.out.clear();
+					f.collect = true;
+					send({ 0x90 | ch, key, 127 });
+					f.pump(300);
+					f.collect = false;
+					send({ 0x80 | ch, key, 0 });
+					std::vector<double> o = f.out;
+					f.pump(600);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb9, 91, 0, 0xc0, 16 });      // 口 E へ。チャンネル 1 はオルガン
+				const std::vector<double> organ = play(0, 69);
+				const double o440 = tone(organ, 440), o220 = tone(organ, 220);
+				send({ 0xb0, 7, 0 });
+				const std::vector<double> quiet = play(0, 69);
+				send({ 0xb0, 7, 100 });
+				const std::vector<double> kick = play(9, 36);
+				const std::vector<mu2000::board_voice> bv = f.mu.board_voices();
+				send({ 0xf5, 1 });
+				f.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					f.press(B::select_right, 150);
+				f.press(B::enter, 150);
+				const std::string list = f.lcd();
+				check(!silent && !stuck && !bad && loudest < 1.5 && kick_held > 0.01 && kick_tap > 0.5 * kick_held &&
+				      open_ring > 0.005 && choked < 0.5 * open_ring &&
+				      known && list.find("FM BOARD") != std::string::npos && o440 > 0.01 && o220 > 0.3 * o440 &&
+				      level(quiet) < 0.002 * level(organ) && level(kick) > 0.005 && bv.size() == 129,
+				      "FM ボード: 128 個のプログラムが鳴って消え、ドラムも鳴る。口 E の 16 パートのボードとして挿さる",
+				      "鳴らないプログラム " + std::to_string(silent) + "、消えないプログラム " + std::to_string(stuck) +
+				      (bad ? "、壊れた値あり" : "") + "、いちばん大きい山 " + std::to_string(loudest) + "、キック " + std::to_string(kick_held) +
+				      "（ゲートなし " + std::to_string(kick_tap) + "）、開いたハイハット " + std::to_string(open_ring) + " → 閉じて " +
+				      std::to_string(choked) + "、見つけた " + (known ? "はい" : "いいえ") + " [" + list + "] オルガン 440Hz " +
+				      std::to_string(o440) + "（220Hz " + std::to_string(o220) + "）、音量 0 で " +
+				      std::to_string(level(quiet) / std::max(1e-12, level(organ))) + " 倍、口 E のキック " + std::to_string(level(kick)) +
+				      "、音色の並び " + std::to_string(bv.size()));
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])

@@ -3200,7 +3200,8 @@ void overview::board_program_menu(int kind, int ch, const mu2000::board_part &p,
 	if (m_board_voices.empty())
 		m_board_voices = m_board.voices();
 	const std::vector<mu2000::board_voice> &all = m_board_voices;
-	const bool dls = kind == mu2000::VBOARD_DLS;
+	// DLS のボードと FM ボードは GM の並びで、ドラムのパートを持つ
+	const bool dls = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;
 	const auto pick = [&](const mu2000::board_voice &v) {
 		if (dls && v.drum != p.drum)
 			board_view::send(br, { 0xf0, 0x43, 0x10, 0x4c, 0x08, ch, 0x07, v.drum ? 1 : 0, 0xf7 });
@@ -3311,7 +3312,7 @@ void overview::board_rows(xg::model &m, bridge &br, float h)
 	ImGuiIO &io = ImGui::GetIO();
 	const float fs = ImGui::GetFontSize();
 	ImDrawList *dl = ImGui::GetWindowDrawList();
-	const bool banks = kind == mu2000::VBOARD_DLS;
+	const bool banks = kind == mu2000::VBOARD_DLS || kind == mu2000::VBOARD_FM16;       // GM の並び（楽器の絵が引ける）
 	for (int ch = 0; ch < 16; ch++) {
 		const mu2000::board_part &p = part[ch];
 		ImGui::TableNextRow(0, h);
