@@ -198,6 +198,7 @@ class user_synth
 public:
 	static constexpr int VOICES = 32;
 	static constexpr double RATE = 44100.0;
+	static constexpr float QUICK = 1.0f / 441.0f;     // 10 ミリ秒で上がりきる、1 サンプルごとの上がり幅
 
 	void set_board(std::shared_ptr<const user_board> b)
 	{
@@ -327,7 +328,9 @@ public:
 					v.on = false;
 			}
 			// 包絡線: 上がる（直線）→ サステインへ近づく（指数）→ 離したら 0 へ（指数）
-			if (v.released) {
+			// 速い立ち上がり（10 ミリ秒まで）は、途中で離されても上がりきってから下げる。そうしないと、
+			// ノートオンのすぐ後にノートオフが来る音（ゲートの短いドラム）が鳴らずに消える
+			if (v.released && !(v.rising && v.d_attack >= QUICK)) {
 				v.env *= v.k_release;
 				if (v.env < 1e-4f)
 					v.on = false;
