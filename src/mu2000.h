@@ -330,6 +330,11 @@ public:
 		bool drum = false;
 		float level = 0;
 		char name[24] = {};
+		// 演奏の様子（口 E に来た MIDI から）: 押さえている鍵、最後のノートオンの強さと回数、ベンド（真ん中が 0）、CC1、CC64
+		u64 notes[2] = { 0, 0 };
+		u8 velocity = 0, mod = 0, hold = 0;
+		s16 bend = 0;
+		u32 note_ons = 0;
 	};
 	void board_parts(board_part out[16]);
 	// マルチパートのボードのチャンネル（0-15）の音を、MU のインサーションへ通す。slot は 0 = 通さない（そのまま出す）、
@@ -1080,6 +1085,10 @@ private:
 		u8 vol = 100, exp = 127, pan = 64, rev = 40, cho = 0, var = 0, insert = 0;
 		float gain[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };  // dry 左右・reverb 左右・chorus 左右・variation 左右
 		float peak = 0;                              // 直近の音の山（画面のメーター用）
+		u64 notes[2] = { 0, 0 };                     // 押さえている鍵（画面の鍵盤用）
+		u8 velocity = 0, mod = 0, hold = 0;
+		s16 bend = 0;
+		u32 note_ons = 0;
 	};
 	std::array<vb_chan, 16> m_vb16;
 	smu2000::vboard::dls_synth m_vb_dls;      // VBOARD_DLS の音源（ミキサーの値は m_vb16 のものを使う）
