@@ -99,6 +99,11 @@ void request_part(int part);            // part は 0-63
 bool take_part_request();               // 頼みがあれば true（1 回だけ）
 int  shape_window_part();               // パートの音色の窓で見ているパート（一覧で行を選んでも替わる）
 void set_shape_window_part(int part);
+// 音色の窓で、マルチパートのボードのチャンネル（口 E の 0-15）を見ているとき、そのチャンネル。見ていなければ -1。
+// 本体のパートを選ぶ（set_shape_window_part・request_part）と -1 に戻る
+int  shape_window_board();
+void set_shape_window_board(int channel);
+void request_board(int channel);        // 音色の窓を、そのチャンネルで開く頼み
 
 // ---- マスターの窓（マスターボリューム・移調・システムエフェクトの戻り・マスター EQ）を開く頼み。
 // 一覧のマスターの行（MASTER の名前、MASTER EQ の絵）のダブルクリックから

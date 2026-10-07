@@ -285,6 +285,7 @@ struct ui_texts {
 	const char *ps_about_route;      // may contain \n
 	const char *ps_tab_matrix;
 	const char *ps_hint_bar;
+	const char *ps_board_note;
 	// Insertion editor (fx_editor.cpp); kind/part covered by fx_kind/fx_part.
 	const char *fxe_slider_tip_fmt;  // %s %s + how to turn
 	const char *fxe_noeffect;

@@ -327,13 +327,17 @@ void set_fx_window_slot(int slot) { g_fx_slot = std::clamp(slot, 1, 7); }
 
 namespace {
 int  g_shape_part = 0;
+int  g_shape_board = -1;
 bool g_part_request = false;
 }
 
-void request_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_part_request = true; }
+void request_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_shape_board = -1; g_part_request = true; }
+int  shape_window_board() { return g_shape_board; }
+void set_shape_window_board(int channel) { g_shape_board = channel < 0 ? -1 : std::min(channel, 15); }
+void request_board(int channel) { set_shape_window_board(channel); g_part_request = true; }
 bool take_part_request() { const bool r = g_part_request; g_part_request = false; return r; }
 int  shape_window_part() { return g_shape_part; }
-void set_shape_window_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); }
+void set_shape_window_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_shape_board = -1; }
 
 namespace {
 bool g_master_request = false;
