@@ -174,11 +174,11 @@ parts that are simply unknown.
     make ios-auv3 IOS_ROMS=roms        # ROMs baked into S-MU2000AU.appex/Resources/roms
 
 Resulting binary: `Mach-O 64-bit executable arm64`, `LC_BUILD_VERSION platform 2` (iOS),
-`minos 17.0`, ad-hoc signed, identifier `com.tarboh.smu2000.ios.auv3`.
+`minos 17.0`, ad-hoc signed, identifier `com.tarboh.smu2000.ios.app.auv3`.
 
 (17.0, not 14.0: the AUv3 only needs 14 for UMP, but the current Xcode's libc++
 no longer supports 14 as a deployment target. The extension id must prefix-extend
-the containing app's - `com.tarboh.smu2000.ios.auv3` under `com.tarboh.smu2000.ios`
+the containing app's - `com.tarboh.smu2000.ios.app.auv3` under `com.tarboh.smu2000.ios.app`
 - or iOS refuses the install with "Mismatched bundle IDs".)
 
 **Zero compile errors.** Every iOS problem encountered was one of two things, and neither
@@ -242,8 +242,11 @@ reverse) just works - no deletion needed.
 rm -rf build-ios/simulator/S-MU2000.app   # only needed after renames; header edits rebuild via depfiles
 make ios-standalone IOS_SDK_NAME=iphonesimulator IOS_ROMS=roms
 
-# Device build (needs a real signing identity + provisioning profile, below)
+# Device build. With TEAM_ID the identity and the profiles are found (see
+# "Device install" below); without it the signature is ad-hoc and no profile is
+# embedded, which only a jailbroken device will take.
 make ios-standalone TEAM_ID=ABCDE12345 IOS_ROMS=roms
+make ios-sign-info TEAM_ID=ABCDE12345     # what it found, and what is missing
 ```
 
 Header edits rebuild their dependents (iOS depfiles are `-include`d); a source
@@ -253,19 +256,38 @@ binaries, plist, artwork and ROMs: signing earlier signs contents about to chang
 
 ### Simulator install and run
 
+The short version, for the loop you run dozens of times a day:
+
+```bash
+make ios-install      # build, install and launch on the booted simulator
+```
+
+It picks the booted simulator itself (an iPhone if several are up, otherwise
+whatever is booted), and prints the two commands worth having - `log stream` and
+`screenshot` - because those need the device id and a second terminal. It also
+sets `CFBundleExecutable` to `Standalone` and re-signs before installing, since
+both front ends share one bundle and whichever was built last leaves its own name
+there; without that, an `ios-app` first means `installd` refuses the bundle.
+
+The same thing by hand, which is what to reach for when a step fails:
+
 ```bash
 IPHONE=$(xcrun simctl list devices booted -j | /usr/bin/python3 -c \
   'import json,sys;print(next(d["udid"] for d in json.load(sys.stdin)["devices"].values() for d in d if "iPhone" in d["name"]))')
 
 xcrun simctl install $IPHONE build-ios/simulator/S-MU2000.app
-xcrun simctl launch --console-pty $IPHONE com.tarboh.smu2000.ios
+xcrun simctl launch --console-pty $IPHONE com.tarboh.smu2000.ios.app
 xcrun simctl io $IPHONE screenshot /tmp/panel.png   # second shell: pixels without logs
 ```
 
 Name the device: with two simulators booted, `booted` is ambiguous and installs
-to the wrong one. The id is `com.tarboh.smu2000.ios` (the bare
-`com.tarboh.smu2000` predates the plist settling). `--console-pty` puts stdout,
-stderr and crashes on one stream with no predicate to get wrong.
+to the wrong one. The id is `com.tarboh.smu2000.ios.app`, which is
+`packaging/ios-app-Info.plist`'s `CFBundleIdentifier` - `make ios-app-info` prints
+it rather than trusting this line. `--console-pty` puts stdout, stderr and crashes
+on one stream with no predicate to get wrong.
+
+`make ios-install` is the same three commands (build, install, launch) with the
+device picked the same way, for the loop where you want them every time.
 
 Success looks like this, in order (each step logs before the next runs, so a
 failure names itself):
@@ -274,18 +296,18 @@ failure names itself):
 [ios] scene willConnectToSession
 [ios] ROM dir: .../S-MU2000.app/roms
 [ios] layout: .../S-MU2000.app/art/real/panel.txt
-MIDI は USB の口（A-D の 64 パート）
-Booted from snapshot ... / [ios] booted
-配置: .../art/real/panel.txt
-[ios] audio objects made (not yet opened)
-[ios] audio opened: iOS 44100 Hz
-[ios] audio running: 512-frame buffer, real-time thread
+[ios] booted
 [ios] running: tap to press, hold a second finger for menus
 ```
 
-(`audio running: 0-frame buffer` on the first line is normal: it prints before
-the first render callback stores a count. The live numbers are on the status
-line - `worst_ms` there is the interpreter-speed measurement.)
+Without a ROM set the first three lines are replaced by `[ios] no ROMs: the
+panel comes up empty` and the import flow opens by itself (see "ROM images"
+below) - that is the expected first launch, not a failure.
+
+The audio lines are printed by the shared core and interleave wherever they land;
+`audio running: 0-frame buffer` on the first of them is normal, since it prints
+before the first render callback stores a count. The live numbers are on the
+status line - `worst_ms` there is the interpreter-speed measurement.
 
 ### Device install
 
@@ -294,19 +316,95 @@ xcrun devicectl list devices
 xcrun devicectl device install app --device <UDID> build-ios/device/S-MU2000.app
 ```
 
-Prerequisites `make` cannot create: an `embedded.mobileprovision` covering both
-bundle IDs (`com.tarboh.smu2000.ios`, `com.tarboh.smu2000.ios.auv3`), the team,
-and the device UDID (one Xcode pass with the same IDs, or the developer portal;
-zero profiles are installed by default). The appex entitlements are deliberately
-empty - `app-sandbox` is macOS-only and `allow-jit` is meaningless where the JIT
-is compiled out. If the install fails, the message decides the fix (profile
-mismatch vs claimed IDs vs free-provisioning limits).
+#### Signing: one team id in, the rest found
+
+A bundle id belongs to a team, so the ids in `packaging/*.plist` are the upstream
+author's and nobody else can sign them. Give `make` your team and it derives the
+ids, finds your signing identity and finds your provisioning profiles:
+
+```bash
+make ios-sign-info TEAM_ID=ABCDE12345   # what it would use, and what is missing
+make ios-team-id   TEAM_ID=ABCDE12345   # remember it in .ios-team-id, once
+make ios-app       TEAM_ID=ABCDE12345   # signed .app, ready to install
+```
+
+With a team set, the ids become
+
+```
+com.tarboh.smu2000.ios.<TEAM>          the app
+com.tarboh.smu2000.ios.<TEAM>.auv3     the AUv3, prefix-extending the app's
+```
+
+and they are written into the *copied* `Info.plists` inside `build-ios/`, never
+into the checkout - a build leaves the tree as it found it.
+
+The suffix is `.auv3` on the end, not a subdomain in front: Apple's rule is that
+an extension's bundle id must *begin with* its containing app's
+(`com.example.App.Ext`, never `ext.com.example.App`), which is what installd
+checks when it reports `Mismatched bundle IDs`. Both ids still have to be
+registered separately, and each needs its own profile. The team comes from
+`TEAM_ID=`, the environment (`SMU2000_IOS_TEAM_ID`) or `.ios-team-id`, in that
+order, and all three may be omitted once the file exists.
+
+The two ids have to be **registered** before a profile can exist, which `make`
+cannot do. The short way, with a throwaway Xcode project (nothing of it is
+committed - `make` only reads the profiles out of the keychain and the profile
+directory):
+
+1. New iOS App project, empty, no storyboard, no tests. Set the app's bundle id
+   to `com.tarboh.smu2000.ios.<TEAM>` and turn on automatic signing with your
+   team.
+2. Add a target of type **Audio Unit Extension**, bundle id
+   `com.tarboh.smu2000.ios.<TEAM>.auv3` - the app's id with `.auv3` on the end,
+   which is the rule (an extension id must *begin with* its container's, never be
+   a subdomain in front of it).
+3. Build once for the device. Xcode registers both ids, issues both profiles and
+   creates a development certificate for the team if there is none.
+4. `make ios-sign-info TEAM_ID=<TEAM>` should then report an identity and both
+   profiles; `make ios-app TEAM_ID=<TEAM>` builds the signed bundle.
+
+Free provisioning (no paid account) hands out a wildcard profile, which the
+tool accepts - it matches on the profile's own `application-identifier` **and**
+its team, so another team's profile is never embedded. Entitlements are taken from
+the profile itself, so nothing has to be written out by hand; the appex's own file
+stays empty on purpose (`app-sandbox` is macOS-only, `allow-jit` is meaningless
+where the JIT is compiled out, and App Groups need a paid account).
+
+Two things that are about *devices* rather than ids, since they are the usual
+next wall:
+
+- **The device must be registered to the team.** That is what a profile's device
+  list holds; installing the throwaway app on a device is one way to get it
+  registered (Xcode asks, or it happens under automatic signing), but S-MU2000
+  itself does not have to be installed there first. After adding a device,
+  regenerate the profile so it lists it - `make ios-sign-info` prints each
+  profile's expiry, and a device missing from it fails at install with
+  "device is not included".
+- **The certificate has to exist before the profile that allows it.** A profile
+  lists the SHA-1s it accepts (`DeveloperCertificates`), so a profile made before
+  the certificate does not accept it: `codesign` then fails with a message about
+  the profile not including a signing certificate. If you made the profiles in the
+  portal before creating the certificate, make them again afterwards - Xcode does
+  this for you when automatic signing is on.
+
+Without a team the device build signs ad-hoc and looks for no profile at all:
+the shipped ids cannot be signed by anyone else, so a profile for them would be
+one this build cannot use. `IOS_PROFILE=` / `IOS_APPEX_PROFILE=` override the
+search when you do have one for those exact ids.
+
+Troubleshooting by message, when an install is still refused:
+
+| message | what it says | fix |
+|---|---|---|
+| `provisioning profile ... doesn't include ...` | the profile is not this team's, or not for this id | `make ios-sign-info` prints both ids it wants; check the profile's team |
+| `Mismatched bundle IDs` | the appex id must prefix-extend the app's | `TEAM_ID` set for both, or override both profiles |
+| `No profiles for '<team>' were found` | Xcode has not made one yet | register the ids (Xcode or the portal), then re-run |
 
 ### Troubleshooting (every one earned)
 
 | symptom | cause | fix |
 |---|---|---|
-| `Mismatched bundle IDs` at install | appex id must prefix-extend the app's | `com.tarboh.smu2000.ios.auv3` under `com.tarboh.smu2000.ios` |
+| `Mismatched bundle IDs` at install | the appex id must *begin with* the app's | `com.tarboh.smu2000.ios.app.auv3` under `com.tarboh.smu2000.ios.app` |
 | `does not contain code ... iOS-simulator` | device build on a simulator | per-SDK trees; `IOS_SDK_NAME=iphonesimulator` |
 | SIGTRAP `NoSceneLifecycleAdoption` | scene lifecycle mandatory | manifest + nil app delegate + scene delegate from plist |
 | black screen, no log, no crash | `UISceneDelegateClassName` names a missing class | match it to the delegate; the marker `fprintf` first line tells called from never-called |

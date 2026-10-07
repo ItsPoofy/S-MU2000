@@ -1571,32 +1571,38 @@ IOS_APPEX_PLIST := $(IOS_APPEX)/Info.plist
 # appex id is unknown until an install says so - that is the next round IF the
 # error names it, not a structure built on a guess.
 ifeq ($(IOS_SDK_NAME),iphoneos)
-IOS_BUNDLE_ID := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" packaging/ios-app-Info.plist)
-IOS_APPEX_ID  := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" packaging/auv3-ios-appex-Info.plist)
+# Who is signing. A bundle id belongs to a team, so a third-party build needs its
+# own ids and they have to be registered before a profile exists; tools/ios_sign.py
+# derives them from the team and finds the identity and the profiles. The team
+# comes from TEAM_ID=, SMU2000_IOS_TEAM_ID or .ios-team-id (see ios-team-id below),
+# and with none of them set everything is the shipped id and an ad-hoc signature -
+# which is all the simulator needs, and all a device install will refuse.
+#
+# `:=` so each query runs once at parse time, not once per rule that mentions it.
+IOS_TEAM_ID    := $(shell python3 tools/ios_sign.py team)
+IOS_BUNDLE_ID  := $(shell python3 tools/ios_sign.py app-id)
+IOS_APPEX_ID   := $(shell python3 tools/ios_sign.py appex-id)
+IOS_IDENTITY   := $(shell python3 tools/ios_sign.py identity)
+# With a team, sign as that team's identity; without one, ad-hoc (-), which is
+# what a build for the simulator or for a jailbroken device wants.
+CODESIGN_ID    := $(if $(IOS_IDENTITY),$(IOS_IDENTITY),-)
 # Two locations: Xcode 27 keeps managed profiles under UserData, older Xcode (and
 # manual downloads) under MobileDevice. Both are searched; the bundle id decides.
 IOS_PROV_DIRS := $(HOME)/Library/Developer/Xcode/UserData/Provisioning\ Profiles $(HOME)/Library/MobileDevice/Provisioning\ Profiles
 
-# The embedded profiles, found by bundle id in both Xcode profile locations
-# (UserData for Xcode 27 managed profiles, MobileDevice for older/manual ones).
-# File targets so they copy once; IOS_PROFILE / IOS_APPEX_PROFILE override with
-# explicit paths when several match or the wrong one wins. The printed basename
-# says which one won, so a surprise is visible rather than silent.
+# The embedded profiles, found by bundle id: tools/ios_sign.py reads each one's
+# own application-identifier (a wildcard counts - free provisioning hands out
+# those), newest first. IOS_PROFILE / IOS_APPEX_PROFILE override with an explicit
+# path when several match or the wrong one wins; the printed basename says which
+# one won, so a surprise is visible rather than silent.
 $(IOS_APP)/embedded.mobileprovision:
 	@prof="$(IOS_PROFILE)"; \
+	if [ -z "$$prof" ]; then prof="$(shell python3 tools/ios_sign.py profile --which APP)"; fi; \
 	if [ -z "$$prof" ]; then \
-	  for d in "$(HOME)/Library/Developer/Xcode/UserData/Provisioning Profiles" \
-	           "$(HOME)/Library/MobileDevice/Provisioning Profiles"; do \
-	    for f in "$$d"/*.mobileprovision; do \
-	      [ -f "$$f" ] || continue; \
-	      if security cms -D -i "$$f" 2>/dev/null | grep -q "<string>[A-Z0-9]*\.$(IOS_BUNDLE_ID)</string>"; then \
-	        prof="$$f"; break 2; \
-	      fi; \
-	    done; \
-	  done; \
-	fi; \
-	if [ -z "$$prof" ]; then \
-	  echo "ios: no provisioning profile for $(IOS_BUNDLE_ID) - Xcode once (team + run on the device) first"; \
+	  echo "ios: no provisioning profile for $(IOS_BUNDLE_ID)"; \
+	  echo "     a profile belongs to the team that registered the id, so set yours:"; \
+	  echo "       make ios-team-id TEAM_ID=ABCDE12345   (then 'make ios-sign-info')"; \
+	  echo "     already have one for this exact id? IOS_PROFILE=/path/to/one.mobileprovision"; \
 	  exit 1; \
 	fi; \
 	cp -f "$$prof" $@; \
@@ -1607,19 +1613,11 @@ $(IOS_APP)/embedded.mobileprovision:
 # Same search, same loud failure, its own override.
 $(IOS_APPEX)/embedded.mobileprovision:
 	@prof="$(IOS_APPEX_PROFILE)"; \
+	if [ -z "$$prof" ]; then prof="$(shell python3 tools/ios_sign.py profile --which APPEX)"; fi; \
 	if [ -z "$$prof" ]; then \
-	  for d in "$(HOME)/Library/Developer/Xcode/UserData/Provisioning Profiles" \
-	           "$(HOME)/Library/MobileDevice/Provisioning Profiles"; do \
-	    for f in "$$d"/*.mobileprovision; do \
-	      [ -f "$$f" ] || continue; \
-	      if security cms -D -i "$$f" 2>/dev/null | grep -q "<string>[A-Z0-9]*\.$(IOS_APPEX_ID)</string>"; then \
-	        prof="$$f"; break 2; \
-	      fi; \
-	    done; \
-	  done; \
-	fi; \
-	if [ -z "$$prof" ]; then \
-	  echo "ios: no provisioning profile for $(IOS_APPEX_ID) - Xcode needs an extension target, or the portal"; \
+	  echo "ios: no provisioning profile for $(IOS_APPEX_ID) (the AUv3's own id)"; \
+	  echo "     the extension target needs its own; 'make ios-sign-info' says what is missing"; \
+	  echo "     already have one? IOS_APPEX_PROFILE=/path/to/one.mobileprovision"; \
 	  exit 1; \
 	fi; \
 	cp -f "$$prof" $@; \
@@ -1682,6 +1680,11 @@ endif
 $(IOS_APPEX_PLIST): packaging/auv3-ios-appex-Info.plist
 	@mkdir -p $(dir $@)
 	@cp -f $< $@
+	@if [ -n "$(IOS_APPEX_ID)" ] && \
+	    [ "$(IOS_APPEX_ID)" != "$$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $<)" ]; then \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $(IOS_APPEX_ID)" $@; \
+	  echo "ios: appex id -> $(IOS_APPEX_ID)"; \
+	fi
 
 $(IOS_BIN): $(IOS_ENGINE_OBJS) $(IOS_AUV3_OBJS) $(IOS_IMGUI_OBJS)
 	@mkdir -p $(dir $@)
@@ -1820,10 +1823,107 @@ $(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
 $(IOS_APP)/Info.plist: packaging/ios-app-Info.plist
 	@mkdir -p $(dir $@)
 	@cp -f $< $@
+	@if [ -n "$(IOS_BUNDLE_ID)" ] && \
+	    [ "$(IOS_BUNDLE_ID)" != "$$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $<)" ]; then \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $(IOS_BUNDLE_ID)" $@; \
+	  echo "ios: app id -> $(IOS_BUNDLE_ID)"; \
+	fi
 
-.PHONY: ios-app-info
+.PHONY: ios ios-team-id ios-sign-info
+
+# `make ios` on its own: the iOS targets and what each is for. The build has a
+# dozen iOS targets and the one a newcomer wants is usually two steps away from
+# its name (a simulator run needs a ROM import first, a device run needs a
+# profile), so the list says which is which.
+ios:
+	@echo "iOS targets (SDK: IOS_SDK_NAME=iphonesimulator (default) or iphoneos)"
+	@echo
+	@echo "  simulator, no signing needed:"
+	@echo "    ios-standalone            the synth, for the simulator"
+	@echo "    ios-auv3                  the AUv3 extension on its own"
+	@echo "    ios-app                   the smoke host (renders offline, checks the appex)"
+	@echo "    ios-standalone ROMS=roms  ... with the ROM images in the bundle"
+	@echo "    ios-install               build, install and launch on the booted simulator"
+	@echo
+	@echo "  device (a team id, and profiles for the ids it derives):"
+	@echo "    ios-sign-info TEAM_ID=...  what signing would use, and what is missing"
+	@echo "    ios-team-id   TEAM_ID=...  remember the team in .ios-team-id, once"
+	@echo "    ios-app       TEAM_ID=...  signed .app"
+	@echo "    ios-standalone TEAM_ID=... signed, without the app wrapper"
+	@echo
+	@echo "  ROMs (one-time; the images are Yamaha's and not shipped):"
+	@echo "    ios-app-roms ROMS=dir     copy a set into the app bundle"
+	@echo
+	@echo "  doc/ios-auv3.md has the whole story, install and troubleshooting."
+	@echo "  Start with 'make ios-sign-info TEAM_ID=...' if you are building for a device."
+
+
+# Remember the team in the checkout, so the iOS targets need no argument after
+# this once. The file is git-ignored (see .gitignore) and only ever read.
+ios-team-id:
+	@if [ -z "$(TEAM_ID)" ]; then \
+	  echo "usage: make ios-team-id TEAM_ID=ABCDE12345"; \
+	  echo "  (find it in Xcode > Settings > Accounts, or the developer portal)"; \
+	  exit 1; \
+	fi
+	@echo "$(TEAM_ID)" > .ios-team-id
+	@echo "ios: team $(TEAM_ID) written to .ios-team-id (git-ignored)"
+
+# What signing would use, and what is still missing. The first thing to run when
+# a device install is refused: it prints the two ids a profile has to exist for.
+ios-sign-info:
+	@python3 tools/ios_sign.py report --team "$(TEAM_ID)"
+
+.PHONY: ios-app-info ios-install ios-install-sim
 
 ios-app-info: $(IOS_APP)/Info.plist
+
+# Build, install and launch on the booted simulator: the loop that runs dozens of
+# times a day, so it should not be three commands with a device name in them. The
+# device is named rather than left as "booted", which is ambiguous with two
+# simulators up and installs to the wrong one. Simulator only - a device needs a
+# team and a profile, which is `ios-app TEAM_ID=...` plus devicectl (doc).
+#
+# --console-pty is deliberately absent: it attaches stdout for as long as the app
+# runs, which is what you want while watching and what you do not want in a target
+# that is supposed to return.
+# Any booted iOS simulator, preferring an iPhone where both are up: the name is
+# the only thing to go on, and an iPad is just as good a target.
+IOS_SIMULATOR_UDID := $(shell xcrun simctl list devices booted -j 2>/dev/null | \
+	python3 -c 'import json,sys; ds=[d for v in json.load(sys.stdin)["devices"].values() for d in v]; print(next((d["udid"] for d in ds if "iPhone" in d["name"]), ds[0]["udid"]) if ds else "")' 2>/dev/null)
+
+# A second invocation, not a target-specific variable: IOS_SDK_NAME defaults to
+# the device, and every path below (IOS_ROOT, IOS_APP) was resolved while this
+# makefile was read, so changing it per target would be too late - the install
+# would run against the device tree. So the entry point re-executes make with
+# the simulator SDK set from the start.
+ios-install:
+	@$(MAKE) --no-print-directory ios-install-sim IOS_SDK_NAME=iphonesimulator
+
+.PHONY: ios-install-sim
+
+ios-install-sim:
+	@$(MAKE) --no-print-directory ios-standalone
+	@# The name in the plist is whichever front end was built last (both live in
+	@# one bundle), and the stamps mean a target whose binary is current does not
+	@# re-run its recipe - so an `ios-app` before this leaves CFBundleExecutable
+	@# saying S-MU2000 and installd refuses the bundle. Set it here and re-sign,
+	@# because changing the plist changes what is signed.
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Standalone" $(IOS_APP)/Info.plist
+	@# Ad-hoc, with no entitlements: a simulator install wants neither an identity
+	@# nor a profile, and the device answers are not resolved in this invocation.
+	@codesign --force --sign - --timestamp=none $(IOS_APP)
+	@if [ -z "$(IOS_SIMULATOR_UDID)" ]; then \
+	  echo "ios: no booted iPhone simulator - start one in Xcode, or:"; \
+	  echo "     xcrun simctl boot \"iPhone 17\""; \
+	  exit 1; \
+	fi
+	@xcrun simctl install "$(IOS_SIMULATOR_UDID)" $(IOS_APP)
+	@xcrun simctl launch "$(IOS_SIMULATOR_UDID)" $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $(IOS_APP)/Info.plist)
+	@echo "ios: launched on $(IOS_SIMULATOR_UDID)"
+	@echo "     logs:    xcrun simctl spawn $(IOS_SIMULATOR_UDID) log stream --predicate 'processImagePath CONTAINS \"S-MU2000\"'"
+	@echo "     picture: xcrun simctl io $(IOS_SIMULATOR_UDID) screenshot /tmp/panel.png"
+	@echo "     ROMs:    launch it once and use the card menu, or IOS_ROMS=roms on the build above"
 
 # Both front ends live in one bundle and choose between themselves by name, so each
 # target must SET the name rather than inherit whatever the other left behind.
