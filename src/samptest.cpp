@@ -2185,18 +2185,62 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				};
 				send({ 0xf5, 5, 0xb0, 91, 0, 0xb9, 91, 0, 0xc0, 0 });
 				const std::vector<double> a4 = play(0, 69), a5 = play(0, 81), kick = play(9, 36), none = play(9, 40);
+				// ゲートの無い音（ノートオンのすぐ後にノートオフ）も、リリースの長いドラムは鳴りきる（gm.dls のドラムは
+				// リリースが 40 秒ほど）。上の小さな DLS にはエンベロープが無いので、音源に直に音色を渡して確かめる
+				double tap = 0, held = 0;
+				{
+					namespace vb = smu2000::vboard;
+					auto bank = std::make_shared<vb::dls_bank>();
+					vb::dls_wave w;
+					w.rate = 44100;
+					for (int i = 0; i < 22050; i++)
+						w.pcm.push_back(s16(12000 * std::sin(i * 0.0627)));
+					bank->waves.push_back(w);
+					vb::dls_instrument kit;
+					kit.drum = true;
+					vb::dls_region r;
+					r.wave = 0;
+					r.art.eg1_release = 40.0;
+					kit.regions.push_back(r);
+					bank->instruments.push_back(kit);
+					vb::dls_synth syn;
+					syn.set_bank(bank);
+					auto rms = [&]() {
+						double e = 0;
+						for (int i = 0; i < 4410; i++) {
+							float ch[16][2] = {};
+							syn.render(ch);
+							e += double(ch[9][0]) * ch[9][0];
+						}
+						return std::sqrt(e / 4410);
+					};
+					syn.midi(0x99, 60, 127);
+					held = rms();
+					syn.midi(0xb9, 120, 0);
+					syn.midi(0x99, 60, 127);
+					syn.midi(0x89, 60, 0);
+					tap = rms();
+				}
+				// GS の「リズムパートに使う」でチャンネル 2 をドラムに（鍵 36 が鳴り、鍵 40 は鳴らない）。0 で戻すとメロディの音色
+				send({ 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x12, 0x15, 0x02, 0x17, 0xf7, 0xb1, 91, 0 });
+				const std::vector<double> kick2 = play(1, 36), none2 = play(1, 40);
+				send({ 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x12, 0x15, 0x00, 0x19, 0xf7 });
+				const std::vector<double> mel2 = play(1, 40);
 				send({ 0xf5, 1 });
 				const double a4_440 = tone(a4, 440), a4_880 = tone(a4, 880), a5_880 = tone(a5, 880), a5_440 = tone(a5, 440);
 				std::remove(good.c_str());
 				std::remove(bad.c_str());
 				check(loaded && refused && d.mu.board_dls_instruments() == 2 && d.mu.virtual_board_known() &&
 				      a4_440 > 0.01 && a4_880 < 0.02 * a4_440 && a5_880 > 0.01 && a5_440 < 0.02 * a5_880 &&
-				      level(kick) > 0.01 && level(none) < 0.001 * level(kick),
-				      "DLS のボードが、読んだ DLS の音色を口 E で鳴らす",
+				      level(kick) > 0.01 && level(none) < 0.001 * level(kick) &&
+				      held > 0.01 && tap > 0.9 * held && level(kick2) > 0.8 * level(kick) && level(none2) < 0.001 * level(kick) &&
+				      level(mel2) > 0.01,
+				      "DLS のボードが、読んだ DLS の音色を口 E で鳴らす（ゲートの無いドラムも鳴り、GS でドラムのパートを増やせる）",
 				      std::string(loaded ? "読めた" : "読めない: " + err) + "、DLS でないものは「" + err_bad + "」、音色 " +
 				      std::to_string(d.mu.board_dls_instruments()) + "、A4 の 440Hz " + std::to_string(a4_440) + "（880Hz " +
 				      std::to_string(a4_880) + "）、A5 の 880Hz " + std::to_string(a5_880) + "、ドラム 鍵 36 " + std::to_string(level(kick)) +
-				      " / 鍵 40 " + std::to_string(level(none)));
+				      " / 鍵 40 " + std::to_string(level(none)) + "、ゲートなし " + std::to_string(tap) + "（押したまま " + std::to_string(held) + "）" + "、チャンネル 2 をドラムに: 鍵 36 " +
+				      std::to_string(level(kick2)) + " / 鍵 40 " + std::to_string(level(none2)) + "、戻して鍵 40 " + std::to_string(level(mel2)));
 			}
 
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、

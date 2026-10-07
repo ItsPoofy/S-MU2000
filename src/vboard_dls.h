@@ -387,7 +387,7 @@ inline std::shared_ptr<dls_bank> dls_load(const std::string &path, std::string &
 class dls_synth
 {
 public:
-	static constexpr int VOICES = 64;
+	static constexpr int VOICES = 128;
 	static constexpr int CHANNELS = 16;
 	static constexpr double RATE = 44100.0;
 	static constexpr int BLOCK = 16;             // 音程とエンベロープを計算し直す間隔（サンプル）
@@ -474,6 +474,10 @@ public:
 			break;
 		}
 	}
+
+	// チャンネルをドラムのパートにする・メロディに戻す（GS の「リズムパートに使う」、XG のパートのモード）。
+	// 何もしなければチャンネル 10 だけがドラム
+	void set_drum(int chan, bool drum) { m_ch[size_t(chan & 15)].drum = drum; }
 
 	// チャンネルのいまの音色（画面に出す）。ins は、その設定で実際に鳴る音色（無ければ nullptr）
 	void channel_voice(int chan, u8 &msb, u8 &lsb, u8 &program, bool &drum, const dls_instrument *&ins) const
@@ -578,6 +582,9 @@ private:
 					if (o.on && o.chan == chan && o.key_group == r.key_group)
 						o.on = false;
 			const dls_wave &w = m_bank->waves[size_t(r.wave)];
+			// 空いている声。無ければ、いちばん小さく鳴っている声を譲ってもらう（立ち上がりの途中の声は避ける）。
+			// 「離された声の古い順」にはしない: ドラムはノートオフがすぐ来るので、シンバルの余韻やタムが
+			// 真っ先に切られてしまう
 			voice *use = nullptr;
 			for (voice &v : m_v)
 				if (!v.on) {
@@ -586,7 +593,7 @@ private:
 				}
 			if (!use)
 				for (voice &v : m_v)
-					if (v.released && (!use || v.age < use->age))
+					if (v.eg1_phase != 0 && (!use || v.amp < use->amp))
 						use = &v;
 			if (!use)
 				for (voice &v : m_v)
@@ -615,6 +622,10 @@ private:
 			v.eg1_attack = r.art.eg1_attack * std::pow(2.0, r.art.eg1_attack_vel * vv / 1200.0);
 			v.eg1_decay = r.art.eg1_decay * std::pow(2.0, r.art.eg1_decay_key * (double(key) / 128.0) / 1200.0);
 			v.lfo_wait = r.art.lfo_delay;
+			// 包絡線の 1 歩目をここで進めておく。立ち上がりの無い音（ドラムなど）はこれで最大になる。
+			// これをしないと、ノートオンのすぐ後（次の計算の前）にノートオフが来た音が、音量 0 のまま
+			// リリースに入って消える（ゲートの短いドラムが鳴らない）
+			control(v);
 			break;
 		}
 	}

@@ -3596,17 +3596,29 @@ void mu2000::board_midi_in(u8 byte)
 	if (!vb_multi() || byte >= 0xf8)
 		return;
 	const bool dls = m_vb_kind == VBOARD_DLS;
-	// SysEx は XG System On（F0 43 1n 4C 00 00 7E 00 F7）と GM System On（F0 7E 7F 09 01 F7）だけ読む
+	// SysEx は、リセット（XG System On F0 43 1n 4C 00 00 7E 00 F7、GM System On F0 7E 7F 09 01 F7、
+	// GS リセット F0 41 dd 42 12 40 00 7F 00 41 F7）と、DLS のボードではドラムのパートの指定を読む:
+	//   GS「リズムパートに使う」 F0 41 dd 42 12 40 1x 15 vv 和 F7（x = 0 はチャンネル 10、1-9 は 1-9、A-F は 11-16。vv = 0 でメロディ）
+	//   XG パートのモード        F0 43 1n 4C 08 pp 07 vv F7（vv = 0 でメロディ。口 E ではパート = チャンネル）
 	if (byte == 0xf0) {
 		m_vb16_sx.assign(1, byte);
 	} else if (!m_vb16_sx.empty()) {
 		if (byte == 0xf7) {
 			const std::vector<u8> &sx = m_vb16_sx;
-			if ((sx.size() == 8 && sx[1] == 0x43 && (sx[2] & 0xf0) == 0x10 && sx[3] == 0x4c && sx[4] == 0x00 && sx[5] == 0x00 && sx[6] == 0x7e) ||
-			    (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01))
+			const bool xg = sx.size() == 8 && sx[1] == 0x43 && (sx[2] & 0xf0) == 0x10 && sx[3] == 0x4c;
+			const bool gs = sx.size() == 10 && sx[1] == 0x41 && sx[3] == 0x42 && sx[4] == 0x12 && sx[5] == 0x40;
+			if ((xg && sx[4] == 0x00 && sx[5] == 0x00 && sx[6] == 0x7e) ||
+			    (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01) ||
+			    (gs && sx[6] == 0x00 && sx[7] == 0x7f && sx[8] == 0x00)) {
 				vb16_reset(true);
+			} else if (gs && (sx[6] & 0xf0) == 0x10 && sx[7] == 0x15) {
+				const int x = sx[6] & 15;
+				m_vb_dls.set_drum(x == 0 ? 9 : x <= 9 ? x - 1 : x, sx[8] != 0);
+			} else if (xg && sx[4] == 0x08 && sx[5] < 16 && sx[6] == 0x07) {
+				m_vb_dls.set_drum(sx[5], sx[7] != 0);
+			}
 			m_vb16_sx.clear();
-		} else if ((byte & 0x80) || m_vb16_sx.size() >= 8) {
+		} else if ((byte & 0x80) || m_vb16_sx.size() >= 12) {
 			m_vb16_sx.clear();
 		} else {
 			m_vb16_sx.push_back(byte);
