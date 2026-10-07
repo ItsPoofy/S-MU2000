@@ -38,6 +38,7 @@ inline constexpr const char *SET_OUTPUT = "output";
 inline constexpr const char *SET_BOARD = "board";             // 架空のプラグインボード（fc。無ければ空）
 inline constexpr const char *SET_BOARD_PART = "board_part";   // そのパート（1-64）
 inline constexpr const char *SET_BOARD_DLS = "board_dls";     // DLS のボードが読むファイル（道。UTF-8）
+inline constexpr const char *SET_BOARD_FILE = "board_file";   // オリジナルのボードのファイル（道。src/ui/user_boards.h）
 inline constexpr const char *SET_VOLUME = "volume";
 inline constexpr const char *SET_EDIT_OUT = "edit_out";   // 音色の窓の送り先（空はパネルの設定）
 
@@ -105,6 +106,7 @@ struct remembered {
 	int board = 0;        // board=fc / fc16 (the imaginary plug-in board, mu2000::VBOARD_FC / VBOARD_FC16; 0 = none)
 	int board_part = 1;   // board_part= (1-64)
 	std::string board_dls; // board_dls= (the DLS file of the DLS board)
+	std::string board_file; // board_file= (the user's own board, board=user / user16)
 };
 
 // Struct to file rows, in file order
@@ -126,8 +128,9 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_THIN_BENDS, r.thin_bends ? "1" : "0");
 	kv.emplace_back(SET_OUTPUT, r.analog ? "analog" : "digital");
 	kv.emplace_back(SET_EDIT_OUT, r.edit_out);
-	kv.emplace_back(SET_BOARD, r.board == 1 ? "fc" : r.board == 2 ? "fc16" : r.board == 3 ? "dls" : "");
+	kv.emplace_back(SET_BOARD, r.board == 1 ? "fc" : r.board == 2 ? "fc16" : r.board == 3 ? "dls" : r.board == 4 ? "user" : r.board == 5 ? "user16" : "");
 	kv.emplace_back(SET_BOARD_DLS, r.board_dls);
+	kv.emplace_back(SET_BOARD_FILE, r.board_file);
 	kv.emplace_back(SET_BOARD_PART, std::to_string(r.board_part));
 	return kv;
 }
@@ -149,8 +152,9 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_THIN_BENDS)) r.thin_bends = *v == "1";
 	if (const std::string *v = find_setting(kv, SET_OUTPUT))  r.analog  = *v == "analog";
 	if (const std::string *v = find_setting(kv, SET_EDIT_OUT)) r.edit_out = *v;
-	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = *v == "fc" ? 1 : *v == "fc16" ? 2 : *v == "dls" ? 3 : 0;
+	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = *v == "fc" ? 1 : *v == "fc16" ? 2 : *v == "dls" ? 3 : *v == "user" ? 4 : *v == "user16" ? 5 : 0;
 	if (const std::string *v = find_setting(kv, SET_BOARD_DLS)) r.board_dls = *v;
+	if (const std::string *v = find_setting(kv, SET_BOARD_FILE)) r.board_file = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_PART)) {
 		const int n = std::atoi(v->c_str());
 		r.board_part = n >= 1 && n <= 64 ? n : 1;

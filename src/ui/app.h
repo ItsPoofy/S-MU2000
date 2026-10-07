@@ -58,6 +58,7 @@
 #include "ui/snapshot.h"
 #include "ui/status.h"
 #include "ui/toolbar.h"
+#include "ui/user_boards.h"
 
 #include "nvram.h"
 #include "smartmedia.h"
@@ -459,6 +460,8 @@ public:
 		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
 		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
 		r.board_dls  = eng ? eng->mu.board_dls_path() : std::string();
+		user_boards::save(br);
+		r.board_file = user_boards::current_path();
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1128,6 +1131,13 @@ public:
 				std::string err;
 				if (!eng->mu.load_board_dls(r.board_dls, err))
 					std::fprintf(stderr, CLI_T("DLS board: %s (%s)\n", "DLS のボード: %s（%s）\n"), err.c_str(), r.board_dls.c_str());
+			}
+			if (eng && !r.board_file.empty()) {
+				std::string err;
+				if (const auto b = user_boards::adopt(r.board_file, err))
+					eng->mu.set_user_board(b, r.board_file);
+				else
+					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
 			}
 			if (eng && r.board)
 				eng->mu.set_virtual_board(r.board, r.board_part - 1);

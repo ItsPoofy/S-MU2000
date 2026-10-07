@@ -6,6 +6,7 @@
 #include "driver.h"
 #include "fx_icons.h"
 #include "overview.h"
+#include "user_boards.h"
 #include "ui/texts.h"
 #include "xg_state.h"
 
@@ -230,7 +231,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// ---- 下: マスター EQ。マルチパートのボードが挿さっているときは、タブで「ボードのパート」に切り替えられる
 	bool show_board = false;
-	if (m_board_kind >= mu2000::VBOARD_FC16 && ImGui::BeginTabBar("bottom")) {
+	if (mu2000::board_is_multi(m_board_kind) && ImGui::BeginTabBar("bottom")) {
 		if (ImGui::BeginTabItem(UI_TEXT(me_master_eq, "Master EQ")))
 			ImGui::EndTabItem();
 		if (ImGui::BeginTabItem(UI_TEXT(me_board_parts, "Board parts (port E)"))) {
@@ -412,7 +413,9 @@ void master_editor::board_pane(bridge &br)
 	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
 	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
 	                          UI_TEXT(me_board_fc16, "FC board, 16 parts on port E") + '\0' +
-	                          UI_TEXT(me_board_dls, "DLS board, 16 parts on port E") + '\0';
+	                          UI_TEXT(me_board_dls, "DLS board, 16 parts on port E") + '\0' +
+	                          UI_TEXT(me_board_user, "Your own board (waves you made)") + '\0' +
+	                          UI_TEXT(me_board_user16, "Your own board, 16 parts on port E") + '\0';
 	bool changed = false;
 	ImGui::SetNextItemWidth(-fs * 9.5f);
 	const bool kind_changed = ImGui::Combo("##board", &m_board_kind, kinds.c_str());
@@ -423,7 +426,7 @@ void master_editor::board_pane(bridge &br)
 	ImGui::TextUnformatted(UI_TEXT(me_board_part, "Part"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
-	ImGui::BeginDisabled(m_board_kind >= mu2000::VBOARD_FC16);       // 16 パートのボードは本体のパートを借りない
+	ImGui::BeginDisabled(mu2000::board_is_multi(m_board_kind));       // 16 パートのボードは本体のパートを借りない
 	if (ImGui::InputInt("##boardpart", &m_board_part)) {
 		m_board_part = std::clamp(m_board_part, 1, 64);
 		changed = true;
@@ -480,8 +483,8 @@ void master_editor::board_pane(bridge &br)
 	if (seen < 0 || now - m_board_touched < 1.0)
 		return;
 	// 設定から挿さった状態で始まったとき（この窓はまだ「なし」のまま）
-	if (!m_board_booting && !m_board_kind && (seen & 0x1800))
-		m_board_kind = (seen >> 11) & 3;
+	if (!m_board_booting && !m_board_kind && (seen & 0x3800))
+		m_board_kind = (seen >> 11) & 7;
 	if (!m_board_kind)
 		return;
 	// 起動し直しが済んだ（本体がボードを見つけて MIDI を受け始めた）。そのパートにボードのバンクを選ぶ
@@ -490,7 +493,7 @@ void master_editor::board_pane(bridge &br)
 		m_board_touched = now;
 		m_board_seen->store(-1);
 		br.post([](mu2000 &mu) {
-			if (mu.virtual_board_kind() != mu2000::VBOARD_FC)
+			if (!mu.virtual_board_kind() || mu.virtual_board_multi())
 				return std::string();
 			const int p = mu.virtual_board_part();
 			const u8 ch = u8(p % 16);
@@ -502,7 +505,9 @@ void master_editor::board_pane(bridge &br)
 	}
 	if (m_board_kind == mu2000::VBOARD_DLS)
 		board_dls_pane(br);
-	if (m_board_kind >= mu2000::VBOARD_FC16) {
+	if (m_board_kind == mu2000::VBOARD_USER || m_board_kind == mu2000::VBOARD_USER16)
+		board_user_pane(br);
+	if (mu2000::board_is_multi(m_board_kind)) {
 		ImGui::TextDisabled("%s", (seen & 0x100) ? UI_TEXT(me_board_port_e, "Listed under UTIL > PLG. Plays from MIDI port E (the fifth port): 16 channels")
 		                                         : UI_TEXT(me_board_unknown, "The MU has not noticed it yet: click the POWER switch and restart the MU to list it under UTIL > PLG"));
 		return;
@@ -632,6 +637,38 @@ void master_editor::board_parts_pane(xg::model &m, bridge &br)
 		ImGui::PopID();
 	}
 	ImGui::EndTable();
+}
+
+// オリジナルのボード: 置き場（設定のフォルダーの boards）のボードから選ぶ。中身はサンプリングの窓の「波形を作る」で作る
+void master_editor::board_user_pane(bridge &br)
+{
+	namespace ub = user_boards;
+	const float fs = ImGui::GetFontSize();
+	const double now = ImGui::GetTime();
+	if (m_ub_listed < 0 || now - m_ub_listed > 1.0) {
+		m_ub_listed = now;
+		m_ub_list = ub::list();
+	}
+	std::shared_ptr<const ub::board> cur = ub::current();
+	const std::string stem = ub::current_stem();
+	ImGui::SetNextItemWidth(fs * 11);
+	if (ImGui::BeginCombo("##ubfile", cur ? cur->name : UI_TEXT(me_board_user_none, "(no board)"))) {
+		for (const std::string &s : m_ub_list)
+			if (ImGui::Selectable(s.c_str(), s == stem) && s != stem) {
+				std::string err;
+				m_ub_note = ub::open(br, s, err) ? std::string() : err;
+			}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_board_user_tip, "A board of your own: waves made on the Sampling window's \"Make a wave\" tab, one per program number. Program change picks the wave; the display shows the names you gave. Only waves computed there can go in (no built-in waves, no recordings). Boards are kept in the \"boards\" folder of the settings folder, one file each."));
+	ImGui::SameLine();
+	if (!m_ub_note.empty())
+		ImGui::TextDisabled(UI_TEXT(me_board_dls_error_fmt, "Could not load: %s"), m_ub_note.c_str());
+	else if (!cur)
+		ImGui::TextDisabled("%s", UI_TEXT(me_board_user_empty, "No board yet: make one in Sampling > Make a wave"));
+	else
+		ImGui::TextDisabled(UI_TEXT(me_board_user_count_fmt, "%d programs"), cur->count());
 }
 
 // DLS のボード: 読むファイルを選ぶ。選んだら音声の糸で読ませ、結果（音色と波形の数、または読めなかった訳）を出す

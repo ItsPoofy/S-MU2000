@@ -2243,6 +2243,100 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(level(kick2)) + " / 鍵 40 " + std::to_string(level(none2)) + "、戻して鍵 40 " + std::to_string(level(mel2)));
 			}
 
+			// オリジナルのボード（VBOARD_USER。src/vboard_user.h）。「波形を作る」の波形をプログラム番号に入れたもの。
+			// プログラム 1 に正弦、3 に矩形を入れて、パート 1 に挿す。鍵 69 で 440Hz（波形は鍵 60 で C3）、正弦は倍音が無く、
+			// 矩形は 3 倍音が 3 分の 1。空いているプログラム 2 は鳴らない。液晶には付けた名前が出る。
+			// ファイルの形にして読み戻すと、同じものになる
+			{
+				namespace vb = smu2000::vboard;
+				namespace wg = smu2000::wavegen;
+				using B = mu2000::button;
+				auto board = std::make_shared<vb::user_board>();
+				std::snprintf(board->name, sizeof(board->name), "TEST BOARD");
+				auto prog = [](const char *name, std::vector<s16> pcm) {
+					auto q = std::make_shared<vb::user_program>();
+					vb::detail::clean_name(q->name, name, 8, true);
+					q->pcm = std::make_shared<std::vector<s16>>(std::move(pcm));
+					return q;
+				};
+				board->program[0] = prog("MYSINE", wg::render(wg::basic(wg::shape::sine)));
+				board->program[2] = prog("MYSQUARE", wg::render(wg::basic(wg::shape::square)));
+				const std::vector<u8> bytes = vb::write_user_board(*board);
+				std::string ferr;
+				const auto back = vb::read_user_board(bytes.data(), bytes.size(), ferr);
+				const bool same = back && vb::write_user_board(*back) == bytes && back->count() == 2;
+				const bool cut = !vb::read_user_board(bytes.data(), bytes.size() - 100, ferr);
+
+				static rig u;
+				if (!u.mu.load_program(dir + "/mu2000_flash.bin") || !u.mu.load_wave(dir + "/dump"))
+					return 1;
+				u.mu.load_sintab(dir + "/standin/sin-table.bin");
+				u.mu.set_user_board(board, "");
+				u.mu.set_virtual_board(mu2000::VBOARD_USER, 0);
+				u.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !u.mu.midi_ready(); i += RATE / 100)
+					u.pump(10);
+				u.pump(3000);
+				const bool known = u.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						u.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&]() {
+					u.pump(300);
+					u.out.clear();
+					u.collect = true;
+					send({ 0x90, 69, 127 });
+					u.pump(300);
+					u.collect = false;
+					send({ 0x80, 69, 0 });
+					std::vector<double> o = u.out;
+					u.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xb0, 91, 0, 0xb0, 0, int(mu2000::VBOARD_BANK_MSB), 0xb0, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0, 0 });
+				const std::vector<double> sine = play();
+				const std::string lcd_sine = u.lcd();
+				// ノートオンのすぐ後にノートオフが来ても、音は立ち上がってからリリースで消えていく
+				u.pump(300);
+				u.out.clear();
+				u.collect = true;
+				send({ 0x90, 69, 127, 0x80, 69, 0 });
+				u.pump(20);
+				u.collect = false;
+				const std::vector<double> tap = u.out;
+				u.pump(500);
+				const double s1 = tone(sine, 440), s2 = tone(sine, 880), s3 = tone(sine, 1320);
+				send({ 0xc0, 1 });
+				const std::vector<double> none = play();
+				send({ 0xc0, 2 });
+				const std::vector<double> sq = play();
+				const std::string lcd_sq = u.lcd();
+				const double q1 = tone(sq, 440), q3 = tone(sq, 1320);
+				u.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					u.press(B::select_right, 150);
+				u.press(B::enter, 150);
+				const std::string list = u.lcd();
+				check(same && cut && known && list.find("TEST BOARD") != std::string::npos &&
+				      lcd_sine.find("MYSINE") != std::string::npos && lcd_sq.find("MYSQUARE") != std::string::npos &&
+				      s1 > 0.01 && s2 < 0.02 * s1 && s3 < 0.02 * s1 && level(none) < 0.002 * level(sine) &&
+				      level(tap) > 0.2 * level(sine) &&
+				      q1 > 0.01 && std::fabs(q3 / q1 - 1.0 / 3.0) < 0.05,
+				      "オリジナルのボード: 作った波形がプログラムごとに鳴り、名前が液晶に出る。ファイルにして読み戻せる",
+				      std::string("読み戻し ") + (same ? "同じ" : "違う") + "、欠けたファイルは" + (cut ? "断る" : "通る") + "、見つけた " +
+				      (known ? "はい" : "いいえ") + " [" + list + "] [" + lcd_sine + "] [" + lcd_sq + "] 正弦 440Hz " + std::to_string(s1) +
+				      "（2 倍音 " + std::to_string(s2 / std::max(1e-12, s1)) + " 倍、3 倍音 " + std::to_string(s3 / std::max(1e-12, s1)) +
+				      " 倍）、ゲートなしの頭 20 ミリ秒 " + std::to_string(level(tap) / std::max(1e-12, level(sine))) + " 倍、空きは " + std::to_string(level(none) / std::max(1e-12, level(sine))) + " 倍、矩形 440Hz " + std::to_string(q1) +
+				      "（3 倍音 " + std::to_string(q3 / std::max(1e-12, q1)) + " 倍）");
+			}
+
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
 			// 残りは波形と表を直に書く（音色の通だけ firmware が受ける）。MIDI で全部送ったときと同じ結果になる
 			for (u8 b : msgs[0])
