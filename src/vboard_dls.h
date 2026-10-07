@@ -475,6 +475,17 @@ public:
 		}
 	}
 
+	// チャンネルのいまの音色（画面に出す）。ins は、その設定で実際に鳴る音色（無ければ nullptr）
+	void channel_voice(int chan, u8 &msb, u8 &lsb, u8 &program, bool &drum, const dls_instrument *&ins) const
+	{
+		const channel &c = m_ch[size_t(chan & 15)];
+		msb = c.msb;
+		lsb = c.lsb;
+		program = c.program;
+		drum = c.drum;
+		ins = m_bank ? m_bank->find(c.drum, c.msb, c.lsb, c.program) : nullptr;
+	}
+
 	bool sounding() const
 	{
 		for (const voice &v : m_v)

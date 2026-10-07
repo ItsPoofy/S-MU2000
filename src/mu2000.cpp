@@ -3434,12 +3434,8 @@ void mu2000::vb_from_firmware(const std::vector<u8> &m)
 	}
 	// 機種 4F: 音色の名前（7F 10 00 <MSB> <LSB> <プログラム> 08）。答えは文字数と 8 文字。液晶の音色名の所に出る
 	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4f && m.size() == 12 && m[4] == 0x7f && m[5] == 0x10 && m[6] == 0x00) {
-		static const char *const names[16] = {
-			"Square50", "Square25", "Square12", "Triangle", "Noise   ", "MetalNz ", "DutySwp ", "OctArp  ",
-			"Sq50 Dcy", "Sq25 Dcy", "Sq12 Dcy", "Tri Dcy ", "NoiseDcy", "MetalDcy", "SweepDcy", "ArpDcy  ",
-		};
 		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4f, 0x7f, 0x10, 0x00, 0x08 };
-		const char *name = names[m[9] & 15];
+		const char *name = smu2000::vboard::fc_program_name(m[9]);
 		r.insert(r.end(), name, name + 8);
 		reply(std::move(r));
 		return;
@@ -3644,6 +3640,33 @@ void mu2000::board_midi_in(u8 byte)
 		c.fc.midi(p.status, p.d[0], need == 2 ? p.d[1] : 0);
 }
 
+void mu2000::board_parts(board_part out[16])
+{
+	for (int i = 0; i < 16; i++) {
+		vb_chan &c = m_vb16[size_t(i)];
+		board_part &o = out[i];
+		o = board_part();
+		o.vol = c.vol;
+		o.exp = c.exp;
+		o.pan = c.pan;
+		o.rev = c.rev;
+		o.cho = c.cho;
+		o.level = c.peak;
+		c.peak *= 0.6f;                    // 読むたびに下げる（画面は 1 秒に 30 回ほど読む）
+		const char *name = "";
+		if (m_vb_kind == VBOARD_DLS) {
+			const smu2000::vboard::dls_instrument *ins = nullptr;
+			m_vb_dls.channel_voice(i, o.msb, o.lsb, o.program, o.drum, ins);
+			if (ins)
+				name = ins->name.c_str();
+		} else if (m_vb_kind == VBOARD_FC16) {
+			o.program = c.fc.program();
+			name = smu2000::vboard::fc_program_name(o.program);
+		}
+		std::snprintf(o.name, sizeof(o.name), "%s", name);
+	}
+}
+
 bool mu2000::load_board_dls(const std::string &path, std::string &err)
 {
 	std::shared_ptr<smu2000::vboard::dls_bank> bank = smu2000::vboard::dls_load(path, err);
@@ -3673,6 +3696,7 @@ void mu2000::vb16_render()
 				bus[3] += ch[i][1] * c.gain[3];
 				bus[4] += ch[i][0] * c.gain[4];
 				bus[5] += ch[i][1] * c.gain[5];
+				m_vb16[size_t(i)].peak = std::max(m_vb16[size_t(i)].peak, std::max(std::fabs(ch[i][0] * c.gain[0]), std::fabs(ch[i][1] * c.gain[1])));
 			}
 		}
 	} else {
@@ -3683,6 +3707,7 @@ void mu2000::vb16_render()
 			const float s = c.fc.render();
 			for (int i = 0; i < 6; i++)
 				bus[i] += s * c.gain[i];
+			c.peak = std::max(c.peak, std::fabs(s) * std::max(c.gain[0], c.gain[1]));
 		}
 	}
 	if (!any) {

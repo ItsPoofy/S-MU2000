@@ -227,8 +227,22 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	ImGui::EndChild();
 
-	// ---- 下: マスター EQ
-	if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+	// ---- 下: マスター EQ。マルチパートのボードが挿さっているときは、タブで「ボードのパート」に切り替えられる
+	bool show_board = false;
+	if (m_board_kind >= mu2000::VBOARD_FC16 && ImGui::BeginTabBar("bottom")) {
+		if (ImGui::BeginTabItem(UI_TEXT(me_master_eq, "Master EQ")))
+			ImGui::EndTabItem();
+		if (ImGui::BeginTabItem(UI_TEXT(me_board_parts, "Board parts (port E)"))) {
+			show_board = true;
+			ImGui::EndTabItem();
+		}
+		ImGui::EndTabBar();
+	}
+	if (show_board) {
+		if (ImGui::BeginChild("boardparts", ImVec2(0, 0), ImGuiChildFlags_Borders))
+			board_parts_pane(br);
+		ImGui::EndChild();
+	} else if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextUnformatted(UI_TEXT(me_master_eq, "Master EQ"));
 		ImGui::SameLine(0, fs * 1.5f);
@@ -287,8 +301,10 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			}
 			ImGui::EndTable();
 		}
+		ImGui::EndChild();
+	} else {
+		ImGui::EndChild();
 	}
-	ImGui::EndChild();
 
 	ImGui::PopFont();
 	ImGui::End();
@@ -500,6 +516,94 @@ void master_editor::board_pane(bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_off, "Listed under UTIL > PLG. PartAssign is off there, so the board is silent"));
 	else
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_known, "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)"));
+}
+
+// マルチパートのボードの 16 チャンネル。様子は音声の糸に聞き、動かした値は口 E へ MIDI で送る
+// （ボードは MIDI で動くので、外から送ったのと同じ結果になる）
+void master_editor::board_parts_pane(bridge &br)
+{
+	const float fs = ImGui::GetFontSize();
+	br.post([info = m_board_parts](mu2000 &mu) {
+		mu2000::board_part now[16];
+		mu.board_parts(now);
+		std::lock_guard<std::mutex> g(info->lock);
+		std::copy(std::begin(now), std::end(now), std::begin(info->part));
+		info->valid = true;
+		return std::string();
+	});
+	mu2000::board_part part[16];
+	{
+		std::lock_guard<std::mutex> g(m_board_parts->lock);
+		if (!m_board_parts->valid)
+			return;
+		std::copy(std::begin(m_board_parts->part), std::end(m_board_parts->part), std::begin(part));
+	}
+	const bool dls = m_board_kind == mu2000::VBOARD_DLS;
+	const auto send = [&br](std::initializer_list<int> bytes) {
+		u8 b[8];
+		size_t n = 0;
+		for (int x : bytes)
+			b[n++] = u8(x);
+		br.send_port(mu2000::MIDI_PORTS, b, n);
+	};
+	ImGui::TextDisabled("%s", UI_TEXT(me_board_parts_note, "The board's own 16 channels on port E. Reverb and chorus go into the MU's effects. Changes here are sent to the board as MIDI."));
+	if (!ImGui::BeginTable("bparts", dls ? 9 : 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit))
+		return;
+	ImGui::TableSetupScrollFreeze(0, 1);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_ch, "Ch"), 0, fs * 1.6f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_voice, "Voice"), 0, fs * 8.5f);
+	if (dls)
+		ImGui::TableSetupColumn(UI_TEXT(me_bp_bank, "Bank"), 0, fs * 4.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_program, "Program"), 0, fs * 5.0f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_volume, "Volume"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_pan, "Pan"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_reverb, "Reverb"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_chorus, "Chorus"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_level, "Level"), ImGuiTableColumnFlags_WidthStretch);
+	ImGui::TableHeadersRow();
+	for (int ch = 0; ch < 16; ch++) {
+		const mu2000::board_part &p = part[ch];
+		ImGui::PushID(ch);
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("%d", ch + 1);
+		ImGui::TableNextColumn();
+		ImGui::TextUnformatted(p.name[0] ? p.name : (p.drum ? UI_TEXT(me_bp_drum, "(drums)") : "-"));
+		if (dls) {
+			ImGui::TableNextColumn();
+			int msb = p.msb;
+			ImGui::SetNextItemWidth(-1);
+			ImGui::BeginDisabled(p.drum);
+			if (ImGui::InputInt("##msb", &msb, 0, 0)) {
+				msb = std::clamp(msb, 0, 127);
+				send({ 0xb0 | ch, 0, msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, p.program });
+			}
+			ImGui::EndDisabled();
+		}
+		ImGui::TableNextColumn();
+		int prog = p.program + 1;
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::InputInt("##prog", &prog)) {
+			prog = std::clamp(prog, 1, 128);
+			send({ 0xb0 | ch, 0, p.msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, prog - 1 });
+		}
+		const auto slider = [&](const char *id, int value, int cc) {
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			int v = value;
+			if (ImGui::SliderInt(id, &v, 0, 127))
+				send({ 0xb0 | ch, cc, v });
+		};
+		slider("##vol", p.vol, 7);
+		slider("##pan", p.pan, 10);
+		slider("##rev", p.rev, 91);
+		slider("##cho", p.cho, 93);
+		ImGui::TableNextColumn();
+		ImGui::ProgressBar(std::min(1.0f, std::sqrt(p.level) * 1.4f), ImVec2(-1, 0), "");
+		ImGui::PopID();
+	}
+	ImGui::EndTable();
 }
 
 // DLS のボード: 読むファイルを選ぶ。選んだら音声の糸で読ませ、結果（音色と波形の数、または読めなかった訳）を出す

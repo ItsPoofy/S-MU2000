@@ -312,6 +312,15 @@ public:
 	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
 	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
 	bool load_board_dls(const std::string &path, std::string &err);
+	// マルチパートのボード（VBOARD_FC16・VBOARD_DLS）の 16 チャンネルのいまの様子。画面のミキサーが読む。
+	// level は直近の音の山（0-1 くらい。読むたびに下がっていく）。音を作る糸から呼ぶこと
+	struct board_part {
+		u8 msb = 0, lsb = 0, program = 0, vol = 100, exp = 127, pan = 64, rev = 40, cho = 0;
+		bool drum = false;
+		float level = 0;
+		char name[24] = {};
+	};
+	void board_parts(board_part out[16]);
 	const std::string &board_dls_path() const { return m_vb_dls_path; }
 	// 読んである DLS の音色の数・波形の数（読んでいなければ 0）
 	int board_dls_instruments() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->instruments.size()) : 0; }
@@ -1053,6 +1062,7 @@ private:
 		smu2000::vboard::fc_board fc;
 		u8 vol = 100, exp = 127, pan = 64, rev = 40, cho = 0;
 		float gain[6] = { 0, 0, 0, 0, 0, 0 };        // dry 左右・reverb 左右・chorus 左右
+		float peak = 0;                              // 直近の音の山（画面のメーター用）
 	};
 	std::array<vb_chan, 16> m_vb16;
 	smu2000::vboard::dls_synth m_vb_dls;      // VBOARD_DLS の音源（ミキサーの値は m_vb16 のものを使う）

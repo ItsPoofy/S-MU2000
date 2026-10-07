@@ -322,6 +322,18 @@ struct ui_texts {
 	const char *me_board_fc;
 	const char *me_board_fc16;
 	const char *me_board_dls;
+	const char *me_board_parts;
+	const char *me_board_parts_note;
+	const char *me_bp_ch;
+	const char *me_bp_voice;
+	const char *me_bp_bank;
+	const char *me_bp_program;
+	const char *me_bp_volume;
+	const char *me_bp_pan;
+	const char *me_bp_reverb;
+	const char *me_bp_chorus;
+	const char *me_bp_level;
+	const char *me_bp_drum;
 	const char *me_board_dls_open;
 	const char *me_board_dls_path;
 	const char *me_board_dls_load;
