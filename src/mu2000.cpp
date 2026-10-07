@@ -3744,14 +3744,15 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 		std::snprintf(v.name, sizeof(v.name), "%s", name);
 		out.push_back(v);
 	};
-	if (m_vb_kind == VBOARD_DLS) {
+	const int kind = multi_kind();
+	if (kind == VBOARD_DLS) {
 		if (const smu2000::vboard::dls_bank *bank = m_vb_dls.bank())
 			for (const smu2000::vboard::dls_instrument &i : bank->instruments)
 				add(i.drum, i.msb, i.lsb, i.program, i.name.c_str());
-	} else if (m_vb_kind == VBOARD_FC16) {
+	} else if (kind == VBOARD_FC16) {
 		for (int i = 0; i < 16; i++)
 			add(false, 0, 0, u8(i), smu2000::vboard::fc_program_name(i));
-	} else if (m_vb_kind == VBOARD_USER16 && m_vb_user_board) {
+	} else if (kind == VBOARD_USER16 && m_vb_user_board) {
 		for (int i = 0; i < smu2000::vboard::user_board::PROGRAMS; i++)
 			if (const auto &p = m_vb_user_board->program[size_t(i)])
 				add(false, 0, 0, u8(i), p->name);
