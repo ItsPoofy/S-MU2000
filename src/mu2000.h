@@ -315,12 +315,19 @@ public:
 	// マルチパートのボード（VBOARD_FC16・VBOARD_DLS）の 16 チャンネルのいまの様子。画面のミキサーが読む。
 	// level は直近の音の山（0-1 くらい。読むたびに下がっていく）。音を作る糸から呼ぶこと
 	struct board_part {
-		u8 msb = 0, lsb = 0, program = 0, vol = 100, exp = 127, pan = 64, rev = 40, cho = 0;
+		u8 msb = 0, lsb = 0, program = 0, vol = 100, exp = 127, pan = 64, rev = 40, cho = 0, var = 0;
+		u8 insert = 0;        // 0 = そのまま出す、1-4 = インサーション 1-4 へ、5 = バリエーション（インサーションとして）へ
 		bool drum = false;
 		float level = 0;
 		char name[24] = {};
 	};
 	void board_parts(board_part out[16]);
+	// マルチパートのボードのチャンネル（0-15）の音を、MU のインサーションへ通す。slot は 0 = 通さない（そのまま出す）、
+	// 1-4 = インサーション 1-4、5 = バリエーション（接続がインサーションのとき）。そのエフェクトは MU の側で
+	// どれかのパートに割り当ててあること（割り当ての無いインサーションは音を通さない）。
+	// バリエーションへの送り（接続がシステムのとき）は CC94。音を作る糸から呼ぶこと
+	void set_board_insert(int channel, int slot);
+	int virtual_board_multi() const { return vb_multi() ? m_vb_kind : 0; }
 	const std::string &board_dls_path() const { return m_vb_dls_path; }
 	// 読んである DLS の音色の数・波形の数（読んでいなければ 0）
 	int board_dls_instruments() const { return m_vb_dls.bank() ? int(m_vb_dls.bank()->instruments.size()) : 0; }
@@ -1060,8 +1067,8 @@ private:
 	// 16 パートのボード（VBOARD_FC16）: チャンネルごとの音源と、ボードが自分で持つミキサーの値
 	struct vb_chan {
 		smu2000::vboard::fc_board fc;
-		u8 vol = 100, exp = 127, pan = 64, rev = 40, cho = 0;
-		float gain[6] = { 0, 0, 0, 0, 0, 0 };        // dry 左右・reverb 左右・chorus 左右
+		u8 vol = 100, exp = 127, pan = 64, rev = 40, cho = 0, var = 0, insert = 0;
+		float gain[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };  // dry 左右・reverb 左右・chorus 左右・variation 左右
 		float peak = 0;                              // 直近の音の山（画面のメーター用）
 	};
 	std::array<vb_chan, 16> m_vb16;

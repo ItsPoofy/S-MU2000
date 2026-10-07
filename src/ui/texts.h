@@ -334,6 +334,10 @@ struct ui_texts {
 	const char *me_bp_chorus;
 	const char *me_bp_level;
 	const char *me_bp_drum;
+	const char *me_bp_insert;
+	const char *me_bp_variation;
+	const char *me_bp_insert_tip;
+	const char *ov_board_row_tip;
 	const char *me_board_dls_open;
 	const char *me_board_dls_path;
 	const char *me_board_dls_load;

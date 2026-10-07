@@ -42,7 +42,7 @@ private:
 	void board_pane(bridge &br);
 	void board_dls_pane(bridge &br);
 	// マルチパートのボード（16 パートの FC ボード・DLS ボード）の 16 チャンネル: 音色・音量・パン・送り・メーター
-	void board_parts_pane(bridge &br);
+	void board_parts_pane(xg::model &m, bridge &br);
 	struct board_parts_info { std::mutex lock; mu2000::board_part part[16]; bool valid = false; };
 	std::shared_ptr<board_parts_info> m_board_parts = std::make_shared<board_parts_info>();
 	int m_board_kind = 0, m_board_part = 1;

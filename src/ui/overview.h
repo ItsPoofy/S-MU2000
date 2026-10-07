@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "board_view.h"
 #include "xg_ui.h"
 #include "imgui.h"
 #include "xg/fx_types.h"
@@ -144,6 +145,9 @@ private:
 	// パートの欄の右端の M / S の印
 	void mute_buttons(int part, float x, float y, float w, float h);
 	void row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h);
+	// マルチパートの架空のボードの 16 チャンネル（口 E）を、64 パートの下に並べる
+	void board_rows(xg::model &m, bridge &br, float h);
+	board_view m_board;
 	// INS 列の 1 マス。掛かっているエフェクトの印（1-4、V）を横に並べる。names なら種類の名前も。
 	// which で並べるものを絞る（パートの音色の窓はインサーションとバリエーションを別の場所に出す）。
 	// 右クリックで掛ける・外す・種類、印のドラッグで別のパートへ、印のダブルクリックで設定の窓

@@ -3555,6 +3555,9 @@ void mu2000::vb16_reset(bool voices)
 		c.pan = 64;
 		c.rev = 40;
 		c.cho = 0;
+		c.var = 0;
+		if (voices)
+			c.insert = 0;
 		vb16_gain(c);
 	}
 	if (voices) {
@@ -3576,6 +3579,15 @@ void mu2000::vb16_gain(vb_chan &c)
 	c.gain[3] = vol * pr * rev;
 	c.gain[4] = vol * pl * cho;
 	c.gain[5] = vol * pr * cho;
+	const float var = smu2000::vboard::level_of(c.var);
+	c.gain[6] = vol * pl * var;
+	c.gain[7] = vol * pr * var;
+}
+
+void mu2000::set_board_insert(int channel, int slot)
+{
+	if (channel >= 0 && channel < 16)
+		m_vb16[size_t(channel)].insert = u8(std::clamp(slot, 0, 5));
 }
 
 // 口 E の MIDI を 1 バイト。チャンネルメッセージが揃ったら、そのチャンネルの音源へ
@@ -3621,6 +3633,7 @@ void mu2000::board_midi_in(u8 byte)
 		case 11:  c.exp = p.d[1]; vb16_gain(c); return;
 		case 91:  c.rev = p.d[1]; vb16_gain(c); return;
 		case 93:  c.cho = p.d[1]; vb16_gain(c); return;
+		case 94:  c.var = p.d[1]; vb16_gain(c); return;
 		case 121:                         // Reset All Controllers: エクスプレッション・ベンド・モジュレーションを戻す
 			c.exp = 127;
 			vb16_gain(c);
@@ -3651,6 +3664,8 @@ void mu2000::board_parts(board_part out[16])
 		o.pan = c.pan;
 		o.rev = c.rev;
 		o.cho = c.cho;
+		o.var = c.var;
+		o.insert = c.insert;
 		o.level = c.peak;
 		c.peak *= 0.6f;                    // 読むたびに下げる（画面は 1 秒に 30 回ほど読む）
 		const char *name = "";
@@ -3677,37 +3692,44 @@ bool mu2000::load_board_dls(const std::string &path, std::string &err)
 	return true;
 }
 
-// 1 サンプルぶん。鳴っているチャンネルを足して、MU のエフェクトの入口へ入れる
+// 1 サンプルぶん。鳴っているチャンネルを足して、MU のエフェクトの入口へ入れる。
+// そのまま出す音は dry へ、インサーションへ通すチャンネルはその入口へ（どちらか片方）。送りは別に足す
 void mu2000::vb16_render()
 {
-	float bus[6] = { 0, 0, 0, 0, 0, 0 };
+	float bus[int(ext_bus::count)][2] = {};
 	bool any = false;
+	const auto mix = [&bus](vb_chan &c, float l, float r) {
+		// insert: 0 = dry、1-4 = insertion1-4、5 = variation（インサーションとして）
+		const int main = c.insert == 0 ? int(ext_bus::dry) : c.insert == 5 ? int(ext_bus::variation) : int(ext_bus::insertion1) + c.insert - 1;
+		bus[main][0] += l * c.gain[0];
+		bus[main][1] += r * c.gain[1];
+		bus[int(ext_bus::reverb)][0] += l * c.gain[2];
+		bus[int(ext_bus::reverb)][1] += r * c.gain[3];
+		bus[int(ext_bus::chorus)][0] += l * c.gain[4];
+		bus[int(ext_bus::chorus)][1] += r * c.gain[5];
+		if (c.insert != 5) {
+			bus[int(ext_bus::variation)][0] += l * c.gain[6];
+			bus[int(ext_bus::variation)][1] += r * c.gain[7];
+		}
+		c.peak = std::max(c.peak, std::max(std::fabs(l * c.gain[0]), std::fabs(r * c.gain[1])));
+	};
 	if (m_vb_kind == VBOARD_DLS) {
 		// DLS の音源はチャンネルごとの左右を返す。チャンネルの音量・パン・送りはここで掛ける
 		if (m_vb_dls.sounding()) {
 			any = true;
 			float ch[16][2] = {};
 			m_vb_dls.render(ch);
-			for (int i = 0; i < 16; i++) {
-				const vb_chan &c = m_vb16[size_t(i)];
-				bus[0] += ch[i][0] * c.gain[0];
-				bus[1] += ch[i][1] * c.gain[1];
-				bus[2] += ch[i][0] * c.gain[2];
-				bus[3] += ch[i][1] * c.gain[3];
-				bus[4] += ch[i][0] * c.gain[4];
-				bus[5] += ch[i][1] * c.gain[5];
-				m_vb16[size_t(i)].peak = std::max(m_vb16[size_t(i)].peak, std::max(std::fabs(ch[i][0] * c.gain[0]), std::fabs(ch[i][1] * c.gain[1])));
-			}
+			for (int i = 0; i < 16; i++)
+				if (ch[i][0] != 0.0f || ch[i][1] != 0.0f)
+					mix(m_vb16[size_t(i)], ch[i][0], ch[i][1]);
 		}
 	} else {
 		for (vb_chan &c : m_vb16) {
 			if (!c.fc.sounding())
 				continue;
 			any = true;
-			const float s = c.fc.render();
-			for (int i = 0; i < 6; i++)
-				bus[i] += s * c.gain[i];
-			c.peak = std::max(c.peak, std::fabs(s) * std::max(c.gain[0], c.gain[1]));
+			const float v = c.fc.render();
+			mix(c, v, v);
 		}
 	}
 	if (!any) {
@@ -3717,9 +3739,8 @@ void mu2000::vb16_render()
 		}
 		return;
 	}
-	set_external_audio(ext_bus::dry, bus[0], bus[1]);
-	set_external_audio(ext_bus::reverb, bus[2], bus[3]);
-	set_external_audio(ext_bus::chorus, bus[4], bus[5]);
+	for (int b = 0; b < int(ext_bus::count); b++)
+		set_external_audio(ext_bus(b), bus[b][0], bus[b][1]);
 	m_vb_live = true;
 }
 

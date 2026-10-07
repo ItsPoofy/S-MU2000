@@ -2067,6 +2067,17 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				send({ 0xb0, 7, 100, 0xf5, 1 });                                   // 口 A に戻す
 				const shot inner = play(0);
 				const double i1 = tone(inner.mono, 440), i2 = tone(inner.mono, 880);
+				// チャンネル 1 をインサーション 1 へ通す。割り当ての無いインサーションは音を通さない。
+				// ディストーションにしてパート 1 に割り当てると、そこを通って出てくる
+				q.mu.set_board_insert(0, 1);
+				send({ 0xf5, 5 });
+				const shot ins_off = play(0);
+				send({ 0xf5, 1, 0xf0, 0x43, 0x10, 0x4c, 0x03, 0x00, 0x00, 0x49, 0x00, 0xf7, 0xf0, 0x43, 0x10, 0x4c, 0x03, 0x00, 0x0c, 0x00, 0xf7 });
+				q.pump(500);
+				send({ 0xf5, 5 });
+				const shot ins_on = play(0);
+				q.mu.set_board_insert(0, 0);
+				send({ 0xf5, 1 });
 				q.press(B::util, 150);
 				for (int i = 0; i < 6; i++)
 					q.press(B::select_right, 150);
@@ -2076,13 +2087,16 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      f1 > 0.01 && std::fabs(f3 / f1 - 1.0 / 3.0) < 0.05 && f2 < 0.05 * f1 &&
 				      left.r < 0.01 * left.l && left.l > 0.3 * sq.l &&
 				      level(quiet.mono) < 0.002 * level(sq.mono) &&
-				      level(inner.mono) > 0.003 && i2 > 0.05 * i1,
-				      "16 パートの FC ボードが口 E で鳴り、本体のパートはそのまま",
+				      level(inner.mono) > 0.003 && i2 > 0.05 * i1 &&
+				      level(ins_off.mono) < 0.05 * level(sq.mono) && level(ins_on.mono) > 0.05 * level(sq.mono),
+				      "16 パートの FC ボードが口 E で鳴り、本体のパートはそのまま。インサーションにも通せる",
 				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + list + "] 440Hz " + std::to_string(f1) +
 				      "、3 倍音 " + std::to_string(f3 / std::max(1e-12, f1)) + " 倍、左に振って右は左の " +
 				      std::to_string(left.r / std::max(1e-12, left.l)) + " 倍、音量 0 で " +
 				      std::to_string(level(quiet.mono) / std::max(1e-12, level(sq.mono))) + " 倍、口 A の内蔵の音 " +
-				      std::to_string(level(inner.mono)) + "（2 倍音 " + std::to_string(i2 / std::max(1e-12, i1)) + " 倍）");
+				      std::to_string(level(inner.mono)) + "（2 倍音 " + std::to_string(i2 / std::max(1e-12, i1)) + " 倍）、インサーション 1 へ: 割り当て前 " +
+				      std::to_string(level(ins_off.mono) / std::max(1e-12, level(sq.mono))) + " 倍 / 割り当て後 " +
+				      std::to_string(level(ins_on.mono) / std::max(1e-12, level(sq.mono))) + " 倍");
 			}
 
 			// DLS のボード（VBOARD_DLS）。DLS のファイルを読んで、口 E の 16 チャンネルで鳴らす。ここでは小さな DLS を

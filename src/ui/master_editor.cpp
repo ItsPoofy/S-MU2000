@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 
+#include "board_view.h"
 #include "master_editor.h"
 
 #include "driver.h"
@@ -240,7 +241,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	if (show_board) {
 		if (ImGui::BeginChild("boardparts", ImVec2(0, 0), ImGuiChildFlags_Borders))
-			board_parts_pane(br);
+			board_parts_pane(m, br);
 		ImGui::EndChild();
 	} else if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
 		ImGui::AlignTextToFramePadding();
@@ -518,9 +519,31 @@ void master_editor::board_pane(bridge &br)
 		ImGui::TextDisabled("%s", UI_TEXT(me_board_known, "Listed under UTIL > PLG. PartAssign there moves it too (parts 1-16)"));
 }
 
+
+// ボードのチャンネルをインサーションへ通す欄（-・1-4・V）。選んだエフェクトがどのパートにも割り当たっていなければ、
+// 音が通らないので、A/D パート 1 に割り当てておく（A/D INPUT を使っていなければ、そのエフェクトはボード専用になる）
+static void board_insert_combo(int ch, const mu2000::board_part &p, xg::model &m, bridge &br)
+{
+	static const char *const marks[6] = { "-", "1", "2", "3", "4", "V" };
+	static const char *const keys[6] = { nullptr, "insertion1.part", "insertion2.part", "insertion3.part", "insertion4.part", "variation.part" };
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::BeginCombo("##ins", marks[std::min<int>(p.insert, 5)], ImGuiComboFlags_NoArrowButton)) {
+		for (int s = 0; s < 6; s++)
+			if (ImGui::Selectable(marks[s], p.insert == s)) {
+				board_view::set_insert(br, ch, s);
+				int who = 0;
+				if (s && m.get(P(keys[s]), 0, who) && who == 127)
+					br.send(m.set(P(keys[s]), 0, 64));
+			}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_bp_insert_tip, "Send this channel through one of the MU's insertion effects (1-4), or through the variation effect when its connection is Insertion (V), instead of straight to the output. If the effect is not assigned to any part it gets assigned to A/D part 1, so that it passes sound."));
+}
+
 // マルチパートのボードの 16 チャンネル。様子は音声の糸に聞き、動かした値は口 E へ MIDI で送る
 // （ボードは MIDI で動くので、外から送ったのと同じ結果になる）
-void master_editor::board_parts_pane(bridge &br)
+void master_editor::board_parts_pane(xg::model &m, bridge &br)
 {
 	const float fs = ImGui::GetFontSize();
 	br.post([info = m_board_parts](mu2000 &mu) {
@@ -546,8 +569,8 @@ void master_editor::board_parts_pane(bridge &br)
 			b[n++] = u8(x);
 		br.send_port(mu2000::MIDI_PORTS, b, n);
 	};
-	ImGui::TextDisabled("%s", UI_TEXT(me_board_parts_note, "The board's own 16 channels on port E. Reverb and chorus go into the MU's effects. Changes here are sent to the board as MIDI."));
-	if (!ImGui::BeginTable("bparts", dls ? 9 : 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit))
+	ImGui::TextDisabled("%s", UI_TEXT(me_board_parts_note, "The board's own 16 channels on port E. Variation, chorus and reverb sends go into the MU's effects; Ins puts a channel through an insertion effect. Changes here are sent to the board as MIDI."));
+	if (!ImGui::BeginTable("bparts", dls ? 11 : 10, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit))
 		return;
 	ImGui::TableSetupScrollFreeze(0, 1);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_ch, "Ch"), 0, fs * 1.6f);
@@ -557,6 +580,8 @@ void master_editor::board_parts_pane(bridge &br)
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_program, "Program"), 0, fs * 5.0f);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_volume, "Volume"), 0, fs * 6.5f);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_pan, "Pan"), 0, fs * 6.5f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_insert, "Ins"), 0, fs * 2.6f);
+	ImGui::TableSetupColumn(UI_TEXT(me_bp_variation, "Variation"), 0, fs * 6.5f);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_reverb, "Reverb"), 0, fs * 6.5f);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_chorus, "Chorus"), 0, fs * 6.5f);
 	ImGui::TableSetupColumn(UI_TEXT(me_bp_level, "Level"), ImGuiTableColumnFlags_WidthStretch);
@@ -597,6 +622,9 @@ void master_editor::board_parts_pane(bridge &br)
 		};
 		slider("##vol", p.vol, 7);
 		slider("##pan", p.pan, 10);
+		ImGui::TableNextColumn();
+		board_insert_combo(ch, p, m, br);
+		slider("##var", p.var, 94);
 		slider("##rev", p.rev, 91);
 		slider("##cho", p.cho, 93);
 		ImGui::TableNextColumn();

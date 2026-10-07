@@ -3174,6 +3174,97 @@ void overview::mod_cell(int part, xg::model &m, bridge &br, float w, float h, bo
 }
 
 
+
+// ボードのチャンネルをインサーションへ通す欄（-・1-4・V）。選んだエフェクトがどのパートにも割り当たっていなければ、
+// 音が通らないので、A/D パート 1 に割り当てておく（A/D INPUT を使っていなければ、そのエフェクトはボード専用になる）
+static void board_insert_combo(int ch, const mu2000::board_part &p, xg::model &m, bridge &br)
+{
+	static const char *const marks[6] = { "-", "1", "2", "3", "4", "V" };
+	static const char *const keys[6] = { nullptr, "insertion1.part", "insertion2.part", "insertion3.part", "insertion4.part", "variation.part" };
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::BeginCombo("##ins", marks[std::min<int>(p.insert, 5)], ImGuiComboFlags_NoArrowButton)) {
+		for (int s = 0; s < 6; s++)
+			if (ImGui::Selectable(marks[s], p.insert == s)) {
+				board_view::set_insert(br, ch, s);
+				int who = 0;
+				if (s && m.get(P(keys[s]), 0, who) && who == 127)
+					br.send(m.set(P(keys[s]), 0, 64));
+			}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(me_bp_insert_tip, "Send this channel through one of the MU's insertion effects (1-4), or through the variation effect when its connection is Insertion (V), instead of straight to the output. If the effect is not assigned to any part it gets assigned to A/D part 1, so that it passes sound."));
+}
+
+// マルチパートの架空のボード（16 パートの FC ボード・DLS ボード）が挿さっていれば、口 E の 16 チャンネルを
+// 64 パートの下に並べる。本体はこのパートを知らないので、出せるのはボードが自分で持つものだけ:
+// 音色の名前、レベル、音量・エクスプレッション・パン、インサーションへの差し込み、バリエーション・コーラス・リバーブの送り
+void overview::board_rows(xg::model &m, bridge &br, float h)
+{
+	m_board.poll(br);
+	mu2000::board_part part[16];
+	const int kind = m_board.get(part);
+	if (!kind)
+		return;
+	const float fs = ImGui::GetFontSize();
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	for (int ch = 0; ch < 16; ch++) {
+		const mu2000::board_part &p = part[ch];
+		ImGui::TableNextRow(0, h);
+		ImGui::PushID(1000 + ch);
+		// パートと音色
+		ImGui::TableNextColumn();
+		{
+			const ImVec2 pos = ImGui::GetCursorScreenPos();
+			char label[16];
+			std::snprintf(label, sizeof(label), "E%02d", ch + 1);
+			dl->AddText(ImVec2(pos.x + fs * 0.3f, pos.y + fs * 0.1f), col(ImGuiCol_Text), label);
+			char voice[64];
+			if (kind == mu2000::VBOARD_DLS && !p.drum)
+				std::snprintf(voice, sizeof(voice), "%03d/%03d  %s", p.msb, p.program + 1, p.name);
+			else
+				std::snprintf(voice, sizeof(voice), "%03d  %s", p.program + 1, p.name);
+			dl->AddText(ImVec2(pos.x + fs * 3.2f, pos.y + fs * 0.1f), col(p.name[0] ? ImGuiCol_Text : ImGuiCol_TextDisabled), voice);
+			ImGui::SetCursorScreenPos(ImVec2(pos.x + fs * 3.2f, pos.y + h - ImGui::GetFrameHeight() - 1));
+			int prog = p.program + 1;
+			ImGui::SetNextItemWidth(fs * 5.5f);
+			if (ImGui::InputInt("##prog", &prog)) {
+				prog = std::clamp(prog, 1, 128);
+				board_view::send(br, { 0xb0 | ch, 0, p.msb, 0xb0 | ch, 32, p.lsb, 0xc0 | ch, prog - 1 });
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(ov_board_row_tip, "A channel of the plug-in board on port E (not one of the MU's parts). Program number; for the rest see the Master window's Board parts tab."));
+		}
+		// VEL の所にレベル
+		ImGui::TableNextColumn();
+		{
+			const ImVec2 pos = ImGui::GetCursorScreenPos();
+			const float w = ImGui::GetContentRegionAvail().x;
+			const float lv = std::min(1.0f, std::sqrt(p.level) * 1.4f);
+			dl->AddRectFilled(ImVec2(pos.x + w * 0.3f, pos.y + h * (1.0f - lv)), ImVec2(pos.x + w * 0.7f, pos.y + h), col(ImGuiCol_PlotHistogram));
+		}
+		ImGui::TableNextColumn();          // SPEC
+		const auto drag = [&](const char *id, int value, int cc) {
+			ImGui::SetNextItemWidth(-1);
+			int v = value;
+			if (ImGui::DragInt(id, &v, 0.5f, 0, 127, "%d", ImGuiSliderFlags_AlwaysClamp))
+				board_view::send(br, { 0xb0 | ch, cc, v });
+		};
+		for (const column &c : COLUMNS) {
+			ImGui::TableNextColumn();
+			if (!std::strcmp(c.title, "VOL"))       drag("##vol", p.vol, 7);
+			else if (!std::strcmp(c.title, "EXP"))  drag("##exp", p.exp, 11);
+			else if (!std::strcmp(c.title, "PAN"))  drag("##pan", p.pan, 10);
+			else if (!std::strcmp(c.title, "INS"))  board_insert_combo(ch, p, m, br);
+			else if (!std::strcmp(c.title, "VAR"))  drag("##var", p.var, 94);
+			else if (!std::strcmp(c.title, "CHO"))  drag("##cho", p.cho, 93);
+			else if (!std::strcmp(c.title, "REV"))  drag("##rev", p.rev, 91);
+		}
+		ImGui::TableNextColumn();          // 鍵盤の列
+		ImGui::PopID();
+	}
+}
+
 void overview::row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h)
 {
 	const float fs = ImGui::GetFontSize();
@@ -4536,6 +4627,7 @@ void overview::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			ImGui::TableNextRow(0, h);
 			row(part, m, ram, br, h);
 		}
+		board_rows(m, br, h);
 		// 行のどこを左クリックしても、その行を選ぶ（パートの音色の窓もそのパートに替わる）。
 		// 載っている行は前のコマのもの（0 は見出し）。品書きなどが上に出ているときは窓が載っていない扱い
 		const int hovered_row = ImGui::TableGetHoveredRow();
