@@ -78,6 +78,14 @@ private:
 	void card_open_file(bridge &br, int index);
 	void card_select_wave(int index);
 	void make_pane(bridge &br);
+	// オリジナルのボード（src/vboard_user.h・user_boards.h）: 作った波形をプログラム番号に入れる
+	void user_board_pane(bridge &br, bool oneshot);
+	int m_ub_pgm = 1;                  // 入れる先のプログラム（1-128）
+	char m_ub_name[15] = {};           // ボードの名前の欄
+	std::string m_ub_name_for;         // その欄を合わせたボード（ファイルの場所）
+	std::string m_ub_note;
+	std::vector<std::string> m_ub_list;
+	double m_ub_listed = -1;
 
 	bridge::sampling_view m_view;
 

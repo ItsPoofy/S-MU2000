@@ -15,6 +15,7 @@
 #include "sampling.h"
 #include "vboard.h"
 #include "vboard_dls.h"
+#include "vboard_user.h"
 #include "voice_lib.h"
 #include "smartmedia.h"
 #include "state.h"
@@ -147,7 +148,7 @@ public:
 		if (port < 0 || port >= MIDI_PORTS)
 			port = 0;
 		// 架空のボードが挿さっていれば、そのパートが受ける MIDI を聞かせる（firmware にも今までどおり渡す）
-		if (m_vb_kind == VBOARD_FC)
+		if (vb_single())
 			vb_tap(byte, m_cable[port]);
 		// native の口が動いているときは、鍵の上げ下げをこちらで処理する
 		// （firmware に渡さない）。詳しくは xg/native_driver.h
@@ -308,7 +309,16 @@ public:
 	// VBOARD_DLS もマルチパートのボード。DLS のファイル（Windows の gm.dls など。load_board_dls で読む）を鳴らす
 	// 16 パートの音源で、口 E を受け持つ（src/vboard_dls.h）。チャンネル 10 はドラム。バンクセレクトと
 	// プログラムチェンジで音色を選ぶ。ファイルを読んでいなければ鳴らない
-	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2, VBOARD_DLS = 3 };
+	//
+	// VBOARD_USER と VBOARD_USER16 は**オリジナルのボード**（src/vboard_user.h）。使う人が「波形を作る」で計算した波形を
+	// プログラム番号に割り当てたもの（set_user_board で渡す）。VBOARD_USER は FC ボードと同じ 1 パートのボードで、
+	// 本体のパートを 1 つ借り、音色名は液晶に出る。VBOARD_USER16 は口 E の 16 パート
+	enum { VBOARD_NONE = 0, VBOARD_FC = 1, VBOARD_FC16 = 2, VBOARD_DLS = 3, VBOARD_USER = 4, VBOARD_USER16 = 5 };
+	static bool board_is_multi(int kind) { return kind == VBOARD_FC16 || kind == VBOARD_DLS || kind == VBOARD_USER16; }
+	// オリジナルのボードの中身と、そのファイルの場所（設定に覚えるため。空でもよい）。音を作る糸から呼ぶこと
+	void set_user_board(std::shared_ptr<const smu2000::vboard::user_board> board, const std::string &path);
+	const std::string &user_board_path() const { return m_vb_user_path; }
+	std::shared_ptr<const smu2000::vboard::user_board> user_board() const { return m_vb_user_board; }
 	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
 	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
 	bool load_board_dls(const std::string &path, std::string &err);
@@ -1074,7 +1084,25 @@ private:
 	std::array<vb_chan, 16> m_vb16;
 	smu2000::vboard::dls_synth m_vb_dls;      // VBOARD_DLS の音源（ミキサーの値は m_vb16 のものを使う）
 	std::string m_vb_dls_path;
-	bool vb_multi() const { return m_vb_kind == VBOARD_FC16 || m_vb_kind == VBOARD_DLS; }
+	bool vb_multi() const { return board_is_multi(m_vb_kind); }
+	bool vb_single() const { return m_vb_kind == VBOARD_FC || m_vb_kind == VBOARD_USER; }
+	// オリジナルのボードの音源（1 パートのときはチャンネル 0 だけ、16 パートのときは 16 チャンネルを使う）
+	smu2000::vboard::user_synth m_vb_user;
+	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
+	std::string m_vb_user_path;
+	// 1 パートのボードの音源（FC か、オリジナル）へ
+	void vb1_midi(u8 status, u8 d0, u8 d1)
+	{
+		if (m_vb_kind == VBOARD_USER)
+			m_vb_user.midi(status & 0xf0, d0, d1);
+		else
+			m_vb_fc.midi(status, d0, d1);
+	}
+	void vb1_reset()
+	{
+		m_vb_fc.reset();
+		m_vb_user.reset();
+	}
 	vb_parse m_vb16_parse;
 	std::vector<u8> m_vb16_sx;
 	void vb16_reset(bool voices);
@@ -1083,7 +1111,7 @@ private:
 	u32 m_vb_resync = 0;               // 0 でなければ、このサンプル数のあとでバンクをワーク RAM から読み直す
 	u8 m_vb_bank[2] = { 0, 0 };        // そのパートでいま選ばれているバンク（MSB・LSB）
 	u8 m_vb_bank_next[2] = { 0, 0 };   // バンクセレクトで届いた値（プログラムチェンジで効く）
-	bool vb_active() const { return m_vb_kind == VBOARD_FC && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
+	bool vb_active() const { return vb_single() && m_vb_on && m_vb_bank[0] == VBOARD_BANK_MSB && m_vb_bank[1] == VBOARD_BANK_LSB; }
 	void vb_bank_from_ram();
 	void vb_set_bank(u8 msb, u8 lsb);
 	std::vector<u8> m_vb_msg;          // firmware → ボードの、組み立て中の SysEx

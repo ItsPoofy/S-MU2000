@@ -54,6 +54,11 @@ private:
 	struct board_dls_info { std::mutex lock; std::string path, error; int instruments = 0, waves = 0; };
 	std::shared_ptr<board_dls_info> m_board_dls = std::make_shared<board_dls_info>();
 	char m_board_dls_input[512] = {};
+	// オリジナルのボード（src/ui/user_boards.h）: 置き場のボードの並び
+	void board_user_pane(bridge &br);
+	std::vector<std::string> m_ub_list;
+	double m_ub_listed = -1;
+	std::string m_ub_note;
 	bool m_board_booting = false;         // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
 	bool m_diff_only = true;              // 既定と違うものだけ書き出す
 	bool m_export_waiting = false;        // 既定値ができるのを待っている（bridge の request_defaults）

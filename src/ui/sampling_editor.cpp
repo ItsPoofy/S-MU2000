@@ -2,6 +2,7 @@
 #include "sampling_editor.h"
 
 #include "wav_in.h"
+#include "user_boards.h"
 #include "smartmedia.h"
 #include "xg/voices.h"
 #include "compat/paths.h"
@@ -2817,6 +2818,207 @@ void sampling_editor::make_pane(bridge &br)
 	ImGui::Checkbox(abuf, &m_wm_assign);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", UI_TEXT(smp_make_assign_tip, "The voice chosen on the Voice tab. Play it with bank MSB 16; level, pan, envelope and the other elements are set there."));
+	user_board_pane(br, oneshot);
+}
+
+// ---- オリジナルのボード。上で作った波形を、ボードのプログラム番号に入れていく。
+// 入れられるのはこのタブで計算した波形（m_wm_pcm）だけ。サンプリング RAM のサンプルや内蔵ウェーブを入れる道は作らない
+void sampling_editor::user_board_pane(bridge &br, bool oneshot)
+{
+	namespace ub = user_boards;
+	namespace vb = smu2000::vboard;
+	const float fs = ImGui::GetFontSize();
+	ImGui::SeparatorText(UI_TEXT(smp_ub_title, "Your own plug-in board"));
+	const double now = ImGui::GetTime();
+	if (m_ub_listed < 0 || now - m_ub_listed > 1.0) {
+		m_ub_listed = now;
+		m_ub_list = ub::list();
+	}
+	std::shared_ptr<const ub::board> cur = ub::current();
+	{
+		const std::string stem = ub::current_stem();
+		ImGui::SetNextItemWidth(fs * 11);
+		if (ImGui::BeginCombo("##ubfile", cur ? cur->name : UI_TEXT(me_board_user_none, "(no board)"))) {
+			for (const std::string &s : m_ub_list)
+				if (ImGui::Selectable(s.c_str(), s == stem) && s != stem) {
+					std::string err;
+					m_ub_note = ub::open(br, s, err) ? std::string() : err;
+				}
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button(UI_TEXT(smp_ub_new, "New board"))) {
+			ub::create(br);
+			m_ub_listed = -1;
+			m_ub_note.clear();
+		}
+		cur = ub::current();
+	}
+	if (!cur) {
+		ImGui::TextWrapped("%s", UI_TEXT(smp_ub_intro, "Collect the waves you make here into a plug-in board of your own: one wave per program number, each with a name. Plug it in from the Master window (Imaginary plug-in board) and pick the waves with program change. Only waves computed on this tab can go in."));
+		if (!m_ub_note.empty())
+			ImGui::TextDisabled("%s", m_ub_note.c_str());
+		return;
+	}
+	// 変えた中身を作る: いまのボードを写して（波形は共有）、f で書き換えて渡す
+	const auto change = [&](const std::function<void(ub::board &)> &f) {
+		auto nb = std::make_shared<ub::board>(*cur);
+		f(*nb);
+		ub::commit(br, nb);
+		cur = nb;
+	};
+	// ---- 名前。変えるとファイルの名前も変わる
+	const std::string path = ub::current_path();
+	if (m_ub_name_for != path && !ImGui::IsAnyItemActive()) {
+		m_ub_name_for = path;
+		std::snprintf(m_ub_name, sizeof(m_ub_name), "%s", cur->name);
+	}
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_ub_board_name, "Board name"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 10);
+	ImGui::InputText("##ubname", m_ub_name, sizeof(m_ub_name));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		char clean[15];
+		vb::detail::clean_name(clean, m_ub_name, 14, false);
+		for (size_t n = std::strlen(clean); n && clean[n - 1] == ' '; n--)
+			clean[n - 1] = 0;
+		const std::string to = ub::file_for(clean);
+		if (!clean[0]) {
+			m_ub_note = UI_TEXT(smp_ub_name_empty, "A board needs a name");
+		} else if (to != path && smu2000::is_file(to)) {
+			m_ub_note = UI_TEXT(smp_ub_name_taken, "Another board already has that name");
+		} else {
+			m_ub_note.clear();
+			change([&](ub::board &b) { std::snprintf(b.name, sizeof(b.name), "%s", clean); });
+		}
+		m_ub_name_for.clear();      // 欄を、決まった名前に合わせ直す
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", UI_TEXT(smp_ub_board_name_tip, "Up to 14 letters, digits and signs. The MU shows it under UTIL > PLG, and the file takes the same name."));
+
+	// ---- 上で作った波形を入れる
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(UI_TEXT(smp_ub_program, "Program"));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(fs * 6.5f);
+	if (ImGui::InputInt("##ubpgm", &m_ub_pgm))
+		m_ub_pgm = std::clamp(m_ub_pgm, 1, vb::user_board::PROGRAMS);
+	ImGui::SameLine();
+	const bool taken = cur->program[size_t(m_ub_pgm - 1)] != nullptr;
+	ImGui::BeginDisabled(m_wm_pcm.empty() || m_wm_pcm.size() > vb::user_board::MAX_FRAMES);
+	if (ImGui::Button(taken ? UI_TEXT(smp_ub_replace, "Replace with this wave") : UI_TEXT(smp_ub_put, "Put this wave on the board"))) {
+		auto p = std::make_shared<ub::program>();
+		vb::detail::clean_name(p->name, m_wm_name, 8, true);
+		p->pcm = std::make_shared<std::vector<s16>>(m_wm_pcm);
+		p->loop = !oneshot;
+		if (oneshot)
+			p->release = 0.3f;
+		else if (const ub::program *old = cur->program[size_t(m_ub_pgm - 1)].get(); old && old->loop) {
+			// 同じ番号のループの波形を差し替えるときは、決めてあった包絡線を残す
+			p->attack = old->attack;
+			p->decay = old->decay;
+			p->sustain = old->sustain;
+			p->release = old->release;
+		}
+		const int at = m_ub_pgm - 1;
+		change([&](ub::board &b) { b.program[size_t(at)] = p; });
+		// 次の空いている番号へ
+		for (int i = at + 1; i < vb::user_board::PROGRAMS; i++)
+			if (!cur->program[size_t(i)]) {
+				m_ub_pgm = i + 1;
+				break;
+			}
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", UI_TEXT(smp_ub_put_tip, "Puts the wave made above on the board at this program number, under the name in the Name field (8 letters). It does not use the sampling memory. Looping waves sustain while the key is held; plucks, drums and bells play once."));
+
+	// ---- 入っているプログラム
+	if (cur->count() && ImGui::BeginTable("ubprogs", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV)) {
+		ImGui::TableSetupColumn("#");
+		ImGui::TableSetupColumn(UI_TEXT(smp_name, "Name"));
+		ImGui::TableSetupColumn(UI_TEXT(smp_ub_col_wave, "Wave"));
+		ImGui::TableSetupColumn(UI_TEXT(smp_ub_col_attack, "Attack"));
+		ImGui::TableSetupColumn(UI_TEXT(smp_ub_col_decay, "Decay"));
+		ImGui::TableSetupColumn(UI_TEXT(smp_ub_col_sustain, "Sustain"));
+		ImGui::TableSetupColumn(UI_TEXT(smp_ub_col_release, "Release"));
+		ImGui::TableSetupColumn("");
+		ImGui::TableHeadersRow();
+		for (int i = 0; i < vb::user_board::PROGRAMS; i++) {
+			const std::shared_ptr<const ub::program> p = cur->program[size_t(i)];
+			if (!p)
+				continue;
+			ImGui::PushID(i);
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("%03d", i + 1);
+			// 書き換えた写しを入れる（波形は共有のまま）
+			const auto set = [&](const std::function<void(ub::program &)> &f) {
+				auto np = std::make_shared<ub::program>(*p);
+				f(*np);
+				change([&](ub::board &b) { b.program[size_t(i)] = np; });
+			};
+			ImGui::TableNextColumn();
+			char name[9];
+			std::snprintf(name, sizeof(name), "%s", p->name);
+			for (size_t n = std::strlen(name); n && name[n - 1] == ' '; n--)
+				name[n - 1] = 0;
+			ImGui::SetNextItemWidth(fs * 6);
+			if (ImGui::InputText("##n", name, sizeof(name)))
+				set([&](ub::program &q) { vb::detail::clean_name(q.name, name, 8, true); });
+			ImGui::TableNextColumn();
+			const size_t frames = p->pcm ? p->pcm->size() : 0;
+			ImGui::Text(p->loop ? UI_TEXT(smp_ub_loop_fmt, "loop %.2f s") : UI_TEXT(smp_ub_once_fmt, "once %.2f s"), double(frames) / 44100.0);
+			float a = p->attack, d = p->decay, s = p->sustain, r = p->release;
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(fs * 4.5f);
+			if (ImGui::DragFloat("##a", &a, 0.005f, 0.0f, 3.0f, "%.3f s", ImGuiSliderFlags_AlwaysClamp))
+				set([&](ub::program &q) { q.attack = a; });
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(fs * 4.5f);
+			if (ImGui::DragFloat("##d", &d, 0.02f, 0.0f, 20.0f, d <= 0.0f ? "-" : "%.2f s", ImGuiSliderFlags_AlwaysClamp))
+				set([&](ub::program &q) { q.decay = d; });
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(fs * 4.5f);
+			if (ImGui::DragFloat("##s", &s, 0.005f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+				set([&](ub::program &q) { q.sustain = s; });
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(fs * 4.5f);
+			if (ImGui::DragFloat("##r", &r, 0.01f, 0.0f, 10.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp))
+				set([&](ub::program &q) { q.release = r; });
+			ImGui::TableNextColumn();
+			if (ImGui::SmallButton(UI_TEXT(smp_play, "Play")) && p->pcm) {
+				std::vector<s16> pcm = *p->pcm;
+				const bool loop = p->loop;
+				br.post([pcm, loop](mu2000 &mu) mutable {
+					mu.preview_pcm(std::move(pcm), loop ? 0 : ~0u);
+					return std::string();
+				});
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton(UI_TEXT(smp_ub_remove, "Remove")))
+				change([&](ub::board &b) { b.program[size_t(i)].reset(); });
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", UI_TEXT(smp_ub_table_tip, "The envelope of each program: Attack is the rise, Decay the fall to the Sustain level while the key is held (\"-\" keeps the level), Release the fade after the key goes up. Drag to change; the next note uses the new values."));
+	}
+	// つまみを離したら、ファイルへ書く
+	if (ub::unsaved() && !ImGui::IsAnyItemActive()) {
+		if (!ub::save(br))
+			m_ub_note = UI_TEXT(smp_ub_save_fail, "Could not write the board file");
+		m_ub_listed = -1;
+	}
+	if (!m_ub_note.empty())
+		ImGui::TextDisabled("%s", m_ub_note.c_str());
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	ImGui::TextWrapped(UI_TEXT(smp_ub_footer_fmt, "%d programs. Saved as you go: %s"), cur->count(), ub::current_path().c_str());
+	ImGui::PopStyleColor();
+	ImGui::TextWrapped("%s", UI_TEXT(smp_ub_how, "To play it: Master window > Imaginary plug-in board > Your own board. Program change picks the wave."));
 }
 
 } // namespace ui
