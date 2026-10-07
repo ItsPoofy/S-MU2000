@@ -2230,7 +2230,10 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				const double a4_440 = tone(a4, 440), a4_880 = tone(a4, 880), a5_880 = tone(a5, 880), a5_440 = tone(a5, 440);
 				std::remove(good.c_str());
 				std::remove(bad.c_str());
-				check(loaded && refused && d.mu.board_dls_instruments() == 2 && d.mu.virtual_board_known() &&
+				// 画面の音色の品書きが使う並び: メロディの音色 1 つとドラムキット 1 つ
+				const std::vector<mu2000::board_voice> bv = d.mu.board_voices();
+				const bool listed = bv.size() == 2 && bv[0].drum != bv[1].drum;
+				check(loaded && refused && listed && d.mu.board_dls_instruments() == 2 && d.mu.virtual_board_known() &&
 				      a4_440 > 0.01 && a4_880 < 0.02 * a4_440 && a5_880 > 0.01 && a5_440 < 0.02 * a5_880 &&
 				      level(kick) > 0.01 && level(none) < 0.001 * level(kick) &&
 				      held > 0.01 && tap > 0.9 * held && level(kick2) > 0.8 * level(kick) && level(none2) < 0.001 * level(kick) &&

@@ -147,6 +147,9 @@ private:
 	void row(int part, xg::model &m, const xg_snapshot &ram, bridge &br, float h);
 	// マルチパートの架空のボードの 16 チャンネル（口 E）を、64 パートの下に並べる
 	void board_rows(xg::model &m, bridge &br, float h);
+	// ボードのチャンネルの音色の品書き（本体のパートの program_menu と同じ形）
+	void board_program_menu(int kind, int ch, const mu2000::board_part &p, bridge &br);
+	std::vector<mu2000::board_voice> m_board_voices;
 	board_view m_board;
 	float m_board_level[16] = {};           // VEL メーターの今の高さ
 	u32 m_board_seen_ons[16] = {};

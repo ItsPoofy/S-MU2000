@@ -42,6 +42,7 @@ const xg::param &P(const char *key);
 std::string part_name(int part);        // A1-A16 ... D1-D16
 std::string channel_name(int value);    // 受信チャンネル。127 は OFF
 const char *gm_name(int program);       // General MIDI の楽器名（規格の名前）
+const char *gm_group_name(int group);   // その分類（0-15。8 番ずつ）の名前
 std::string voice_text(int msb, int lsb, int program);
 
 // 音色の名前と絵を読む ROM。音源を読み込んだあとで 1 回渡す（無ければ GM の名前で出す）

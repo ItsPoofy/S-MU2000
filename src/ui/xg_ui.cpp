@@ -951,6 +951,11 @@ const char *gm_name(int program)
 	return GM_NAMES[program & 0x7f];
 }
 
+const char *gm_group_name(int group)
+{
+	return GM_GROUPS[group & 15];
+}
+
 std::string voice_text(int msb, int lsb, int prog)
 {
 	char buf[80];
