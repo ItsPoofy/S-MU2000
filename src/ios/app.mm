@@ -36,6 +36,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -189,22 +190,29 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	// load_machine wants the parsed tool_args because it reads a.dir and a.usb_host
 	// off them. Rather than run the argv parser - there is no command line on iOS -
 	// this fills in the fields it uses and leaves the rest default.
-	ui::tool_args a;
-	a.dir = dir;
+	//
+	// Shared, not a local: the ROM-import callback below reads it after the user
+	// has picked a folder, long after this method has returned, and a local would
+	// be a dangling reference by then - on the path every first launch takes,
+	// since a new install has no ROMs and so always goes through the picker. A
+	// shared_ptr captured by value in the block ties the lifetime to the callback,
+	// which is the only thing that needs it alive.
+	auto a = std::make_shared<ui::tool_args>();
+	a->dir = dir;
 	// Without --layout, look through the usual places in order: exactly what the
 	// shared parser does in tool_args.h. Skipping this was why art/real was never
 	// used - apply_layout("") falls back to the built-in defaults and never
 	// consults find_default(), so the bundled art/real/panel.txt sat there
 	// unread while the panel drew from defaults. The log names the file so the
 	// next run proves which layout won rather than leaving it to inspection.
-	if (a.layout_path.empty())
-		a.layout_path = ui::layout::find_default();
+	if (a->layout_path.empty())
+		a->layout_path = ui::layout::find_default();
 	std::fprintf(stderr, "[ios] layout: %s\n",
-	             a.layout_path.empty() ? "(built-in defaults)" : a.layout_path.c_str());
+	             a->layout_path.empty() ? "(built-in defaults)" : a->layout_path.c_str());
 	// Boot now, and again later if this launch had nothing to boot: the picker
 	// opens at the end of this method and boot_machine() runs once the install
 	// lands, so the machine comes up without a relaunch.
-	const bool booted = boot_machine(gui, eng, a);
+	const bool booted = boot_machine(gui, eng, *a);
 	gui.wire_engine(eng, eng_opts);
 
 	// What ui::app::run() does for every desktop main before showing the window:
@@ -217,7 +225,7 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	// device (that is open_remembered_ports/make_audio, called later in run()),
 	// so it is safe this early.
 	ui::window_options win_opts;
-	gui.setup_for_window(a, win_opts, false);
+	gui.setup_for_window(*a, win_opts, false);
 
 	// The window system: a UIView with a CAMetalLayer and a 30 Hz CADisplayLink.
 	const CGRect b = [UIScreen mainScreen].bounds;
@@ -260,12 +268,11 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	if (!booted) {
 		ui::gui_app *g = &gui;
 		ui::engine *e = &eng;
-		ui::tool_args *args = &a;
-		set_rom_import_done([g, e, args] {
+		set_rom_import_done([g, e, a] {
 			// The container now holds a whole set, so the shared search finds
 			// it on its own; refresh the path the boot will use.
-			args->dir = rom_dir();
-			boot_machine(*g, *e, *args);
+			a->dir = rom_dir();
+			boot_machine(*g, *e, *a);
 		});
 		dispatch_async(dispatch_get_main_queue(), ^{
 			prompt_for_roms(panel_view);

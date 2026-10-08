@@ -89,12 +89,28 @@ static ask_kind g_kind = ask_kind::bytes;
 @property (nonatomic, strong) UIDocumentPickerViewController *picker;
 @end
 
+// g_flow is what service_file_asks() checks to keep one picker at a time, so it
+// has to be clear whenever no picker is up - including on the paths below that
+// return early (a read that failed, a container that could not be written, an
+// empty pick). It used to be cleared on one path only, so any of those returns
+// left it set and no further picker ever opened: the second attempt to import
+// anything did nothing at all, with no message. A scope guard clears it on the
+// way out of the handler whichever way it goes, and the delegate it holds goes
+// with it (UIDocumentPickerViewController.delegate is weak, so this is also what
+// keeps the delegate alive for the presentation).
+namespace {
+struct flow_cleared {
+	~flow_cleared() { g_flow = nil; }
+};
+} // namespace
+
 @implementation SMUFileAskDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)picker
 didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
 	(void)picker;
+	flow_cleared cleared;
 	switch (g_kind) {
 	case ask_kind::save:
 		break;   // the note was already given when the bytes were written
@@ -132,10 +148,16 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 		}
 		const std::string dest = smu2000::join(dir, utf8(url.lastPathComponent));
 		const BOOL granted = [url startAccessingSecurityScopedResource];
-		const BOOL copied = [[NSFileManager defaultManager] removeItemAtPath:@(dest.c_str()) error:nil]
-		                && [[NSFileManager defaultManager] copyItemAtURL:url
-		                                                          toURL:[NSURL fileURLWithPath:@(dest.c_str())]
-		                                                          error:nil];
+		// The remove's own answer is not the question. It returns NO when there
+		// is nothing to remove - which is the case for every first import, since
+		// the name is new - so asking for both with && meant the copy ran only
+		// when a file of that name was already there. Re-importing over an
+		// existing file works; importing anything new does not. Removed with
+		// the result ignored, as the same remove is done in view_ios.mm.
+		[[NSFileManager defaultManager] removeItemAtPath:@(dest.c_str()) error:nil];
+		const BOOL copied = [[NSFileManager defaultManager] copyItemAtURL:url
+		                                                  toURL:[NSURL fileURLWithPath:@(dest.c_str())]
+		                                                  error:nil];
 		if (granted)
 			[url stopAccessingSecurityScopedResource];
 		if (!copied) {
@@ -164,10 +186,12 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 		for (NSURL *url in urls) {
 			const std::string dest = smu2000::join(dir, utf8(url.lastPathComponent));
 			const BOOL granted = [url startAccessingSecurityScopedResource];
-			const BOOL copied = [[NSFileManager defaultManager] removeItemAtPath:@(dest.c_str()) error:nil]
-			                && [[NSFileManager defaultManager] copyItemAtURL:url
-			                                                              toURL:[NSURL fileURLWithPath:@(dest.c_str())]
-			                                                              error:nil];
+			// See the note in ask_kind::path above: the remove's NO for a name
+			// that is not there yet must not gate the copy.
+			[[NSFileManager defaultManager] removeItemAtPath:@(dest.c_str()) error:nil];
+			const BOOL copied = [[NSFileManager defaultManager] copyItemAtURL:url
+			                                                  toURL:[NSURL fileURLWithPath:@(dest.c_str())]
+			                                                  error:nil];
 			if (granted)
 				[url stopAccessingSecurityScopedResource];
 			if (copied) {
@@ -184,7 +208,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 		break;
 	}
 	}
-	g_flow = nil;
+	// g_flow is cleared by the guard above, on this path and on every early
+	// return in the switch.
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)picker

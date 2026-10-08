@@ -269,6 +269,12 @@ static UIViewController *top_presenter()
     : NSObject <UIDocumentPickerDelegate>
 @end
 
+// What keeps the card picker's delegate alive for the presentation: the picker's
+// delegate property is weak, the presented controller does not retain it, and the
+// card "Open" menu item that creates one is a method that returns immediately.
+// Cleared in the picker's own callbacks below.
+static id g_card_picker = nil;
+
 @implementation SMUCardPicker {
 	std::function<void(const std::string &)> _done;
 }
@@ -289,6 +295,7 @@ static UIViewController *top_presenter()
     didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
 	(void)controller;
+	g_card_picker = nil;
 	NSURL *url = [urls firstObject];
 	if (!url) {
 		if (_done)
@@ -324,6 +331,7 @@ static UIViewController *top_presenter()
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
 	(void)controller;
+	g_card_picker = nil;
 	if (_done)
 		_done(std::string());
 }
@@ -560,8 +568,12 @@ void ios_window::pickCardItem(int itemId)
 			    if (!path.empty())
 				    m_owner.card_insert_path(path);
 		    }];
-		// Retained by the presented controller for the pick's duration; the
-		// callback holds only this (see the note above), so no cycle.
+		// Held in a file-scope strong, not in this local: the picker's delegate
+		// property is weak and the presented controller does not retain it, so a
+		// delegate this function owns is released the moment it returns - and
+		// then the pick answers nobody, with no message. Cleared when the pick
+		// ends, which is where SMUCardPicker calls its callback.
+		g_card_picker = delegate;
 		picker.delegate = delegate;
 		UIViewController *vc = top_presenter();
 		if (vc)

@@ -480,12 +480,20 @@
 @property (nonatomic, strong) UIDocumentPickerViewController *picker;
 @end
 
+// UIDocumentPickerViewController.delegate is weak, and the presented controller
+// does not hold it either, so a delegate that only a local variable owns is gone
+// before the user has picked anything - and then nothing is called back, with no
+// message. This is what keeps it alive for as long as the picker is up, and it is
+// cleared when the pick ends (which is also what lets the delegate go).
+static id g_midi_file_delegate = nil;
+
 @implementation SMUMidiFileDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller
 didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
 	(void)controller;
+	g_midi_file_delegate = nil;
 	NSURL *src = urls.firstObject;
 	if (!src) {
 		std::fprintf(stderr, "[ios] midi: nothing picked\n");
@@ -510,6 +518,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
 	(void)controller;
+	g_midi_file_delegate = nil;
 	std::fprintf(stderr, "[ios] midi: cancelled\n");
 }
 
@@ -680,6 +689,11 @@ void open_midi_file_panel()
 	SMUMidiFileDelegate *delegate = [[SMUMidiFileDelegate alloc] init];
 	delegate.picker = picker;
 	picker.delegate = delegate;
+	// Held here, not in a local: the delegate is weak on the picker and the
+	// presented controller does not keep it, so without this it is released when
+	// this function returns and the pick answers nobody. Same shape as
+	// file_ask_ios.mm's g_flow and rom_import_ios.mm's g_importer.
+	g_midi_file_delegate = delegate;
 	[presenter presentViewController:picker animated:YES completion:nil];
 }
 
