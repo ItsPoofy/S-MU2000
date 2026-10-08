@@ -60,7 +60,7 @@ public:
 		for (const auto &[page, label] : std::array<std::pair<settings_page, const char *>, 3>{
 		         {{settings_page::general, UI_TEXT(settings_general, "General")},
 		          {settings_page::audio, UI_TEXT(settings_audio, "Audio")},
-				          {settings_page::emulation, UI_TEXT(settings_emulation, "Emulation")}}}) {
+		          {settings_page::emulation, UI_TEXT(settings_emulation, "Emulation")}}}) {
 			if (ImGui::Selectable(label, m_state.page == page)) m_state.page = page;
 		}
 		ImGui::EndChild();
@@ -209,13 +209,13 @@ private:
 		ImGui::SeparatorText(UI_TEXT(settings_emulation, "Emulation"));
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
 		bool fx = m_state.native_fx;
-		if (ImGui::Checkbox(UI_TEXT(menu_native_fx, "Play effects in C++"), &fx)) m_actions.command(ID_NATIVE_FX);
+		if (ImGui::Checkbox(UI_TEXT(settings_native_fx, "Play effects in C++"), &fx)) m_actions.command(ID_NATIVE_FX);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_native_fx_tip, "Runs effects in C++ to reduce CPU use.\nSome effects may sound different."));
 		bool thin = m_state.thin_bends;
-		if (ImGui::Checkbox(UI_TEXT(menu_thin_bends, "Lighten heavy MIDI"), &thin)) m_actions.command(ID_THIN_BENDS);
+		if (ImGui::Checkbox(UI_TEXT(settings_thin_bends, "Lighten heavy MIDI"), &thin)) m_actions.command(ID_THIN_BENDS);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_thin_bends_tip, "During MIDI-file playback, reduces pitch-bend updates\nand skips Roland display data."));
 		bool engine = m_state.native_engine;
-		if (ImGui::Checkbox(UI_TEXT(menu_native_engine, "Play without the firmware"), &engine)) m_actions.command(ID_NATIVE_ENGINE);
+		if (ImGui::Checkbox(UI_TEXT(settings_native_engine, "Play without the firmware"), &engine)) m_actions.command(ID_NATIVE_ENGINE);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_native_engine_tip, "Handles MIDI and notes in C++ to reduce CPU use.\nSound and feature support may differ from firmware playback."));
 		ImGui::EndDisabled();
 	}

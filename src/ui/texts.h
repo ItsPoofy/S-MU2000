@@ -1104,6 +1104,9 @@ struct ui_texts {
 	const char *settings_title;
 	const char *settings_audio;
 	const char *settings_emulation;
+	const char *settings_native_fx;
+	const char *settings_thin_bends;
+	const char *settings_native_engine;
 	const char *settings_native_fx_tip;
 	const char *settings_thin_bends_tip;
 	const char *settings_native_engine_tip;
@@ -1118,8 +1121,6 @@ struct ui_texts {
 	const char *settings_volume;
 	const char *settings_dc;
 	const char *settings_limiter;
-	const char *settings_reset;
-	const char *settings_panic;
 };
 
 // Each language file defines one of these (never included directly).

@@ -238,22 +238,21 @@ write `usb=0` in `%LOCALAPPDATA%\S-MU2000\plugin.ini`.
 
 ## Standalone settings
 
-Open **Settings** from the toolbar or right-click menu (or start with `--settings`).
-Audio changes apply immediately, and a failed device/format change restores the
-previous stream. Windows uses WASAPI by default; `make ASIO=1` also enables DirectSound and installed ASIO drivers;
-macOS uses CoreAudio and Linux uses ALSA. Set the output, supported sample rate,
-buffer, left/right hardware channels, resampler, volume and peak limiter here.
-ASIO also exposes the driver's control panel. Settings and channel routes persist.
+Open **Settings** from the toolbar, any quick menu, or `--settings`.
+General selects English or Japanese. Audio selects playback and recording devices,
+sample rate, buffer size, latency, output channels, resampler, volume, DC filtering,
+and peak limiting. Changes apply immediately; failed changes restore the previous
+stream. Device lists refresh automatically.
 
-General selects English/Japanese. MIDI contains port assignments; the MIDI IN
-quick menu also contains GM/GS/TG300B/XG resets and panic. Emulation contains the
-native effects, firmware bypass and MIDI-lightening switches. PHONES keeps quick
-output/rate/limiter controls; POWER contains factory reset.
+Emulation contains C++ effects, firmware bypass, and MIDI-file lightening.
+Hover over each option for details. The existing WASAPI, CoreAudio, and ALSA
+backends are used; this adds no DAC or circuit simulation.
 
-Only `make ASIO=1` needs CMake 3.18+ and downloads the ASIO SDK. The default
-Windows build uses neither PortAudio nor the SDK. See `third_party/portaudio/S-MU2000.md` and `NOTICE.txt` for dependency and
-ASIO binary licensing details. This adds no DAC/circuit simulation; the existing
-analog option removes DC.
+Windows builds can also enable DirectSound and installed ASIO drivers with
+`make ASIO=1`. This adds a Driver selector and an ASIO control-panel button to
+Audio settings. Only this opt-in build needs CMake 3.18+ and downloads the ASIO
+SDK. The default build uses neither PortAudio nor the SDK. See
+[build notes](third_party/portaudio/S-MU2000.md) for details.
 
 ## Latency
 
