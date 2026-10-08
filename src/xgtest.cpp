@@ -14,12 +14,14 @@
 #include "xg/ram.h"
 #include "ui/xg_state.h"
 #include "xg/sysfx.h"
+#include "vst3/pc_order.h"
 
 using ui::XG_SYSTEM_SIZE;
 using ui::XG_EFFECT_SIZE;
 using ui::XG_PARTS;
 using ui::XG_PART_COPY;
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -146,6 +148,92 @@ int main(int argc, char **argv)
 
 	int checked = 0, bad = 0;
 	std::vector<std::string> problems;
+
+	// ---- 0. VST3: パラメータで届いたプログラムチェンジを、バンクセレクトの後ろに並べる（vst3/pc_order.h。ROM は要らない）
+	{
+		namespace v3 = smu2000::vst3;
+		struct tmsg { int off; int seq; uint8_t port; uint8_t n; uint8_t b[3]; const uint8_t *sysex; uint8_t rank; };
+		const auto mk = [](std::vector<tmsg> &v, int off, int port, int a, int b1, int c) {
+			v.push_back({ off, int(v.size()), uint8_t(port), 3, { uint8_t(a), uint8_t(b1), uint8_t(c) }, nullptr, v3::RANK_OTHER });
+		};
+		// 流す順（時刻、rank、積んだ順）に並べたときの、最初のバイト 2 つの並び
+		const auto order = [](std::vector<tmsg> v, size_t params) {
+			v3::order_program_changes(v, params);
+			std::stable_sort(v.begin(), v.end(), [](const tmsg &x, const tmsg &y) {
+				return x.off != y.off ? x.off < y.off : x.rank != y.rank ? x.rank < y.rank : x.seq < y.seq;
+			});
+			std::string out;
+			for (const tmsg &m : v) {
+				char t[24];
+				std::snprintf(t, sizeof(t), "%d:%02X.%02X ", m.off, m.b[0], m.b[1]);
+				out += t;
+			}
+			return out;
+		};
+		int fails = 0;
+		const auto expect = [&](const char *what, const std::string &got, const char *want) {
+			if (got != want) {
+				fails++;
+				std::printf("  プログラムチェンジの並べ替え（%s）: [%s] のはずが [%s]\n", what, want, got.c_str());
+			}
+		};
+		// REAPER の形: プログラムチェンジだけブロックの頭、CC は本当の位置
+		{
+			std::vector<tmsg> v;
+			mk(v, 0, 0, 0xc0, 5, 0);
+			mk(v, 300, 0, 0xb0, 0, 64);
+			mk(v, 300, 0, 0xb0, 32, 1);
+			expect("REAPER", order(v, v.size()), "300:B0.00 300:B0.20 300:C0.05 ");
+		}
+		// 位置が全部同じで、プログラムチェンジの列が先に来た
+		{
+			std::vector<tmsg> v;
+			mk(v, 0, 0, 0xc0, 5, 0);
+			mk(v, 0, 0, 0xb0, 0, 64);
+			mk(v, 0, 0, 0xb0, 32, 1);
+			mk(v, 0, 0, 0xb0, 7, 100);
+			expect("同じ位置", order(v, v.size()), "0:B0.00 0:B0.20 0:C0.05 0:B0.07 ");
+		}
+		// 後ろまで続くエクスプレッションのカーブには引きずられない（基準はバンクセレクトだけ）
+		{
+			std::vector<tmsg> v;
+			mk(v, 10, 0, 0xb0, 0, 64);
+			mk(v, 10, 0, 0xc0, 5, 0);
+			mk(v, 200, 0, 0xb0, 11, 90);
+			mk(v, 400, 0, 0xb0, 11, 80);
+			expect("カーブ", order(v, v.size()), "10:B0.00 10:C0.05 200:B0.0B 400:B0.0B ");
+		}
+		// 別のチャンネル・別の口のバンクセレクトは関係ない
+		{
+			std::vector<tmsg> v;
+			mk(v, 0, 0, 0xc0, 5, 0);
+			mk(v, 300, 0, 0xb1, 0, 64);
+			mk(v, 300, 1, 0xb0, 0, 64);
+			expect("別のチャンネル", order(v, v.size()), "0:C0.05 300:B1.00 300:B0.00 ");
+		}
+		// 後ろのバンクセレクトに、それ用のプログラムチェンジがもうある: 前のプログラムチェンジは動かさない
+		{
+			std::vector<tmsg> v;
+			mk(v, 0, 0, 0xc0, 5, 0);
+			mk(v, 300, 0, 0xb0, 0, 64);
+			mk(v, 300, 0, 0xc0, 9, 0);
+			expect("持ち主がいる", order(v, v.size()), "0:C0.05 300:B0.00 300:C0.09 ");
+		}
+		// ホストがイベントとして渡した MIDI（パラメータの後ろに積まれる）は触らない
+		{
+			std::vector<tmsg> v;
+			mk(v, 0, 0, 0xb0, 7, 100);          // パラメータから
+			mk(v, 0, 0, 0xc0, 5, 0);            // ここからイベント
+			mk(v, 300, 0, 0xb0, 0, 64);
+			expect("イベントは触らない", order(v, 1), "0:B0.07 0:C0.05 300:B0.00 ");
+		}
+		checked++;
+		std::printf("VST3 のプログラムチェンジをバンクセレクトの後ろに並べる: %s\n", fails ? "違" : "合");
+		if (fails) {
+			bad++;
+			problems.push_back("VST3 のプログラムチェンジの並べ替え");
+		}
+	}
 
 	// ---- 1. 書いて読み返す
 	const int PARTS[] = { 0, 16, 32, 63 };        // 口 A・B・C・D から 1 つずつ（1、17、33、64）
