@@ -3275,11 +3275,12 @@ void mu2000::plg_tx_byte(int chan, u8 targets, u8 byte)
 		return;
 	}
 	// 架空のボードは PLG1〜3 に挿さっている。宛て先の印（下 3 ビット）が立っている差込口ごとに、
-	// SysEx を 1 つずつ組み立てて読む
+	// SysEx を 1 つずつ組み立てて読む。増設の差込口（PLG-4〜）に firmware は話しかけてこないが、3 枚全部に宛てたもの
+	// （パネルで音色を変えたときの 4C 08 pp 01〜03、XG System On）は同じ線に乗っているものとして聞く。答えは返さない
 	if (chan != 3 || byte >= 0xf8)
 		return;
 	for (vb_slot &vs : m_vbs) {
-		if (!vs.kind || !((targets >> vs.index) & 1))
+		if (!vs.kind || !(vs.extra() ? (targets & 7) == 7 : (targets >> vs.index) & 1))
 			continue;
 		if (byte == 0xf0)
 			vs.msg.clear();
@@ -3327,6 +3328,9 @@ void mu2000::set_virtual_board(int kind, int part, int slot)
 		return;
 	vb_slot &s = m_vbs[size_t(slot)];
 	kind = kind >= VBOARD_FC && kind < VBOARD_KINDS ? kind : VBOARD_NONE;
+	// 増設の差込口（PLG-4〜）には 1 パートのボードだけ（マルチパートのボードは firmware に口 E を割り当ててもらう）
+	if (board_slot_extra(slot) && board_is_multi(kind))
+		kind = VBOARD_NONE;
 	part = std::clamp(part, 0, 63);
 	if (kind == s.kind && part == s.part && s.on)
 		return;
@@ -3385,6 +3389,23 @@ void mu2000::vb_bank_from_ram(vb_slot &s)
 	const u32 pb = xg::ram::part_base(s.part);
 	s.bank[0] = s.bank_next[0] = m_ram[pb + 0x01];
 	s.bank[1] = s.bank_next[1] = m_ram[pb + 0x02];
+	s.ram_seen[0] = m_ram[pb + 0x01];
+	s.ram_seen[1] = m_ram[pb + 0x02];
+	s.ram_seen[2] = m_ram[pb + 0x03];
+}
+
+// firmware が知らないボード（増設の差込口、起動のあとで挿したボード）は、パネルや SysEx で音色を変えても何も知らせてもらえない。
+// ワーク RAM のバンクとプログラムが**変わったとき**だけ、それに合わせる（MIDI のバンクセレクトは vb_tap が先に追っているので、
+// RAM が後から同じ値になっても何も起きない。RAM が古い間にボードを戻してしまうこともない）
+void mu2000::vb_follow_ram(vb_slot &s)
+{
+	const u32 pb = xg::ram::part_base(s.part);
+	const u8 now[3] = { m_ram[pb + 0x01], m_ram[pb + 0x02], m_ram[pb + 0x03] };
+	if (now[0] != s.ram_seen[0] || now[1] != s.ram_seen[1])
+		vb_set_bank(s, now[0], now[1]);
+	if (now[2] != s.ram_seen[2] && now[2] < 128)
+		s.midi(0xc0, now[2], 0);
+	std::copy(now, now + 3, s.ram_seen);
 }
 
 // バンクが変わった。ボードのバンクから外れたら、鳴っている音を止める
@@ -3905,6 +3926,9 @@ bool mu2000::vb1_mix(vb_slot &s, float bus[][2])
 {
 	if (s.resync && !--s.resync)
 		vb_bank_from_ram(s);
+	// firmware が知らないボードは、ワーク RAM を 256 サンプル（6ms）ごとに見て音色の変更を追う
+	if (!s.known && s.on && !(++s.poll & 255))
+		vb_follow_ram(s);
 	const bool user = s.kind == VBOARD_USER;
 	if (!(user ? s.user.sounding() : s.fc.sounding()))
 		return false;

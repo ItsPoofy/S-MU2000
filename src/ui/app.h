@@ -471,7 +471,7 @@ public:
 		// the imaginary plug-in board stays plugged in, like a real one
 		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
 		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
-		for (int i = 0; i < 2; i++) {
+		for (int i = 0; i < mu2000::PLG_SLOTS - 1; i++) {
 			r.board_more[i]      = eng ? eng->mu.virtual_board_kind(i + 1) : 0;
 			r.board_more_part[i] = eng ? eng->mu.virtual_board_part(i + 1) + 1 : i + 2;
 		}
@@ -1180,7 +1180,7 @@ public:
 			}
 			if (eng && r.board)
 				eng->mu.set_virtual_board(r.board, r.board_part - 1);
-			for (int i = 0; i < 2; i++)
+			for (int i = 0; i < mu2000::PLG_SLOTS - 1; i++)
 				if (eng && r.board_more[i])
 					eng->mu.set_virtual_board(r.board_more[i], r.board_more_part[i] - 1, i + 1);
 		}
