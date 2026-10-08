@@ -3461,7 +3461,7 @@ void mu2000::vb_from_firmware(vb_slot &s, const std::vector<u8> &m)
 	// 機種 4F: 音色の名前（7F 10 00 <MSB> <LSB> <プログラム> 08）。答えは文字数と 8 文字。液晶の音色名の所に出る
 	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4f && m.size() == 12 && m[4] == 0x7f && m[5] == 0x10 && m[6] == 0x00) {
 		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4f, 0x7f, 0x10, 0x00, 0x08 };
-		const char *name = s.kind == VBOARD_USER ? s.user.program_name(m[9]) : smu2000::vboard::fc_program_name(m[9]);
+		const char *name = s.kind == VBOARD_USER ? s.user.program_name(m[9]) : s.fc.name(m[9]);
 		r.insert(r.end(), name, name + 8);
 		reply(std::move(r));
 		return;
@@ -3757,8 +3757,9 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 			for (const smu2000::vboard::dls_instrument &i : bank->instruments)
 				add(i.drum, i.msb, i.lsb, i.program, i.name.c_str());
 	} else if (kind == VBOARD_FC16) {
-		for (int i = 0; i < 16; i++)
-			add(false, 0, 0, u8(i), smu2000::vboard::fc_program_name(i));
+		// 初期の音色は 16 個（17 以降はそのくり返し）。音色の組を開いていれば 128 個とも自分の音色
+		for (int i = 0; i < (m_vb_fc_bank[FC_BANK_MULTI] ? 128 : 16); i++)
+			add(false, 0, 0, u8(i), m_vb16[0].fc.name(i));
 	} else if (kind == VBOARD_FM16) {
 		// プログラム番号は GM の並び（分類ごとに 2 つの音色を 4 つずつ）。ドラムは 1 つ
 		for (int i = 0; i < 128; i++)
@@ -3814,7 +3815,7 @@ void mu2000::board_parts(board_part out[16])
 			name = m_vb_user16.program_name(o.program);
 		} else if (multi_kind() == VBOARD_FC16) {
 			o.program = c.fc.program();
-			name = smu2000::vboard::fc_program_name(o.program);
+			name = c.fc.name(o.program);
 		}
 		std::snprintf(o.name, sizeof(o.name), "%s", name);
 	}

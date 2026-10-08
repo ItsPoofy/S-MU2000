@@ -43,6 +43,8 @@ inline constexpr const char *SET_BOARD3 = "board3";
 inline constexpr const char *SET_BOARD3_PART = "board3_part";
 inline constexpr const char *SET_BOARD_DLS = "board_dls";     // DLS のボードが読むファイル（道。UTF-8）
 inline constexpr const char *SET_BOARD_FILE = "board_file";   // オリジナルのボードのファイル（道。src/ui/user_boards.h）
+// FC ボードの音色の組のファイル（道。src/ui/fc_banks.h。無ければ初期の音色）。ボードごと: PLG-1・2・3 の 1 パートのボード、16 パートのボード
+inline constexpr const char *const SET_BOARD_FC[4] = { "board_fc", "board_fc2", "board_fc3", "board_fc16" };
 inline constexpr const char *SET_BOARD_FM = "board_fm";       // FM ボードの音色の組のファイル（道。src/ui/fm_banks.h。無ければ初期の音色）
 inline constexpr const char *SET_VOLUME = "volume";
 inline constexpr const char *SET_EDIT_OUT = "edit_out";   // 音色の窓の送り先（空はパネルの設定）
@@ -115,6 +117,7 @@ struct remembered {
 	std::string board_dls; // board_dls= (the DLS file of the DLS board)
 	std::string board_file; // board_file= (the user's own board, board=user / user16)
 	std::string board_fm;   // board_fm= (the FM board's voice set; empty = the built-in voices)
+	std::string board_fc[4]; // board_fc= board_fc2= board_fc3= board_fc16= (each FC board's voice set; empty = the built-in voices)
 };
 
 // Struct to file rows, in file order
@@ -145,6 +148,8 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_BOARD_DLS, r.board_dls);
 	kv.emplace_back(SET_BOARD_FILE, r.board_file);
 	kv.emplace_back(SET_BOARD_FM, r.board_fm);
+	for (int i = 0; i < 4; i++)
+		kv.emplace_back(SET_BOARD_FC[i], r.board_fc[i]);
 	kv.emplace_back(SET_BOARD_PART, std::to_string(r.board_part));
 	return kv;
 }
@@ -178,6 +183,8 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_BOARD_DLS)) r.board_dls = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_FILE)) r.board_file = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_FM)) r.board_fm = *v;
+	for (int i = 0; i < 4; i++)
+		if (const std::string *v = find_setting(kv, SET_BOARD_FC[i])) r.board_fc[i] = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_PART)) {
 		const int n = std::atoi(v->c_str());
 		r.board_part = n >= 1 && n <= 64 ? n : 1;

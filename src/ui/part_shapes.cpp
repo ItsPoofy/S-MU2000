@@ -1470,7 +1470,7 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		voice = voice_text(msb, lsb, prog);
 		if (sb_playing) {
 			char buf[80];
-			std::snprintf(buf, sizeof(buf), "%3d  %s   [PLG-%d %s]", prog + 1, single_board_pane::program_name(sb_kind, prog).c_str(),
+			std::snprintf(buf, sizeof(buf), "%3d  %s   [PLG-%d %s]", prog + 1, single_board_pane::program_name(sb_kind, prog, sb_slot).c_str(),
 			              sb_slot + 1, single_board_pane::board_name(sb_kind).c_str());
 			voice = buf;
 		} else if (const xg::voice_rom *vr = voices()) {
@@ -1526,6 +1526,9 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			if (bkind == mu2000::VBOARD_FM16 && !bp.drum) {
 				// FM ボードのメロディの音色は、ここで中身を触れる
 				m_fm_edit.draw(bp.program, br);
+			} else if (bkind == mu2000::VBOARD_FC16) {
+				// FC ボードの音色も（1 パートの FC ボードと同じ組）
+				m_single.edit_fc_voice(bp.program, br);
 			} else {
 				if (bkind == mu2000::VBOARD_FM16)
 					ImGui::TextWrapped("%s", UI_TEXT(fme_drum_note, "This channel plays the FM board's drums. The drum sounds are fixed; pick a melodic voice on the left to edit its sound here."));

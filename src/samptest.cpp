@@ -1932,6 +1932,114 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      " 倍）、バンクを選ぶ前 " + std::to_string(rms(before.mono, on, len)) + (idle ? "" : "（もう鳴っている）") + (live ? "" : "（選んでも鳴らない）"));
 			}
 
+			// FC ボードの音色の組（src/vboard.h の fc_bank）。組を渡さなければ今までどおり（初期の組を渡しても 1 ビットも変わらない、
+			// プログラム 17 以降は 1〜16 のくり返し）。書き換えた音色はその番号の音を変え、鳴っている音にもすぐ効く。
+			// ファイルの形にして読み戻すと同じになり、欠けたファイルは断る
+			{
+				namespace vb = smu2000::vboard;
+				const auto render = [](vb::fc_board &b, int n) {
+					std::vector<double> o;
+					for (int i = 0; i < n; i++)
+						o.push_back(b.render());
+					return o;
+				};
+				const auto play = [&](vb::fc_board &b, int prog, int held, int tail) {
+					b.reset();
+					b.midi(0xc0, u8(prog), 0);
+					b.midi(0x90, 69, 100);
+					std::vector<double> o = render(b, held);
+					b.midi(0x80, 69, 0);
+					const std::vector<double> t = render(b, tail);
+					o.insert(o.end(), t.begin(), t.end());
+					return o;
+				};
+				const auto level = [](const std::vector<double> &x, size_t from, size_t n) {
+					double q = 0;
+					for (size_t i = from; i < from + n && i < x.size(); i++)
+						q += x[i] * x[i];
+					return std::sqrt(q / double(n));
+				};
+				const auto slice = [](const std::vector<double> &x, size_t from, size_t n) {
+					return std::vector<double>(x.begin() + long(from), x.begin() + long(std::min(x.size(), from + n)));
+				};
+				vb::fc_board plain, banked;
+				banked.set_bank(std::make_shared<vb::fc_bank>());
+				bool same = true, wraps = true;
+				for (int prog : { 0, 3, 5, 6, 7, 12, 15 }) {
+					same = same && play(plain, prog, 22050, 8820) == play(banked, prog, 22050, 8820);
+					wraps = wraps && play(plain, prog, 8820, 4410) == play(plain, prog + 16 * 3, 8820, 4410);
+				}
+				// 書き換え: プログラム 1 をデューティ 1/8 に（1/2 には無い 2 倍音が出る）、プログラム 2 を 30 コマごとの
+				// オクターブのアルペジオに、プログラム 3 を「1 コマで 1 段下がり 5 段で止まる」に、プログラム 4 を上から落ちる音に
+				auto bank = std::make_shared<vb::fc_bank>();
+				bank->prog[0].duty[0] = 0;
+				std::snprintf(bank->prog[0].name, sizeof(bank->prog[0].name), "THIN    ");
+				bank->prog[1] = vb::fc_voice();
+				bank->prog[1].arp_len = 2;
+				bank->prog[1].arp_frames = 30;
+				bank->prog[1].arp[1] = 12;
+				bank->prog[2] = vb::fc_voice();
+				bank->prog[2].decay = 1;
+				bank->prog[2].floor = 5;
+				bank->prog[3] = vb::fc_voice();
+				bank->prog[3].sweep = 12;
+				bank->prog[3].sweep_frames = 30;
+				vb::fc_board ed;
+				ed.set_bank(bank);
+				const std::vector<double> thin = play(ed, 0, 22050, 0), wide = play(plain, 0, 22050, 0);
+				const double thin2 = tone(slice(thin, 2205, 8820), 880) / tone(slice(thin, 2205, 8820), 440),
+				             wide2 = tone(slice(wide, 2205, 8820), 880) / tone(slice(wide, 2205, 8820), 440);
+				const std::vector<double> arp = play(ed, 1, 44100, 0);
+				const double arp_lo = tone(slice(arp, 2205, 17640), 440), arp_lo2 = tone(slice(arp, 2205, 17640), 880),
+				             arp_hi = tone(slice(arp, 24255, 17640), 880), arp_hi1 = tone(slice(arp, 24255, 17640), 440);
+				const std::vector<double> floored = play(ed, 2, 44100, 0);
+				vb::fc_voice gone = bank->prog[2];
+				gone.floor = 0;
+				auto bank_gone = std::make_shared<vb::fc_bank>(*bank);
+				bank_gone->prog[2] = gone;
+				vb::fc_board ed2;
+				ed2.set_bank(bank_gone);
+				const std::vector<double> faded = play(ed2, 2, 44100, 0);
+				const double floor_now = level(floored, 30000, 8820), floor_top = level(floored, 0, 735), faded_now = level(faded, 30000, 8820);
+				const std::vector<double> swept = play(ed, 3, 44100, 0);
+				const double sw_first = tone(slice(swept, 0, 735), 880), sw_first_lo = tone(slice(swept, 0, 735), 440),
+				             sw_late = tone(slice(swept, 26460, 8820), 440);
+				// 鳴っている音に効く: 鍵を押したまま、デューティ 1/2 の組から 1/8 の組へ
+				vb::fc_board live;
+				live.set_bank(std::make_shared<vb::fc_bank>());
+				live.reset();
+				live.midi(0xc0, 0, 0);
+				live.midi(0x90, 69, 100);
+				const std::vector<double> l1 = render(live, 11025);
+				live.set_bank(bank);
+				const std::vector<double> l2 = render(live, 11025);
+				const double live_before = tone(slice(l1, 2205, 8820), 880) / tone(slice(l1, 2205, 8820), 440),
+				             live_after = tone(slice(l2, 2205, 8820), 880) / tone(slice(l2, 2205, 8820), 440);
+				// ファイル
+				const std::vector<u8> bytes = vb::write_fc_bank(*bank);
+				std::string err;
+				const auto back = vb::read_fc_bank(bytes.data(), bytes.size(), err);
+				const bool file_same = back && vb::write_fc_bank(*back) == bytes && std::string(back->prog[0].name) == "THIN    " &&
+				                       back->prog[1].arp[1] == 12 && back->prog[3].sweep == 12;
+				const bool file_cut = !vb::read_fc_bank(bytes.data(), bytes.size() - 20, err);
+				std::vector<u8> wild = bytes;
+				wild[28 + 8 + 1] = 200;                  // プログラム 1 のデューティの並びの長さに、ありえない値
+				const auto tamed = vb::read_fc_bank(wild.data(), wild.size(), err);
+				const bool file_clamped = tamed && tamed->prog[0].duty_len == 4;
+				check(same && wraps && wide2 < 0.02 && thin2 > 0.5 && arp_lo > 0.01 && arp_lo2 < 0.05 * arp_lo && arp_hi > 0.01 && arp_hi1 < 0.05 * arp_hi &&
+				      floor_now > 0.2 * floor_top && floor_now < 0.5 * floor_top && faded_now < 1e-9 &&
+				      sw_first > 3 * sw_first_lo && sw_late > 0.01 && live_before < 0.02 && live_after > 0.5 &&
+				      file_same && file_cut && file_clamped,
+				      "FC ボードの音色の組: 初期の組は今までと同じ音、書き換えた音色が鳴り、鳴っている音にも効き、ファイルに書いて読み戻せる",
+				      std::string("初期の組は") + (same ? "同じ" : "違う") + "、17 以降のくり返しは" + (wraps ? "同じ" : "違う") + "、2 倍音 1/2 " +
+				      std::to_string(wide2) + " 倍 → 1/8 " + std::to_string(thin2) + " 倍、アルペジオ 前半 440Hz " + std::to_string(arp_lo) + "（880Hz " +
+				      std::to_string(arp_lo2) + "）後半 880Hz " + std::to_string(arp_hi) + "（440Hz " + std::to_string(arp_hi1) + "）、止まる段 " +
+				      std::to_string(floor_now / std::max(1e-12, floor_top)) + " 倍（止めないと " + std::to_string(faded_now) + "）、ずれ 最初 880Hz " +
+				      std::to_string(sw_first) + "（440Hz " + std::to_string(sw_first_lo) + "）あと 440Hz " + std::to_string(sw_late) +
+				      "、押したまま 2 倍音 " + std::to_string(live_before) + " → " + std::to_string(live_after) + " 倍、読み戻し " +
+				      (file_same ? "同じ" : "違う") + "、欠けたファイルは" + (file_cut ? "断る" : "通る") + "、外れた値は" + (file_clamped ? "直す" : "そのまま"));
+			}
+
 			// 架空のボードを挿したまま起動すると、firmware の「Checking PLG」に答える（doc/plg-protocol.md）。
 			// firmware は UTIL → PLG にボードを並べ、そこの PartAssign を [VALUE] で変えるとボードのパートも動く。
 			// off まで回すとボードは外れた扱い。外から set_virtual_board で動かすと、メニューの値も付いてくる。
@@ -2397,6 +2505,22 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 					send({ 0xb0 | ch, 91, 0, 0xb0 | ch, 0, mu2000::board_bank_msb(ch), 0xb0 | ch, 32, 0, 0xc0 | ch, 0 });
 				const std::vector<double> p1 = play({ 0 }), p2 = play({ 1 }), p3 = play({ 2 }), all = play({ 0, 1, 2 });
 				const double a1 = tone(p1, 440), a3 = tone(p1, 1320), b1 = tone(p2, 440), b3 = tone(p2, 1320), c1 = tone(p3, 440), c3 = tone(p3, 1320);
+				// FC ボードの音色の組はボード 1 枚ごと: 差込口 3 のボードだけ、プログラム 1 をデューティ 1/8 にする。
+				// 差込口 3（パート 3）には 1/2 に無い 2 倍音が出て、差込口 1（パート 1）は元のまま
+				{
+					auto thin = std::make_shared<smu2000::vboard::fc_bank>();
+					thin->prog[0].duty[0] = 0;
+					t.mu.set_fc_bank(thin, "thin", 2);
+					const std::vector<double> q1 = play({ 0 }), q3 = play({ 2 });
+					const double own2 = tone(q3, 880) / tone(q3, 440), other2 = tone(q1, 880) / tone(q1, 440);
+					const bool paths = t.mu.fc_bank_path(2) == "thin" && t.mu.fc_bank_path(0).empty() && t.mu.fc_bank_path(mu2000::FC_BANK_MULTI).empty();
+					t.mu.set_fc_bank(nullptr, "", 2);
+					const std::vector<double> r3 = play({ 2 });
+					const double back2 = tone(r3, 880) / tone(r3, 440);
+					check(own2 > 0.5 && other2 < 0.05 && back2 < 0.05 && paths,
+					      "FC ボードの音色の組はボード 1 枚ごと: 差込口 3 の組を替えても、差込口 1 のボードの音は変わらない",
+					      "2 倍音 差込口 3 " + std::to_string(own2) + " 倍、差込口 1 " + std::to_string(other2) + " 倍、組を外すと " + std::to_string(back2) + " 倍" + (paths ? "" : "、ファイルの場所が違う"));
+				}
 				// パート 2 に差込口 1 のバンクを選ぶ: ボードは鳴らず、内蔵の音（倍音のある別の音）
 				send({ 0xb1, 0, mu2000::board_bank_msb(0), 0xb1, 32, 0, 0xc1, 0 });
 				const bool wrong_bank_idle = !t.mu.virtual_board_playing(1);

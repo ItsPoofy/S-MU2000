@@ -331,6 +331,23 @@ public:
 		m_vb_fm_path = path;
 	}
 	const std::string &fm_bank_path() const { return m_vb_fm_path; }
+	// FC ボードの音色の組（src/vboard.h の fc_bank。nullptr なら初期の 16 個）と、そのファイルの場所。
+	// **ボード 1 枚ごとに別の組**: target 0-2 は差込口 PLG-1・2・3 の 1 パートの FC ボード、FC_BANK_MULTI は 16 パートの FC ボード
+	// （16 チャンネルとも同じ組）。音を作る糸から呼ぶこと
+	enum { FC_BANK_MULTI = 3, FC_BANKS = 4 };       // 差込口の数（PLG_SLOTS）+ 1
+	void set_fc_bank(std::shared_ptr<const smu2000::vboard::fc_bank> bank, const std::string &path, int target)
+	{
+		if (target < 0 || target >= FC_BANKS)
+			return;
+		if (target == FC_BANK_MULTI)
+			for (vb_chan &c : m_vb16)
+				c.fc.set_bank(bank);
+		else
+			m_vbs[size_t(target)].fc.set_bank(bank);
+		m_vb_fc_bank[target] = std::move(bank);
+		m_vb_fc_path[target] = path;
+	}
+	const std::string &fc_bank_path(int target) const { return m_vb_fc_path[std::clamp(target, 0, FC_BANKS - 1)]; }
 	std::shared_ptr<const smu2000::vboard::user_board> user_board() const { return m_vb_user_board; }
 	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
 	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
@@ -375,6 +392,7 @@ public:
 	// ボードのバンクは差込口ごとに違う（MSB 90・91・92、LSB 0。board_bank_msb）。マルチパートのボードは口 E を
 	// 1 つしか持てないので 1 枚だけ（別の差込口に挿すと、前のものは外れる）
 	enum { PLG_SLOTS = 3 };
+	static_assert(int(FC_BANK_MULTI) == int(PLG_SLOTS), "one FC voice set per slot, then the 16-part board");
 	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号（差込口 1。2・3 は 91・92）
 	static int board_bank_msb(int slot) { return VBOARD_BANK_MSB + std::clamp(slot, 0, PLG_SLOTS - 1); }
 	bool virtual_board_playing(int slot = 0) const { return vbs(slot).active(); }  // いまボードのバンクが選ばれている
@@ -1163,6 +1181,8 @@ private:
 	smu2000::vboard::user_synth m_vb_user16;
 	smu2000::vboard::fm_synth m_vb_fm;         // VBOARD_FM16 の音源
 	std::string m_vb_fm_path;                  // その音色の組のファイル（設定に覚えるため）
+	std::shared_ptr<const smu2000::vboard::fc_bank> m_vb_fc_bank[FC_BANKS];   // FC ボードの音色の組（ボードごと。無ければ初期の音色）
+	std::string m_vb_fc_path[FC_BANKS];
 	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
 	std::string m_vb_user_path;
 	vb_parse m_vb16_parse;
