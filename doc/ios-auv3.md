@@ -74,9 +74,8 @@ Two facts shape the design:
 
   | concern | macOS | Linux |
   |---|---|---|
-  | audio out | `src/ui/audio_apple.mm` (shared: render path *and* the class) + `audio_out_mac.cpp` (HAL only) | WASAPI version |
-  | audio in | `src/ui/audio_apple.mm` (same file) + `audio_in_mac.cpp` (HAL only) | — |
-  | session | `src/ui/session_mac.cpp` (nothing to watch) | — |
+  | audio out | `src/ui/audio_out_mac.cpp` (the AudioUnit, fed 44100 Hz) | WASAPI version |
+  | audio in | `src/ui/audio_in_mac.cpp` | — |
   | MIDI in | `src/ui/midi_in_apple.cpp` (160) | `src/ui/midi_in_linux.cpp` |
   | MIDI out | `src/ui/midi_out_apple.cpp` (256) | `src/ui/midi_out_linux.cpp` |
   | window | `src/ui/window_mac.mm` (637) | `gui_linux.cpp` |
@@ -85,17 +84,20 @@ Two facts shape the design:
 
   - `midi_in_ios.cpp` / `midi_out_ios.cpp` — **CoreMIDI is the same API on iOS**, so these
     should be close to copies of the macOS ones.
-  - `audio_out_ios.mm` / `audio_in_ios.mm` — the answers to what the engine cannot ask, and
-    `session_ios.{h,mm}` — the `AVAudioSession` they ask them of.
+  - `audio_out_ios.mm` / `audio_in_ios.mm` — the answers to what the engine cannot ask,
+    `session_ios.{h,mm}` — the `AVAudioSession` they ask them of, and
+    `audio_core_ios.{h,mm}` — the render block, the input tap, the resampler and the
+    ring, which both directions share.
     **What this study got wrong:** the audio was expected to be the one genuinely rewritten
     part, and it isn't. `AVAudioEngine`'s input and output nodes hand out the very `AudioUnit`
-    a hand-written backend owns, so device, buffer size, stream format and workgroup are the
-    same properties on both systems. The render path therefore became
-    `src/ui/audio_apple.mm`, shared with macOS, and what stays per platform is the short list
-    in `src/ui/audio_apple.h`: the session (iOS), device enumeration and hog mode (macOS).
-    `audio_out`'s and `audio_in`'s own methods live in `audio_apple.mm` too, so the platform
-    files hold answers only, one per direction, with the session each platform has beside
-    them in `session_ios.mm` and `session_mac.cpp`.
+    a hand-written backend owns, so the workgroup read is the same property on both systems.
+    That much is shared. What is *not* shared is the rest: iOS ships no public AudioHardware
+    HAL (`AudioObject*` appears in no header, only in `CoreAudio.tbd`), so
+    `audio_out_mac.cpp`/`audio_in_mac.cpp` cannot compile there at all and the back end is
+    written from scratch against the session's route and ports.
+    The macOS back end is left exactly as it was — an owned `AudioUnit` fed 44100 Hz with
+    CoreAudio converting — so a shared render path is its own change, with its own review
+    (`src/ui/audio_core_ios.{h,mm}` is what it would share).
   - `window_ios.mm` — UIKit + the same `CAMetalLayer`/Metal/ImGui stack.
 
 #### A design decision worth making deliberately

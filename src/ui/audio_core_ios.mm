@@ -1,13 +1,12 @@
 // license:BSD-3-Clause
 //
-// The shared half of Apple audio: one AVAudioEngine, one source node, one
-// render block, for macOS and iOS alike. See audio_apple.h for why the two
-// platforms share this and what stays apart.
+// The iOS audio back end: one AVAudioEngine, one source node, one render block.
+// See audio_core_ios.h for why it is written this way.
 //
-// The work is the same on both: call fill, convert to what the unit wants,
-// count, and hand the device's workgroup to the parallel slave thread. What
-// differs between the platforms is the questions in namespace apple, asked from
-// below.
+// The work: call fill, convert to what the unit wants, count, and hand the
+// device's workgroup to the parallel slave thread. What only iOS knows - the
+// route, the permission, the available inputs - is asked from below, through
+// namespace ios_audio.
 //
 // AVFAudio directly rather than through AVFoundation's re-export: this file
 // needs the engine and the source node. Verified against the SDK headers rather
@@ -18,7 +17,7 @@
 #import <AVFAudio/AVFAudio.h>
 #import <Foundation/Foundation.h>
 
-#include "ui/audio_apple.h"
+#include "ui/audio_core_ios.h"
 #include "ui/audio_in.h"
 #include "ui/cpu_meter.h"
 #include "ui/resampler.h"
@@ -60,11 +59,11 @@ static void zero_buffers(AudioBufferList *abl)
 			std::memset(abl->mBuffers[i].mData, 0, abl->mBuffers[i].mDataByteSize);
 }
 
-struct apple_audio_out::impl {
+struct ios_audio_out::impl {
 	fill_fn fill = nullptr;
 
-	apple::device_ref dev;      // what the request resolved to
-	apple::device_claim claim;  // and whether taking it is what got it
+	ios_audio::device_ref dev;      // what the request resolved to
+	ios_audio::device_claim claim;  // and whether taking it is what got it
 
 	AVAudioEngine *engine = nil;
 	AVAudioSourceNode *src = nil;
@@ -76,7 +75,7 @@ struct apple_audio_out::impl {
 	std::string dev_name;
 
 	std::atomic<bool> running{false};
-	std::atomic<bool> taken{false};   // macOS: the device is ours alone
+	std::atomic<bool> taken{false};   // whether the device is ours alone
 	std::atomic<u32> buffer_frames{0};    // what the last block actually was
 	u32 granted_frames = 0;               // what the platform granted, pre-roll
 	double dev_rate = double(AUDIO_RATE);
@@ -96,17 +95,17 @@ struct apple_audio_out::impl {
 	std::atomic<u64> callbacks{0};
 };
 
-apple_audio_out::apple_audio_out()
+ios_audio_out::ios_audio_out()
 	: m(new impl)
 {
 }
 
-apple_audio_out::~apple_audio_out()
+ios_audio_out::~ios_audio_out()
 {
 	stop();
 }
 
-bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
+bool ios_audio_out::start(const request &r, fill_fn fill, std::string &err)
 {
 	if (m->running.load(std::memory_order_acquire))
 		stop();
@@ -114,7 +113,7 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 
 	// The session comes first: the category and the rate decide what the engine
 	// is handed, and on iOS an unconfigured session refuses to start one at all.
-	if (!apple::session_open(r.latency_ms, err))
+	if (!ios_audio::session_open(r.latency_ms, err))
 		return false;
 
 	AVAudioEngine *engine = [[AVAudioEngine alloc] init];
@@ -151,19 +150,18 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 		             double(AUDIO_RATE), rate);
 
 	// Which device the request means, then its buffer size. Both before the
-	// engine runs: macOS writes the device's buffer frame size here, which is
-	// what --latency has always meant on that side, and the unit negotiates
-	// against it once it opens.
-	m->dev = apple::resolve_output(r.device, r.exact);
+	// engine runs, so the unit negotiates against what --latency asked for
+	// once it opens.
+	m->dev = ios_audio::resolve_output(r.device, r.exact);
 	if (!m->dev.found) {
 		err = r.device.empty() ? CLI_T("No audio output found", "音声の出口が見つからない")
 		                       : CLI_T("No audio output with that name: ", "その名前の音声の出口が見つからない: ")
 		                             + r.device;
 		return false;
 	}
-	m->granted_frames = apple::request_buffer_frames(m->dev, r.latency_ms);
+	m->granted_frames = ios_audio::request_buffer_frames(m->dev, r.latency_ms);
 
-	apple_audio_out::impl *im = m.get();
+	ios_audio_out::impl *im = m.get();
 	AVAudioSourceNode *src = [[AVAudioSourceNode alloc]
 		initWithRenderBlock:^OSStatus(BOOL *isSilence, const AudioTimeStamp *ts,
 		                              AVAudioFrameCount n, AudioBufferList *abl) {
@@ -227,14 +225,13 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 				        mach_tps() * 1000.0,
 				    std::memory_order_relaxed);
 			}
-			// The overrun proxy CoreAudio has no better name for: we took longer
-			// to make the block than the block is worth. Counted on both
-			// platforms now, where before only the AudioUnit callback had it.
+			// The overrun CoreAudio has no better name for: we took longer to
+			// make the block than the block is worth.
 			if (double(busy) / mach_tps() > double(n) / im->dev_rate)
 				im->starved.fetch_add(1, std::memory_order_relaxed);
 			// What the machine made, before any conversion, which is what a
-			// capture means on both platforms. The only allocation on this
-			// path, and only while --dump-dev asked for it.
+			// capture means. The only allocation on this path, and only while
+			// --dump-dev asked for it.
 			if (im->cap && want > 0)
 				im->cap->insert(im->cap->end(), im->scratch.data(),
 				                im->scratch.data() + size_t(want) * 2);
@@ -257,7 +254,7 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 	NSError *e = nil;
 	// The device is pinned before the connection, because the format is
 	// negotiated against whichever device the unit holds.
-	if (!apple::pin_output([out_node audioUnit], m->dev, err)) {
+	if (!ios_audio::pin_output([out_node audioUnit], m->dev, err)) {
 		[engine detachNode:src];
 		return false;
 	}
@@ -270,7 +267,7 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 
 	m->engine = engine;
 	m->src = src;
-	m->dev_name = apple::output_label(m->dev, rate);
+	m->dev_name = ios_audio::output_label(m->dev, rate);
 	m->running.store(true, std::memory_order_release);
 	m->callbacks.store(0, std::memory_order_relaxed);
 	m->spikes.store(0, std::memory_order_relaxed);
@@ -279,11 +276,9 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 	// The device is claimed after IO has started, as it always was: claiming
 	// first can leave a device that cannot be mixed unopenable, and a refused
 	// claim still plays - it surfaces through exclusive(), not a failed start.
-	// Taking it changes the device's mixability, so the HAL rebuilds its IO
-	// under us and the engine is started again on the new one (macOS only).
 	if (r.exclusive) {
 		std::string hog_err;
-		m->claim = apple::take_output(m->dev, hog_err);
+		m->claim = ios_audio::take_output(m->dev, hog_err);
 		m->taken.store(m->claim.took, std::memory_order_relaxed);
 		if (m->claim.took) {
 			[engine stop];
@@ -297,7 +292,7 @@ bool apple_audio_out::start(const request &r, fill_fn fill, std::string &err)
 	return true;
 }
 
-void apple_audio_out::restart()
+void ios_audio_out::restart()
 {
 	AVAudioEngine *engine = m->engine;
 	if (!engine || !m->running.load(std::memory_order_acquire))
@@ -309,7 +304,7 @@ void apple_audio_out::restart()
 		             e ? [[e localizedDescription] UTF8String] : "?");
 }
 
-void apple_audio_out::stop()
+void ios_audio_out::stop()
 {
 	if (!m->running.exchange(false))
 		return;
@@ -323,9 +318,9 @@ void apple_audio_out::stop()
 	if (engine)
 		[engine stop];
 	m->fill = nullptr;
-	apple::unpin_output();
-	apple::release_output(m->claim);
-	m->claim = apple::device_claim();
+	ios_audio::unpin_output();
+	ios_audio::release_output(m->claim);
+	m->claim = ios_audio::device_claim();
 	m->taken.store(false, std::memory_order_relaxed);
 	// What the worst spike was, and when: a 40 ms callback is four times a
 	// 512-frame buffer, so this line is where the crack gets explained (or not).
@@ -344,22 +339,22 @@ void apple_audio_out::stop()
 	}
 }
 
-bool apple_audio_out::running() const
+bool ios_audio_out::running() const
 {
 	return m->running.load(std::memory_order_relaxed);
 }
 
-const std::string &apple_audio_out::device_name() const
+const std::string &ios_audio_out::device_name() const
 {
 	return m->dev_name;
 }
 
-bool apple_audio_out::exclusive() const
+bool ios_audio_out::exclusive() const
 {
 	return m->taken.load(std::memory_order_relaxed);
 }
 
-void *apple_audio_out::realtime_workgroup()
+void *ios_audio_out::realtime_workgroup()
 {
 	if (!m->engine || !m->engine.isRunning)
 		return nullptr;
@@ -383,7 +378,7 @@ void *apple_audio_out::realtime_workgroup()
 	return nullptr;
 }
 
-void apple_audio_out::set_capture(const std::string &path)
+void ios_audio_out::set_capture(const std::string &path)
 {
 	// Same convention as every backend: the flag says capture was asked for, so
 	// the render block knows to append rather than to skip a null check.
@@ -397,12 +392,12 @@ void apple_audio_out::set_capture(const std::string &path)
 	m->cap = &m_cap;
 }
 
-u64 apple_audio_out::capture_frames() const
+u64 ios_audio_out::capture_frames() const
 {
 	return m_cap.size() / 2;
 }
 
-bool apple_audio_out::write_capture(std::string &err)
+bool ios_audio_out::write_capture(std::string &err)
 {
 	if (m_cap_path.empty()) {
 		err = CLI_T("No output file was given", "書き出す先が決まっていない");
@@ -413,12 +408,12 @@ bool apple_audio_out::write_capture(std::string &err)
 	return write_wav(m_cap_path, m_cap, err, AUDIO_RATE);
 }
 
-u64 apple_audio_out::produced() const
+u64 ios_audio_out::produced() const
 {
 	return m->produced.load(std::memory_order_relaxed);
 }
 
-u32 apple_audio_out::buffer_frames() const
+u32 ios_audio_out::buffer_frames() const
 {
 	// What the last block actually was, once there has been one. Before the
 	// first callback the granted size is the honest answer, and on iOS it used
@@ -427,19 +422,19 @@ u32 apple_audio_out::buffer_frames() const
 	return seen ? seen : m->granted_frames;
 }
 
-u64 apple_audio_out::starved() const
+u64 ios_audio_out::starved() const
 {
 	return m->starved.load(std::memory_order_relaxed);
 }
 
-bool apple_audio_out::mmcss() const
+bool ios_audio_out::mmcss() const
 {
 	// The engine's render thread is real-time by construction - the counterpart
 	// of registering with MMCSS on Windows, with nothing to register.
 	return m->running.load(std::memory_order_relaxed);
 }
 
-double apple_audio_out::cpu_percent() const
+double ios_audio_out::cpu_percent() const
 {
 	const u64 busy = m->busy_ticks.load(std::memory_order_relaxed);
 	const u64 prod = m->produced.load(std::memory_order_relaxed);
@@ -449,12 +444,12 @@ double apple_audio_out::cpu_percent() const
 	return 100.0 * double(busy) / (mach_tps() * double(prod) / m->dev_rate);
 }
 
-double apple_audio_out::worst_ms() const
+double ios_audio_out::worst_ms() const
 {
 	return 1000.0 * double(m->worst_ticks.load(std::memory_order_relaxed)) / mach_tps();
 }
 
-double apple_audio_out::cpu_recent() const
+double ios_audio_out::cpu_recent() const
 {
 	return m->meter.value();
 }
@@ -479,11 +474,10 @@ static inline float tap_sample(const float *const *chans, AVAudioFormat *fmt,
 //
 // Recording is the same shape as playback with the arrow reversed: the engine
 // hands us buffers, we convert them to 44100 Hz s16 stereo and push them into a
-// ring, and pop() takes them out one pair at a time. The buffers arrive the same
-// way on both platforms - tapped off the engine - so the format asked for is
+// ring, and pop() takes them out one pair at a time. The format asked for is
 // the engine's own input format rather than one this file decides.
 
-struct apple_audio_in::impl {
+struct ios_audio_in::impl {
 	static constexpr u32 RING = 1 << 16, MASK = RING - 1;      // 約 1.5 秒
 	static constexpr u32 TARGET_FRAMES = 2205;                  // 50ms
 	static constexpr u32 DROP_FRAMES = 8820;                    // 200ms を超えたら捨てる
@@ -520,32 +514,32 @@ struct apple_audio_in::impl {
 	}
 };
 
-apple_audio_in::apple_audio_in()
+ios_audio_in::ios_audio_in()
 	: m(new impl)
 {
 }
 
-apple_audio_in::~apple_audio_in()
+ios_audio_in::~ios_audio_in()
 {
 	stop();
 }
 
-bool apple_audio_in::start(const std::string &device, std::string &err)
+bool ios_audio_in::start(const std::string &device, std::string &err)
 {
 	stop();
 	// Three questions before any engine exists, in the order they have always
 	// been asked: which device did the name mean, may we record, does the
 	// session take the request. A bad name is a cheaper thing to say than a
 	// permission prompt.
-	const apple::device_ref dev = apple::resolve_input(device, false);
+	const ios_audio::device_ref dev = ios_audio::resolve_input(device, false);
 	if (!dev.found) {
 		err = device.empty() ? CLI_T("No recording device", "録音デバイスが無い")
 		                     : CLI_T("No recording device with that name", "その名前の録音デバイスは無い");
 		return false;
 	}
-	if (!apple::input_permission(err))
+	if (!ios_audio::input_permission(err))
 		return false;
-	if (!apple::session_open_input(err))
+	if (!ios_audio::session_open_input(err))
 		return false;
 
 	AVAudioEngine *engine = [[AVAudioEngine alloc] init];
@@ -553,16 +547,16 @@ bool apple_audio_in::start(const std::string &device, std::string &err)
 	// The pin comes before the format, for the same reason the output side's
 	// does: what the unit is allowed to record is decided by which device it
 	// holds.
-	if (!apple::pin_input([node audioUnit], dev, err))
+	if (!ios_audio::pin_input([node audioUnit], dev, err))
 		return false;
 
 	// The tap asks for the device's own format, whatever that is. Asking for
 	// 2ch interleaved instead looks harmless - the tap is accepted and the
 	// engine starts - but on a mono device the block is then never called at
-	// all, so the machine hears silence and nothing says why. Measured on
-	// macOS with a bare engine: a 1ch device delivered 48000 frames in 10
-	// callbacks on its own format and zero on a forced 2ch one. The block
-	// below folds the channels instead.
+	// all, so the machine hears silence and nothing says why. Measured with a
+	// bare engine: a 1ch device delivered 48000 frames in 10 callbacks on its
+	// own format and zero on a forced 2ch one. The block below folds the
+	// channels instead.
 	AVAudioFormat *tap = [node inputFormatForBus:0];
 	const double rate = tap.sampleRate;
 	if (!(rate > 0.0) || tap.channelCount < 1) {
@@ -572,7 +566,7 @@ bool apple_audio_in::start(const std::string &device, std::string &err)
 	m->dev_rate = rate;
 	m->rs.configure(rate, double(AUDIO_RATE));
 
-	apple_audio_in::impl *im = m.get();
+	ios_audio_in::impl *im = m.get();
 	[node installTapOnBus:0 bufferSize:1024 format:tap
 	                block:^(AVAudioPCMBuffer *buf, AVAudioTime *when) {
 		                (void)when;
@@ -625,7 +619,7 @@ bool apple_audio_in::start(const std::string &device, std::string &err)
 
 	m->engine = engine;
 	m->dev_name = dev.name;
-	m->fmt_line = apple::input_label(dev, rate, 2);
+	m->fmt_line = ios_audio::input_label(dev, rate, 2);
 	m->m_w.store(0);
 	m->m_r.store(0);
 	m->running.store(true, std::memory_order_release);
@@ -633,7 +627,7 @@ bool apple_audio_in::start(const std::string &device, std::string &err)
 	return true;
 }
 
-void apple_audio_in::restart()
+void ios_audio_in::restart()
 {
 	AVAudioEngine *engine = m->engine;
 	if (!engine || !m->running.load(std::memory_order_acquire))
@@ -645,7 +639,7 @@ void apple_audio_in::restart()
 		             e ? [[e localizedDescription] UTF8String] : "?");
 }
 
-void apple_audio_in::stop()
+void ios_audio_in::stop()
 {
 	if (!m->running.exchange(false))
 		return;
@@ -659,42 +653,42 @@ void apple_audio_in::stop()
 	}
 }
 
-bool apple_audio_in::running() const
+bool ios_audio_in::running() const
 {
 	return m->running.load(std::memory_order_acquire);
 }
 
-const std::string &apple_audio_in::device_name() const
+const std::string &ios_audio_in::device_name() const
 {
 	return m->dev_name;
 }
 
-std::string apple_audio_in::format_line() const
+std::string ios_audio_in::format_line() const
 {
 	return m->fmt_line;
 }
 
-u64 apple_audio_in::empty_count() const
+u64 ios_audio_in::empty_count() const
 {
 	return m->m_empty.load(std::memory_order_relaxed);
 }
 
-u64 apple_audio_in::dropped_count() const
+u64 ios_audio_in::dropped_count() const
 {
 	return m->m_dropped.load(std::memory_order_relaxed);
 }
 
-void apple_audio_in::pop(s32 &l, s32 &r)
+void ios_audio_in::pop(s32 &l, s32 &r)
 {
-	apple_audio_in::impl &im = *m;
+	ios_audio_in::impl &im = *m;
 	u32 rd = im.m_r.load(std::memory_order_relaxed);
 	const u32 wr = im.m_w.load(std::memory_order_acquire);
-	u32 level = (wr - rd) & apple_audio_in::impl::MASK;
-	if (level > apple_audio_in::impl::DROP_FRAMES) {
+	u32 level = (wr - rd) & ios_audio_in::impl::MASK;
+	if (level > ios_audio_in::impl::DROP_FRAMES) {
 		// Too far behind to catch up frame by frame: jump to a sane distance and
 		// say so, which is what the counter is for.
-		rd = (wr - apple_audio_in::impl::TARGET_FRAMES) & apple_audio_in::impl::MASK;
-		level = apple_audio_in::impl::TARGET_FRAMES;
+		rd = (wr - ios_audio_in::impl::TARGET_FRAMES) & ios_audio_in::impl::MASK;
+		level = ios_audio_in::impl::TARGET_FRAMES;
 		im.m_dropped.fetch_add(1, std::memory_order_relaxed);
 	}
 	if (!level) {
@@ -705,19 +699,18 @@ void apple_audio_in::pop(s32 &l, s32 &r)
 	}
 	l = im.m_ring[rd * 2];
 	r = im.m_ring[rd * 2 + 1];
-	im.m_r.store((rd + 1) & apple_audio_in::impl::MASK, std::memory_order_relaxed);
+	im.m_r.store((rd + 1) & ios_audio_in::impl::MASK, std::memory_order_relaxed);
 }
 
 
-// ---- audio_out: the class, shared by both platforms ------------------------
+// ---- audio_out: the class -----------------------------------------------------
 //
 // Every method is one line, because the work behind it is above: the render
-// path, the engine, the nodes, the counters. Which platform owns a given
-// question is answered in namespace apple, which is all the platform files
-// contain.
+// path, the engine, the nodes, the counters. The questions that work asks are
+// answered in namespace ios_audio, which is all audio_out_ios.mm contains.
 
 struct audio_out::impl {
-	std::unique_ptr<apple_audio_out> core = std::make_unique<apple_audio_out>();
+	std::unique_ptr<ios_audio_out> core = std::make_unique<ios_audio_out>();
 };
 
 audio_out::audio_out()
@@ -732,17 +725,17 @@ audio_out::~audio_out()
 
 std::vector<std::string> audio_out::list()
 {
-	return apple::output_list();
+	return ios_audio::output_list();
 }
 
 bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclusive,
                       const std::string &device, bool raw, bool exact)
 {
-	// raw bypasses the system mixer, and there is nothing to bypass on either
-	// platform: the system does the format conversion rather than a driver
-	// mixer. It is in the signature only so both take the same call.
+	// raw bypasses the system mixer, and there is nothing to bypass: the system
+	// does the format conversion rather than a driver mixer. It is in the
+	// signature only so every back end takes the same call.
 	(void)raw;
-	apple_audio_out::request r;
+	ios_audio_out::request r;
 	r.latency_ms = latency_ms;
 	r.device = device;
 	r.exact = exact;
@@ -756,13 +749,13 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 		return false;
 	// Watch the session while we are running (see watch_output_session): the
 	// engine stops itself when headphones appear or a call arrives.
-	apple::watch_output_session([core = m_impl->core.get()] { core->restart(); });
+	ios_audio::watch_output_session([core = m_impl->core.get()] { core->restart(); });
 	return true;
 }
 
 void audio_out::stop()
 {
-	apple::watch_output_session(nullptr);
+	ios_audio::watch_output_session(nullptr);
 	m_impl->core->stop();
 }
 
@@ -838,13 +831,13 @@ double audio_out::cpu_recent() const
 }
 
 
-// ---- audio_in: the class, shared by both platforms ------------------------
+// ---- audio_in: the class ------------------------------------------------------
 //
 // One line per method, for the same reason audio_out's are: the tap, the ring,
 // the resampler and the counters are above.
 
 struct audio_in::impl {
-	std::unique_ptr<apple_audio_in> core = std::make_unique<apple_audio_in>();
+	std::unique_ptr<ios_audio_in> core = std::make_unique<ios_audio_in>();
 };
 
 audio_in::audio_in()
@@ -859,7 +852,7 @@ audio_in::~audio_in()
 
 std::vector<std::string> audio_in::list()
 {
-	return apple::input_list();
+	return ios_audio::input_list();
 }
 
 bool audio_in::start(const std::string &device, std::string &err)
@@ -868,13 +861,13 @@ bool audio_in::start(const std::string &device, std::string &err)
 		return false;
 	// A route change stops the input engine too (mic unplugged, category
 	// flipped), so it is watched the same way output is.
-	apple::watch_input_session([core = m_impl->core.get()] { core->restart(); });
+	ios_audio::watch_input_session([core = m_impl->core.get()] { core->restart(); });
 	return true;
 }
 
 void audio_in::stop()
 {
-	apple::watch_input_session(nullptr);
+	ios_audio::watch_input_session(nullptr);
 	m_impl->core->stop();
 }
 
