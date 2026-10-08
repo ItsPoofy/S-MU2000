@@ -24,11 +24,13 @@ struct audio_preferences {
 struct audio_output_config {
 	std::string device; // empty: follow the system output
 	audio_preferences preferences;
+	bool control_panel = false; // one-time request, never persisted
 	bool operator==(const audio_output_config &) const = default;
 };
 
 struct audio_channel_route {
 	std::string device;
 	int left = 0, right = 1;
+	audio_driver driver = audio_driver::native;
 };
 } // namespace ui

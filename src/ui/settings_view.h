@@ -15,6 +15,7 @@ struct settings_state {
 	settings_page page = settings_page::audio;
 	audio_output_config audio;
 	audio_stream_info stream;
+	std::array<std::vector<std::string>, 3> driver_outputs;
 	std::vector<std::string> outputs, inputs;
 	std::string input, error;
 	bool ready = false, busy = false, connected = false;
@@ -24,6 +25,7 @@ struct settings_state {
 
 struct settings_actions {
 	std::function<void(audio_output_config)> audio;
+	std::function<void()> control_panel;
 	std::function<void(std::string)> input;
 	std::function<void(int)> command, language;
 	std::function<void(float)> volume;
@@ -58,7 +60,7 @@ public:
 		for (const auto &[page, label] : std::array<std::pair<settings_page, const char *>, 3>{
 		         {{settings_page::general, UI_TEXT(settings_general, "General")},
 		          {settings_page::audio, UI_TEXT(settings_audio, "Audio")},
-		          {settings_page::emulation, UI_TEXT(settings_emulation, "Emulation")}}}) {
+				          {settings_page::emulation, UI_TEXT(settings_emulation, "Emulation")}}}) {
 			if (ImGui::Selectable(label, m_state.page == page)) m_state.page = page;
 		}
 		ImGui::EndChild();
@@ -106,15 +108,26 @@ private:
 		const audio_output_config before = m_draft;
 		ImGui::SeparatorText(UI_TEXT(settings_audio, "Audio"));
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
-		device_combo(UI_TEXT(menu_audio_title, "Audio output device"), m_state.outputs, m_draft.device,
+		if (ImGui::BeginCombo(UI_TEXT(settings_driver, "Driver"), audio_driver_name(m_draft.preferences.stream.driver))) {
+			for (int d = 0; d < 3; d++) if (supported_audio_driver(audio_driver(d))) {
+				if (ImGui::Selectable(audio_driver_name(audio_driver(d)), m_draft.preferences.stream.driver == audio_driver(d))) {
+					m_draft.preferences.stream.driver = audio_driver(d);
+					m_draft.device.clear(); m_draft.preferences.exclusive = false;
+					m_draft.preferences.stream.sample_rate = 0; m_draft.preferences.stream.buffer_frames = 0;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		device_combo(UI_TEXT(menu_audio_title, "Audio output device"), (m_draft.preferences.stream.driver == m_state.audio.preferences.stream.driver ? m_state.outputs : m_state.driver_outputs[size_t(m_draft.preferences.stream.driver)]), m_draft.device,
 		             UI_TEXT(menu_audio_default, "System default"));
 #if !defined(__linux__)
-		if (ImGui::Checkbox(UI_TEXT(settings_exclusive, "Exclusive access"), &m_draft.preferences.exclusive))
+		if (m_draft.preferences.stream.driver == audio_driver::native && ImGui::Checkbox(UI_TEXT(settings_exclusive, "Exclusive access"), &m_draft.preferences.exclusive))
 			m_draft.preferences.stream.sample_rate = 0;
 #endif
 		// Capabilities describe the opened device, not an unverified draft.
 		const bool same_device = m_draft.device == m_state.audio.device &&
-		                        m_draft.preferences.exclusive == m_state.audio.preferences.exclusive;
+		                        m_draft.preferences.exclusive == m_state.audio.preferences.exclusive &&
+		                        m_draft.preferences.stream.driver == m_state.audio.preferences.stream.driver;
 		ImGui::BeginDisabled(!same_device);
 		char rate_label[64];
 		std::snprintf(rate_label, sizeof(rate_label), "%d Hz", m_draft.preferences.stream.sample_rate);
@@ -158,7 +171,7 @@ private:
 			}
 			ImGui::EndCombo();
 		}
-		ImGui::BeginDisabled(m_draft.preferences.stream.buffer_frames != 0);
+		ImGui::BeginDisabled(m_draft.preferences.stream.buffer_frames != 0 || m_draft.preferences.stream.driver == audio_driver::asio);
 		ImGui::SliderInt(UI_TEXT(settings_latency, "Automatic buffer target (ms)"), &m_draft.preferences.latency_ms, 5, 200);
 		const bool latency_active = ImGui::IsItemActive();
 		const bool latency_done = ImGui::IsItemDeactivatedAfterEdit();
@@ -172,6 +185,9 @@ private:
 		}
 		ImGui::EndDisabled();
 		if ((m_draft != before && !latency_active) || latency_done) m_actions.audio(m_draft);
+		if (m_state.stream.control_panel && same_device && !m_state.busy) {
+			if (ImGui::Button(UI_TEXT(settings_control_panel, "Driver Control Panel..."))) m_actions.control_panel();
+		}
 		if (m_state.busy) ImGui::TextUnformatted(UI_TEXT(settings_opening, "Opening audio device..."));
 		if (!m_state.error.empty()) ImGui::TextWrapped("%s", m_state.error.c_str());
 		ImGui::Separator();
@@ -193,13 +209,13 @@ private:
 		ImGui::SeparatorText(UI_TEXT(settings_emulation, "Emulation"));
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
 		bool fx = m_state.native_fx;
-		if (ImGui::Checkbox(UI_TEXT(settings_native_fx, "Play effects in C++"), &fx)) m_actions.command(ID_NATIVE_FX);
+		if (ImGui::Checkbox(UI_TEXT(menu_native_fx, "Play effects in C++"), &fx)) m_actions.command(ID_NATIVE_FX);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_native_fx_tip, "Runs effects in C++ to reduce CPU use.\nSome effects may sound different."));
 		bool thin = m_state.thin_bends;
-		if (ImGui::Checkbox(UI_TEXT(settings_thin_bends, "Lighten heavy MIDI"), &thin)) m_actions.command(ID_THIN_BENDS);
+		if (ImGui::Checkbox(UI_TEXT(menu_thin_bends, "Lighten heavy MIDI"), &thin)) m_actions.command(ID_THIN_BENDS);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_thin_bends_tip, "During MIDI-file playback, reduces pitch-bend updates\nand skips Roland display data."));
 		bool engine = m_state.native_engine;
-		if (ImGui::Checkbox(UI_TEXT(settings_native_engine, "Play without the firmware"), &engine)) m_actions.command(ID_NATIVE_ENGINE);
+		if (ImGui::Checkbox(UI_TEXT(menu_native_engine, "Play without the firmware"), &engine)) m_actions.command(ID_NATIVE_ENGINE);
 		ImGui::SetItemTooltip("%s", UI_TEXT(settings_native_engine_tip, "Handles MIDI and notes in C++ to reduce CPU use.\nSound and feature support may differ from firmware playback."));
 		ImGui::EndDisabled();
 	}

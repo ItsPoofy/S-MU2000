@@ -891,12 +891,12 @@ public:
 		if (!audio_ready.load() || audio_job.busy() || !out || !eng || !state) return;
 		if (state->load() != 1 && !audio_failed) return;
 		if (reboot.joinable()) join_reboot();
-		if (wanted.device != audio_name) {
+		if (wanted.device != audio_name || wanted.preferences.stream.driver != audio_settings.stream.driver) {
 			wanted.preferences.stream.sample_rate = 0;
 			wanted.preferences.stream.left = 0;
 			wanted.preferences.stream.right = 1;
-			const std::string key = wanted.device.empty() ? audio_out::default_device_name() : audio_device_key(wanted.device);
-			for (const auto &route : audio_routes) if (route.device == key) {
+			const std::string key = wanted.device.empty() ? audio_out::default_device_name(wanted.preferences.stream.driver) : audio_device_key(wanted.device);
+			for (const auto &route : audio_routes) if (route.device == key && route.driver == wanted.preferences.stream.driver) {
 				wanted.preferences.stream.left = route.left;
 				wanted.preferences.stream.right = route.right;
 			}
@@ -915,7 +915,7 @@ public:
 		if (!audio_name.empty()) {
 			const std::string opened = out->device_name();
 			audio_name = opened;
-			for (const auto &name : audio_out::list())
+			for (const auto &name : audio_out::list(audio_settings.stream.driver))
 				if (name == opened || name.substr(0, name.find("  (")) == opened) {
 					audio_name = name;
 					break;
@@ -934,8 +934,8 @@ public:
 			audio_name = pending_audio.device;
 			audio_settings = pending_audio.preferences;
 			const std::string device = out->device_name();
-			auto it = std::find_if(audio_routes.begin(), audio_routes.end(), [&](const auto &r) { return r.device == device; });
-			const audio_channel_route route{device, audio_settings.stream.left, audio_settings.stream.right};
+			auto it = std::find_if(audio_routes.begin(), audio_routes.end(), [&](const auto &r) { return r.device == device && r.driver == audio_settings.stream.driver; });
+			const audio_channel_route route{device, audio_settings.stream.left, audio_settings.stream.right, audio_settings.stream.driver};
 			if (it == audio_routes.end()) audio_routes.push_back(route); else *it = route;
 			save_settings();
 			say_audio_opened(audio_settings.exclusive);
@@ -965,18 +965,20 @@ public:
 	void refresh_audio_devices()
 	{
 		const auto now = std::chrono::steady_clock::now();
-		preferences_state.outputs = audio_out::list();
+		for (int d = 0; d < 3; d++) if (supported_audio_driver(audio_driver(d)))
+			preferences_state.driver_outputs[size_t(d)] = audio_out::list(audio_driver(d));
+		preferences_state.outputs = preferences_state.driver_outputs[size_t(audio_settings.stream.driver)];
 		preferences_state.inputs = audio_in::list();
 		if (audio_job.busy() || now < next_audio_retry || state->load() == 2) return;
 		const std::string active = out->device_name();
-		const std::string default_name = audio_name.empty() ? audio_out::default_device_name() : std::string();
+		const std::string default_name = audio_name.empty() && audio_settings.stream.driver != audio_driver::asio ? audio_out::default_device_name(audio_settings.stream.driver) : std::string();
 		const bool default_changed = audio_name.empty() && !default_name.empty() && default_name != active;
 		if (audio_failed || default_changed) {
 			audio_output_config wanted{audio_name, audio_settings};
 			if (default_changed) {
 				wanted.preferences.stream.sample_rate = 0;
 				wanted.preferences.stream.left = 0; wanted.preferences.stream.right = 1;
-				for (const auto &route : audio_routes) if (route.device == default_name) {
+				for (const auto &route : audio_routes) if (route.device == default_name && route.driver == audio_settings.stream.driver) {
 					wanted.preferences.stream.left = route.left; wanted.preferences.stream.right = route.right;
 				}
 			}
@@ -1011,6 +1013,12 @@ public:
 		preferences_actions.language = [](int value) { xgui::set_help_lang(value); };
 		preferences_actions.audio = [this](audio_output_config c) {
 			defer_outside_paint([this, c = std::move(c)] { request_audio(c); });
+		};
+		preferences_actions.control_panel = [this] {
+			audio_output_config config{audio_name, audio_settings, true};
+			config.preferences.stream.sample_rate = 0;
+			config.preferences.stream.buffer_frames = 0;
+			request_audio(config);
 		};
 		preferences_actions.input = [this](std::string name) {
 			defer_outside_paint([this, name] {
@@ -1086,7 +1094,7 @@ public:
 		s.midi_ins = midi_in::list();
 		s.midi_outs = midi_out::list();
 		s.audio_ins = audio_in::list();
-		s.audio_outs = audio_out::list();
+		s.audio_outs = audio_out::list(audio_settings.stream.driver);
 		audio_menu_devices = s.audio_outs;
 		s.audio_ready = audio_ready.load() && !audio_job.busy() && state && (state->load() == 1 || audio_failed);
 		if (s.audio_ready) {

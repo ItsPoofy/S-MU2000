@@ -71,10 +71,11 @@ public:
 
 	// 使える再生デバイスの名前。番号は挿し直すとずれるので、**名前で選ぶ**
 	// (live --list prints this on both platforms, so macOS needs the same answer)
-	static std::vector<std::string> list();
-	static std::string default_device_name();
+	static std::vector<std::string> list(audio_driver driver = audio_driver::native);
+	static std::string default_device_name(audio_driver driver = audio_driver::native);
 	// Set only while stopped; read stream_info() after start() completes.
 	void set_stream_options(const audio_stream_options &s) { m_stream = s; }
+	void set_control_panel(bool show) { m_control_panel = show; }
 	const audio_stream_info &stream_info() const { return m_info; }
 
 	// latency_ms is the target amount to keep queued (0 or less leaves the
@@ -130,6 +131,7 @@ public:
 	double worst_ms() const;
 
 private:
+	bool m_control_panel = false;
 	audio_stream_options m_stream;
 	audio_stream_info m_info;
 	struct impl;
@@ -155,10 +157,11 @@ public:
 	~audio_out() { stop(); }
 
 	// 使える再生デバイスの名前。番号は挿し直すとずれるので、**名前で選ぶ**
-	static std::vector<std::string> list();
-	static std::string default_device_name();
+	static std::vector<std::string> list(audio_driver driver = audio_driver::native);
+	static std::string default_device_name(audio_driver driver = audio_driver::native);
 	// Set only while stopped; read stream_info() after start() completes.
 	void set_stream_options(const audio_stream_options &s) { m_stream = s; }
+	void set_control_panel(bool show) { m_control_panel = show; }
 	const audio_stream_info &stream_info() const { return m_info; }
 
 	// latency_ms は**溜める目標の長さ**。0 以下ならデバイスの周期 2 つぶん。
@@ -226,9 +229,11 @@ public:
 	std::string latency_line() const;
 
 private:
+	bool m_control_panel = false;
 	audio_stream_options m_stream;
 	audio_stream_info m_info;
 	void run(int latency_ms, bool exclusive);
+	void run_portaudio(int latency_ms);
 
 	fill_fn           m_fill;
 	std::thread       m_thread;

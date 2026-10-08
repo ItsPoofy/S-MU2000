@@ -21,6 +21,7 @@ inline audio_output_switch_result switch_audio_output(
 	const auto open = [&](const audio_output_config &c, std::string &error) {
 		out.stop();
 		out.set_stream_options(c.preferences.stream);
+		out.set_control_panel(c.control_panel);
 		return out.start(c.preferences.latency_ms, fill, error, c.preferences.exclusive,
 		                 c.device, false, true);
 	};

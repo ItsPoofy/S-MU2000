@@ -345,7 +345,7 @@ struct audio_out::impl
 	}
 };
 
-std::vector<std::string> audio_out::list()
+std::vector<std::string> audio_out::list(audio_driver)
 {
 	std::vector<std::string> names;
 	for (AudioDeviceID d : output_devices()) {
@@ -356,7 +356,7 @@ std::vector<std::string> audio_out::list()
 	return names;
 }
 
-std::string audio_out::default_device_name() { return name_of(default_output_device()); }
+std::string audio_out::default_device_name(audio_driver) { return name_of(default_output_device()); }
 
 audio_out::audio_out() = default;
 
