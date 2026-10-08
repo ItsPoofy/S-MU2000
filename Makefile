@@ -1373,6 +1373,22 @@ clean:
 
 # ---- iOS AUv3 ----------------------------------------------------------------
 #
+# Everything from here to the end of the file is inside the two fences below, and
+# that is the point of them: this block asks xcrun where the SDK is, runs
+# tools/ios_sign.py four times over and reads a profile directory, and none of
+# that is any use to a Windows or Linux build - which still had to pay for it,
+# because a makefile is read whole before any target runs. So it is read only when
+# an ios% goal was asked for, and only on macOS, where xcrun and the signing
+# identities are.
+#
+# MAKECMDGOALS rather than a variable: there is no earlier point at which "which
+# target was asked for" is known. The cost is that an ios% goal has to be spelled
+# on the command line (it always is - these targets cannot be reached as a
+# prerequisite of anything), and that a target defined here cannot be a
+# prerequisite of a target defined above, which nothing wants.
+ifeq ($(PLATFORM),macos)
+ifneq ($(filter ios%,$(MAKECMDGOALS)),)
+
 # The AUv3 extension built for iOS. Reuses AUV3_SRCS unchanged - engine, AUv3 core and
 # the shared ImGui panel are already platform-free (doc/ios-auv3.md) - and only replaces
 # the toolchain flags and the bundle layout.
@@ -1563,13 +1579,37 @@ ifeq ($(IOS_SDK_NAME),iphoneos)
 # which is all the simulator needs, and all a device install will refuse.
 #
 # `:=` so each query runs once at parse time, not once per rule that mentions it.
-IOS_TEAM_ID    := $(shell python3 tools/ios_sign.py team)
-IOS_BUNDLE_ID  := $(shell python3 tools/ios_sign.py app-id)
-IOS_APPEX_ID   := $(shell python3 tools/ios_sign.py appex-id)
-IOS_IDENTITY   := $(shell python3 tools/ios_sign.py identity)
+IOS_TEAM_ID    := $(shell $(PYTHON) tools/ios_sign.py team --team "$(TEAM_ID)")
+IOS_BUNDLE_ID  := $(shell $(PYTHON) tools/ios_sign.py app-id --team "$(TEAM_ID)")
+IOS_APPEX_ID   := $(shell $(PYTHON) tools/ios_sign.py appex-id --team "$(TEAM_ID)")
+IOS_IDENTITY   := $(shell $(PYTHON) tools/ios_sign.py identity --team "$(TEAM_ID)")
 # With a team, sign as that team's identity; without one, ad-hoc (-), which is
 # what a build for the simulator or for a jailbroken device wants.
-CODESIGN_ID    := $(if $(IOS_IDENTITY),$(IOS_IDENTITY),-)
+#
+# IOS_CODESIGN_ID, not CODESIGN_ID: the shared CODESIGN_ID ?= above is what the
+# macOS auv3 recipes sign with, and `CODESIGN_ID="Developer ID: ..." make auv3`
+# is a documented thing to type. This line used `:=` on the same name, so on any
+# invocation that reached it the macOS value was replaced by an ad-hoc one - and
+# because the iphoneos branch is the default, that was every make that read this
+# block, including one that only wanted to know whether the mac plug-ins were
+# signed. Two names, one meaning each.
+IOS_CODESIGN_ID := $(if $(IOS_IDENTITY),$(IOS_IDENTITY),-)
+# A team with profiles but no certificate signs ad-hoc, and an ad-hoc signature
+# installs nowhere: the device refuses it at install time, long after the build
+# said nothing was wrong. So this is checked before signing rather than left for
+# installd to find. A build that wants ad-hoc on purpose (a jailbroken device)
+# asks for it by passing an empty team, which is what the simulator does anyway.
+.PHONY: FORCE
+
+define IOS_REQUIRE_IDENTITY
+	@if [ -n "$(IOS_TEAM_ID)" ] && [ -z "$(IOS_IDENTITY)" ]; then \
+	  echo "ios: team $(IOS_TEAM_ID) has no signing certificate on this machine"; \
+	  echo "     Xcode > Settings > Accounts > $(IOS_TEAM_ID) > Manage Certificates"; \
+	  echo "     then + Apple Development. A profile alone does not sign anything."; \
+	  echo "     (an ad-hoc device build on purpose: make ... IOS_TEAM_ID=)"; \
+	  exit 1; \
+	fi
+endef
 # Two locations: Xcode 27 keeps managed profiles under UserData, older Xcode (and
 # manual downloads) under MobileDevice. Both are searched; the bundle id decides.
 IOS_PROV_DIRS := $(HOME)/Library/Developer/Xcode/UserData/Provisioning\ Profiles $(HOME)/Library/MobileDevice/Provisioning\ Profiles
@@ -1579,9 +1619,15 @@ IOS_PROV_DIRS := $(HOME)/Library/Developer/Xcode/UserData/Provisioning\ Profiles
 # those), newest first. IOS_PROFILE / IOS_APPEX_PROFILE override with an explicit
 # path when several match or the wrong one wins; the printed basename says which
 # one won, so a surprise is visible rather than silent.
-$(IOS_APP)/embedded.mobileprovision:
+#
+# FORCE re-runs both rules on every build, and cmp makes that a no-op when the
+# profile that is there is already the right one. It is there because the bundle
+# id is derived from the team: a build that switched teams would otherwise keep
+# the previous team's profile, and installd would refuse the install with a
+# message about an id nobody asked for.
+$(IOS_APP)/embedded.mobileprovision: FORCE
 	@prof="$(IOS_PROFILE)"; \
-	if [ -z "$$prof" ]; then prof="$(shell python3 tools/ios_sign.py profile --which APP)"; fi; \
+	if [ -z "$$prof" ]; then prof="$(shell $(PYTHON) tools/ios_sign.py profile --which APP --team "$(TEAM_ID)")"; fi; \
 	if [ -z "$$prof" ]; then \
 	  echo "ios: no provisioning profile for $(IOS_BUNDLE_ID)"; \
 	  echo "     a profile belongs to the team that registered the id, so set yours:"; \
@@ -1589,21 +1635,23 @@ $(IOS_APP)/embedded.mobileprovision:
 	  echo "     already have one for this exact id? IOS_PROFILE=/path/to/one.mobileprovision"; \
 	  exit 1; \
 	fi; \
+	if cmp -s "$$prof" $@; then exit 0; fi; \
 	cp -f "$$prof" $@; \
 	echo "ios: embedded $$(basename "$$prof")"
 
 # The appex carries its own profile too (its id differs): installd checks nested
 # code, so hoping the app's profile covers it is a guess the error would bill.
 # Same search, same loud failure, its own override.
-$(IOS_APPEX)/embedded.mobileprovision:
+$(IOS_APPEX)/embedded.mobileprovision: FORCE
 	@prof="$(IOS_APPEX_PROFILE)"; \
-	if [ -z "$$prof" ]; then prof="$(shell python3 tools/ios_sign.py profile --which APPEX)"; fi; \
+	if [ -z "$$prof" ]; then prof="$(shell $(PYTHON) tools/ios_sign.py profile --which APPEX --team "$(TEAM_ID)")"; fi; \
 	if [ -z "$$prof" ]; then \
 	  echo "ios: no provisioning profile for $(IOS_APPEX_ID) (the AUv3's own id)"; \
 	  echo "     the extension target needs its own; 'make ios-sign-info' says what is missing"; \
 	  echo "     already have one? IOS_APPEX_PROFILE=/path/to/one.mobileprovision"; \
 	  exit 1; \
 	fi; \
+	if cmp -s "$$prof" $@; then exit 0; fi; \
 	cp -f "$$prof" $@; \
 	echo "ios: embedded $$(basename "$$prof") in appex"
 
@@ -1630,10 +1678,16 @@ IOS_APP_SIGN_FLAGS :=
 # than adding to it.
 IOS_APPEX_SIGN_DEPS  :=
 IOS_APPEX_SIGN_FLAGS := --entitlements packaging/auv3-ios-appex.entitlements
+# Ad-hoc on purpose, and set here rather than inherited: a simulator install
+# wants no identity and no profile, and IOS_CODESIGN_ID is only defined in the
+# branch above, so without this the recipes below would ask codesign to sign with
+# an empty string.
+IOS_CODESIGN_ID := -
 endif
 
 $(IOS_APPEX_STAMP): $(IOS_BIN) $(IOS_APPEX_PLIST) ios-auv3-roms $(IOS_APPEX)/art/real/panel.txt $(IOS_APPEX_SIGN_DEPS)
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none \
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none \
 	          $(IOS_APPEX_SIGN_FLAGS) $(IOS_APPEX)
 	@touch $@
 
@@ -1784,7 +1838,8 @@ $(IOS_BUILD)/src/ios/smoke.o: src/ios/smoke.mm
 $(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
 	@mkdir -p $(dir $@)
 	$(CXX) $(IOS_CXXFLAGS) -o $@ $(IOS_BUILD)/src/ios/smoke.o $(IOS_FW)
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP)
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP)
 	@echo " smoke host: $(IOS_APP)"
 
 # The standalone, not the smoke host. Same bundle, different executable, so the
@@ -1820,13 +1875,13 @@ $(IOS_APP)/Info.plist: packaging/ios-app-Info.plist
 # its name (a simulator run needs a ROM import first, a device run needs a
 # profile), so the list says which is which.
 ios:
-	@echo "iOS targets (SDK: IOS_SDK_NAME=iphonesimulator (default) or iphoneos)"
+	@echo "iOS targets (SDK: IOS_SDK_NAME=iphoneos (default) or iphonesimulator)"
 	@echo
-	@echo "  simulator, no signing needed:"
+	@echo "  simulator, no signing needed (IOS_SDK_NAME=iphonesimulator):"
 	@echo "    ios-standalone            the synth, for the simulator"
 	@echo "    ios-auv3                  the AUv3 extension on its own"
 	@echo "    ios-app                   the smoke host (renders offline, checks the appex)"
-	@echo "    ios-standalone ROMS=roms  ... with the ROM images in the bundle"
+	@echo "    ios-standalone IOS_ROMS=roms  ... with the ROM images in the bundle"
 	@echo "    ios-install               build, install and launch on the booted simulator"
 	@echo
 	@echo "  device (a team id, and profiles for the ids it derives):"
@@ -1836,7 +1891,7 @@ ios:
 	@echo "    ios-standalone TEAM_ID=... signed, without the app wrapper"
 	@echo
 	@echo "  ROMs (one-time; the images are Yamaha's and not shipped):"
-	@echo "    ios-app-roms ROMS=dir     copy a set into the app bundle"
+	@echo "    ios-app-roms IOS_ROMS=dir copy a set into the app bundle"
 	@echo
 	@echo "  doc/ios-auv3.md has the whole story, install and troubleshooting."
 	@echo "  Start with 'make ios-sign-info TEAM_ID=...' if you are building for a device."
@@ -1856,7 +1911,7 @@ ios-team-id:
 # What signing would use, and what is still missing. The first thing to run when
 # a device install is refused: it prints the two ids a profile has to exist for.
 ios-sign-info:
-	@python3 tools/ios_sign.py report --team "$(TEAM_ID)"
+	@$(PYTHON) tools/ios_sign.py report --team "$(TEAM_ID)"
 
 .PHONY: ios-app-info ios-install ios-install-sim
 
@@ -1931,7 +1986,8 @@ IOS_APP_STAMP  := $(IOS_ROOT)/.standalone.stamp
 $(IOS_SMOKE_STAMP): $(IOS_APP_BIN) $(IOS_APP)/Info.plist $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable S-MU2000" \
 	    $(IOS_APP)/Info.plist
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
 	@touch $@
 
 .PHONY: ios-app
@@ -1958,7 +2014,8 @@ $(IOS_APP_STAMP): $(IOS_STANDALONE) $(IOS_APP)/Info.plist \
                   $(IOS_PANEL_DIR)/panel.txt ios-app-roms $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Standalone" \
 	    $(IOS_APP)/Info.plist
-	@codesign --force --sign "$(CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
 	@touch $@
 
 .PHONY: ios-app-stamp
@@ -2033,3 +2090,22 @@ ios-auv3: $(IOS_BIN) ios-auv3-roms
 	@echo "これを .app に入れて起動すれば登録される（ROM は app group に置く）"
 
 .PHONY: ios-auv3
+
+endif # filter ios%,$(MAKECMDGOALS)
+
+# The fence above means these two exist only on macOS, where nothing above can
+# build them. Saying so beats "No rule to make target", which is what a Windows
+# or Linux builder would otherwise get from `make ios`.
+else
+
+.PHONY: ios ios-install
+
+ios:
+	@echo "iOS builds need macOS with Xcode: the iOS toolchain, the simulator and"
+	@echo "the signing identities are all macOS tools (make ios on macOS lists the"
+	@echo "targets)."
+
+ios-install:
+	@$(MAKE) ios
+
+endif # PLATFORM is macos
