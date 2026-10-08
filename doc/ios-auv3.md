@@ -237,7 +237,12 @@ reverse) just works - no deletion needed.
 | `IOS_SDK_NAME` | `iphoneos` (device, `build-ios/device/`) | `iphonesimulator` (`build-ios/simulator/`) - a different platform ID, not interchangeable |
 | `IOS_ROMS` | empty (no ROMs) | `roms` (baked beside the binary: `<bundle>/roms/`, `<appex>/roms/`) |
 | `IOS_DEBUG` | `1` (`-Og`, symbols) | `0` (`-O3`, for the interpreter-speed measurement) |
-| `CODESIGN_ID` | `-` (ad-hoc: simulator only) | `"Apple Development: …"` (device) |
+| `TEAM_ID` | `.ios-team-id`, else none (ad-hoc) | `ABCDE12345`; the ids, the identity and the profiles are all derived from it |
+| `IOS_PROFILE` / `IOS_APPEX_PROFILE` | found by bundle id | a path, when several match or the wrong one wins |
+
+`CODESIGN_ID` is *not* the iOS variable: it signs the macOS AUv3, and setting it
+changed nothing here (and, before the iOS block was fenced, was silently
+overwritten by the iOS side). For iOS the identity comes from the team.
 
 ```bash
 # Simulator standalone with ROMs (the usual test loop)
@@ -251,10 +256,22 @@ make ios-standalone TEAM_ID=ABCDE12345 IOS_ROMS=roms
 make ios-sign-info TEAM_ID=ABCDE12345     # what it found, and what is missing
 ```
 
+A team with profiles but no signing certificate fails the build rather than
+signing ad-hoc, which a device would refuse at install time long after the build
+said nothing was wrong. To sign a device build ad-hoc on purpose (a jailbroken
+device), pass an empty team: `make ios-standalone IOS_SDK_NAME=iphoneos IOS_TEAM_ID=`.
+
 Header edits rebuild their dependents (iOS depfiles are `-include`d); a source
 rename/delete leaves a stale `.d` pointing at the ghost - `find build-ios -name
 '*.d' -delete` fixes that one case. `codesign` runs last in every target, after
 binaries, plist, artwork and ROMs: signing earlier signs contents about to change.
+
+The whole iOS block is inside `ifeq ($(PLATFORM),macos)` and
+`ifneq ($(filter ios%,$(MAKECMDGOALS)),)`, so a Windows or Linux build reads none
+of it - no `xcrun` and no `tools/ios_sign.py` per invocation - and neither does
+`make all` on macOS. The one consequence worth knowing: the goal has to be spelled
+on the command line, so an iOS target cannot be a prerequisite of another target,
+and `make` with no goal builds nothing iOS.
 
 ### Simulator install and run
 
@@ -359,7 +376,8 @@ directory):
 2. Add a target of type **Audio Unit Extension**, bundle id
    `com.tarboh.smu2000.ios.<TEAM>.auv3` - the app's id with `.auv3` on the end,
    which is the rule (an extension id must *begin with* its container's, never be
-   a subdomain in front of it).
+   a subdomain in front of it). Both ids are needed separately registered, and
+   each needs its own profile.
 3. Build once for the device. Xcode registers both ids, issues both profiles and
    creates a development certificate for the team if there is none.
 4. `make ios-sign-info TEAM_ID=<TEAM>` should then report an identity and both
