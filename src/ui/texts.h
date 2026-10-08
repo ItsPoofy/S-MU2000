@@ -247,6 +247,7 @@ struct ui_texts {
 	const char *ps_tab_all;
 	const char *ps_tab_drum;
 	const char *ps_out_label;
+	const char *ps_out_label_ctrl;
 	const char *ps_out_panel;
 	const char *ps_out_hint;
 	const char *ps_out_sent_fmt;
