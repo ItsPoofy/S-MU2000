@@ -16,6 +16,9 @@
 //     （分類の前半 4 つが 1 つ目、後半 4 つが 2 つ目）
 //   ・チャンネル 10（か、ドラムのパートにしたチャンネル）は FM のドラム。鍵ごとに決まった音（キック・スネア・
 //     ハイハット・タム・シンバルなど）。ハイハットは閉じると開いた音が止まる
+//   ・音色は書き換えられる。128 個のプログラムそれぞれが自分の音色（fm_voice）を持ち、その組が fm_bank。
+//     何もしなければ上の 32 個を並べた初期の組。画面の音色エディタ（src/ui/fm_voice_editor.h）が組を作り直して渡す。
+//     組はファイル（.smufm）に保存できる。鳴っている音にも、書き換えた値はすぐ効く
 //   ・32 声。ピッチベンド（±2 半音）、モジュレーション（CC1。ビブラート）、サステインペダル（CC64）、
 //     CC120 / CC121 / CC123
 
@@ -29,6 +32,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace smu2000::vboard {
 
@@ -204,11 +212,222 @@ inline const fm_patch &fm_patch_of(int program)
 	return fm_detail::PATCHES[(program / 8) * 2 + ((program % 8) >= 4 ? 1 : 0)];
 }
 
+// ---- 書き換えられる音色と、その 128 個の組
+
+struct fm_voice {
+	char name[9] = "        ";      // 8 文字
+	int alg = 7;
+	float feedback = 0.0f;
+	fm_op op[4] = { { 1, 1, 0.002f, 0, 1, 0.1f }, { 1, 0, 0.002f, 0, 1, 0.1f }, { 1, 0, 0.002f, 0, 1, 0.1f }, { 1, 0, 0.002f, 0, 1, 0.1f } };
+	float drop = 0.0f;              // 鳴り始めに上乗せする半音（30ms ほどで元の高さへ落ちる）
+	float noise = 0.0f;             // 鳴る側の変調に足すノイズ（0-1）
+};
+
+// そのつなぎ方で、オペレーター i（0-3）は鳴る側か
+inline bool fm_is_carrier(int alg, int i)
+{
+	static const u8 MASK[8] = { 0x8, 0x8, 0x8, 0x8, 0xa, 0xe, 0xe, 0xf };
+	return (MASK[alg & 7] >> i) & 1;
+}
+
+// 初期の音色（プログラム番号ごと。内蔵の 32 個を GM の並びに置いたもの）
+inline fm_voice fm_default_voice(int program)
+{
+	const fm_patch &p = fm_patch_of(program);
+	fm_voice v;
+	std::snprintf(v.name, sizeof(v.name), "%-8.8s", p.name);
+	v.alg = p.alg;
+	v.feedback = p.feedback;
+	for (int i = 0; i < 4; i++)
+		v.op[i] = p.op[i];
+	v.drop = p.drop;
+	v.noise = p.noise;
+	return v;
+}
+
+struct fm_bank {
+	char name[15] = "FM SET";       // 組の名前（ファイルの名前にもなる）
+	std::array<fm_voice, 128> prog;
+	fm_bank()
+	{
+		for (int i = 0; i < 128; i++)
+			prog[size_t(i)] = fm_default_voice(i);
+	}
+};
+
+// 1 周期の形（n 点）。包絡線は全部いちばん上（鳴り始めの形）、ノイズと落ち幅は入れない。画面の絵用。
+// フィードバックは同じ周期を何度か回して落ち着かせる
+inline void fm_cycle(const fm_voice &v, float *out, int n)
+{
+	const auto wave = [](float cycles) { return float(std::sin(double(cycles) * 6.283185307179586)); };
+	// 比が整数でないオペレーターは 1 周期で閉じないが、絵では基音 1 周期ぶんをそのまま描く
+	std::vector<float> o1(size_t(n), 0.0f);
+	for (int pass = 0; pass < 6; pass++) {
+		float fb0 = o1[size_t(n - 1)], fb1 = o1[size_t(n - 2 >= 0 ? n - 2 : 0)];
+		for (int k = 0; k < n; k++) {
+			const float t = float(k) / float(n);
+			const float cur = wave(t * v.op[0].ratio + 2.0f * v.feedback * 0.5f * (fb0 + fb1)) * v.op[0].level;
+			fb1 = fb0;
+			fb0 = cur;
+			o1[size_t(k)] = cur;
+		}
+	}
+	for (int k = 0; k < n; k++) {
+		const float t = float(k) / float(n);
+		const auto osc = [&](int i, float mod) { return wave(t * v.op[i].ratio + 2.0f * mod) * v.op[i].level; };
+		const float a = o1[size_t(k)];
+		float s = 0.0f;
+		switch (v.alg & 7) {
+		case 0: s = osc(3, osc(2, osc(1, a))); break;
+		case 1: s = osc(3, osc(2, a + osc(1, 0.0f))); break;
+		case 2: s = osc(3, a + osc(2, osc(1, 0.0f))); break;
+		case 3: s = osc(3, osc(1, a) + osc(2, 0.0f)); break;
+		case 4: s = (osc(1, a) + osc(3, osc(2, 0.0f))) * 0.5f; break;
+		case 5: s = (osc(1, a) + osc(2, a) + osc(3, a)) * (1.0f / 3.0f); break;
+		case 6: s = (osc(1, a) + osc(2, 0.0f) + osc(3, 0.0f)) * (1.0f / 3.0f); break;
+		default: s = (a + osc(1, 0.0f) + osc(2, 0.0f) + osc(3, 0.0f)) * 0.25f; break;
+		}
+		out[k] = s;
+	}
+}
+
+// ---- 組のファイル。全部リトルエンディアン
+//   "SMUFMBNK"  u32 版（1）  名前 16 バイト
+//   音色 128 個: 名前 8 バイト  u8 つなぎ方  u8 × 3 空き  f32 フィードバック・落ち幅・ノイズ
+//                オペレーター 4 つ × f32 6 個（比・大きさ・アタック・ディケイ・サステイン・リリース）
+
+namespace fm_detail {
+inline void put_f32(std::vector<u8> &o, float f)
+{
+	u32 v;
+	std::memcpy(&v, &f, 4);
+	for (int i = 0; i < 4; i++)
+		o.push_back(u8(v >> (8 * i)));
+}
+inline float get_f32(const u8 *p, float lo, float hi, float fallback)
+{
+	const u32 v = u32(p[0]) | u32(p[1]) << 8 | u32(p[2]) << 16 | u32(p[3]) << 24;
+	float f;
+	std::memcpy(&f, &v, 4);
+	return f >= lo && f <= hi ? f : fallback;       // NaN もここで落ちる
+}
+inline void clean_text(char *dst, const u8 *src, size_t n, bool pad)
+{
+	size_t i = 0;
+	for (; i < n && src[i]; i++)
+		dst[i] = src[i] >= 0x20 && src[i] < 0x7f ? char(src[i]) : '?';
+	const size_t end = i;
+	for (; i < n; i++)
+		dst[i] = ' ';
+	dst[pad ? n : end] = 0;
+}
+constexpr size_t FM_VOICE_BYTES = 8 + 4 + 12 + 4 * 24;
+} // namespace fm_detail
+
+inline std::vector<u8> write_fm_bank(const fm_bank &b)
+{
+	std::vector<u8> o = { 'S', 'M', 'U', 'F', 'M', 'B', 'N', 'K', 1, 0, 0, 0 };
+	char name[16] = {};
+	std::snprintf(name, sizeof(name), "%s", b.name);
+	o.insert(o.end(), name, name + 16);
+	for (const fm_voice &v : b.prog) {
+		o.insert(o.end(), v.name, v.name + 8);
+		o.insert(o.end(), { u8(v.alg & 7), 0, 0, 0 });
+		fm_detail::put_f32(o, v.feedback);
+		fm_detail::put_f32(o, v.drop);
+		fm_detail::put_f32(o, v.noise);
+		for (const fm_op &p : v.op)
+			for (float f : { p.ratio, p.level, p.attack, p.decay, p.sustain, p.release })
+				fm_detail::put_f32(o, f);
+	}
+	return o;
+}
+
+inline std::shared_ptr<fm_bank> read_fm_bank(const u8 *d, size_t n, std::string &err)
+{
+	if (n < 28 || std::memcmp(d, "SMUFMBNK", 8) != 0) {
+		err = "not an FM voice set";
+		return nullptr;
+	}
+	if (d[8] != 1 || d[9] || d[10] || d[11]) {
+		err = "unknown version";
+		return nullptr;
+	}
+	if (n < 28 + 128 * fm_detail::FM_VOICE_BYTES) {
+		err = "file is cut short";
+		return nullptr;
+	}
+	auto b = std::make_shared<fm_bank>();
+	fm_detail::clean_text(b->name, d + 12, 14, false);
+	const u8 *p = d + 28;
+	for (fm_voice &v : b->prog) {
+		fm_detail::clean_text(v.name, p, 8, true);
+		v.alg = p[8] & 7;
+		v.feedback = fm_detail::get_f32(p + 12, 0.0f, 1.0f, 0.0f);
+		v.drop = fm_detail::get_f32(p + 16, -48.0f, 48.0f, 0.0f);
+		v.noise = fm_detail::get_f32(p + 20, 0.0f, 1.0f, 0.0f);
+		const u8 *q = p + 24;
+		for (fm_op &op : v.op) {
+			op.ratio = fm_detail::get_f32(q, 0.05f, 32.0f, 1.0f);
+			op.level = fm_detail::get_f32(q + 4, 0.0f, 1.0f, 0.0f);
+			op.attack = fm_detail::get_f32(q + 8, 0.0f, 10.0f, 0.002f);
+			op.decay = fm_detail::get_f32(q + 12, 0.0f, 30.0f, 0.0f);
+			op.sustain = fm_detail::get_f32(q + 16, 0.0f, 1.0f, 1.0f);
+			op.release = fm_detail::get_f32(q + 20, 0.0f, 30.0f, 0.1f);
+			q += 24;
+		}
+		p += fm_detail::FM_VOICE_BYTES;
+	}
+	return b;
+}
+
+inline bool save_fm_bank(const std::string &path, const fm_bank &b)
+{
+	const std::vector<u8> bytes = write_fm_bank(b);
+	std::FILE *f = std::fopen(path.c_str(), "wb");
+	if (!f)
+		return false;
+	const bool ok = std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+	return std::fclose(f) == 0 && ok;
+}
+
+inline std::shared_ptr<fm_bank> load_fm_bank(const std::string &path, std::string &err)
+{
+	std::FILE *f = std::fopen(path.c_str(), "rb");
+	if (!f) {
+		err = "cannot open the file";
+		return nullptr;
+	}
+	std::vector<u8> bytes;
+	u8 buf[16384];
+	size_t n;
+	while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0 && bytes.size() < (1u << 20))
+		bytes.insert(bytes.end(), buf, buf + n);
+	std::fclose(f);
+	return read_fm_bank(bytes.data(), bytes.size(), err);
+}
+
 class fm_synth
 {
 public:
 	static constexpr int VOICES = 32;
 	static constexpr double RATE = 44100.0;
+
+	// 音色の組を替える（nullptr なら初期の組）。鳴っている音にも、新しい値をすぐ効かせる（包絡線の進み具合はそのまま）
+	void set_bank(std::shared_ptr<const fm_bank> bank)
+	{
+		m_bank = std::move(bank);
+		for (voice &v : m_v)
+			if (v.on && v.prog >= 0) {
+				const fm_voice fv = voice_of(v.prog);
+				load(v, fv);
+				setup_ops(v, v.vel);
+				v.tuned = false;
+			}
+	}
+	const fm_bank *bank() const { return m_bank.get(); }
+	// そのプログラムの音色（組が無ければ初期の音色）
+	fm_voice voice_of(int program) const { return m_bank ? m_bank->prog[size_t(program & 127)] : fm_default_voice(program); }
 
 	void reset()
 	{
@@ -307,7 +526,7 @@ public:
 		for (voice &v : m_v) {
 			if (!v.on)
 				continue;
-			const fm_patch &p = *v.patch;
+			const fm_patch &p = v.cur;
 			const chan &c = m_c[size_t(v.ch)];
 			if (retune || !v.tuned) {
 				// 高さ（16 サンプルごと）。ドラムの落ち幅は 30ms ほどで消える
@@ -392,7 +611,9 @@ private:
 		bool on = false, released = false, held = false, tuned = false;
 		int ch = 0, group = 0;
 		u8 key = 60;
-		const fm_patch *patch = nullptr;
+		fm_patch cur{};               // 鳴らしている音色の写し（書き換えが来たら入れ直す）
+		int prog = -1;                // メロディの音色ならプログラム番号、ドラムは -1
+		float vel = 1.0f;
 		float base_key = 60.0f, drop = 0.0f, gain = 0.0f;
 		float fb0 = 0.0f, fb1 = 0.0f;
 		u32 inc[4] = { 0, 0, 0, 0 };
@@ -403,22 +624,44 @@ private:
 
 	// seconds で 60dB 下がる、1 サンプルごとの倍率
 	static float fall(float seconds) { return seconds <= 0.0f ? 1.0f : float(std::pow(0.001, 1.0 / (double(seconds) * RATE))); }
-	// そのつなぎ方で、オペレーター i（0-3）は鳴る側か
-	static bool is_carrier(int alg, int i)
+	// 書き換えられる音色を、声の写しに入れる
+	static void load(voice &v, const fm_voice &fv)
 	{
-		static const u8 MASK[8] = { 0x8, 0x8, 0x8, 0x8, 0xa, 0xe, 0xe, 0xf };
-		return (MASK[alg & 7] >> i) & 1;
+		v.cur.alg = fv.alg & 7;
+		v.cur.feedback = fv.feedback;
+		for (int i = 0; i < 4; i++)
+			v.cur.op[i] = fv.op[i];
+		v.cur.noise = fv.noise;
+		v.cur.drop = fv.drop;
+		v.cur.fixed_key = 0.0f;
+		v.cur.group = 0;
+	}
+	// オペレーターごとの大きさと包絡線の速さを、声の写しから決める（包絡線の今の位置は触らない）
+	static void setup_ops(voice &v, float vv)
+	{
+		for (int i = 0; i < 4; i++) {
+			const fm_op &src = v.cur.op[i];
+			op_state &o = v.op[i];
+			o.carrier = fm_is_carrier(v.cur.alg, i);
+			// 変調する側は、強く弾くほど深く（半分は強さによらない）
+			o.level = o.carrier ? src.level : src.level * (0.5f + 0.5f * vv);
+			o.sustain = src.sustain;
+			o.d_attack = src.attack <= 0.0f ? 1.0f : float(1.0 / (double(src.attack) * RATE));
+			o.k_decay = src.decay <= 0.0f || src.sustain >= 1.0f ? 1.0f : fall(src.decay);
+			o.k_release = fall(std::max(src.release, 0.003f));
+		}
 	}
 
 	void note_on(int ch, u8 key, u8 vel)
 	{
 		const chan &c = m_c[size_t(ch)];
 		float tune = 0.0f;
-		const fm_patch &p = c.drum ? fm_detail::drum_for_key(key, tune) : fm_patch_of(c.program);
+		const fm_patch *drum = c.drum ? &fm_detail::drum_for_key(key, tune) : nullptr;
+		const int group = drum ? drum->group : 0;
 		// 同じ組（ハイハットの開閉）で鳴っている音は止める
-		if (p.group)
+		if (group)
 			for (voice &o : m_v)
-				if (o.on && o.ch == ch && o.group == p.group)
+				if (o.on && o.ch == ch && o.group == group)
 					o.on = false;
 		voice *use = nullptr;
 		for (voice &v : m_v)
@@ -445,27 +688,25 @@ private:
 		v.on = true;
 		v.ch = ch;
 		v.key = key;
-		v.patch = &p;
-		v.group = p.group;
-		v.base_key = (p.fixed_key > 0.0f ? p.fixed_key : float(key)) + tune;
-		v.drop = p.drop;
+		if (drum) {
+			v.cur = *drum;
+			v.prog = -1;
+		} else {
+			load(v, voice_of(c.program));
+			v.prog = c.program;
+		}
+		v.group = group;
+		v.base_key = (v.cur.fixed_key > 0.0f ? v.cur.fixed_key : float(key)) + tune;
+		v.drop = v.cur.drop;
 		v.lfsr = (++m_age) * 2654435761u | 1u;
 		v.age = m_age;
 		const float vv = vel / 127.0f;
+		v.vel = vv;
 		v.gain = 0.35f * vv * vv;
-		for (int i = 0; i < 4; i++) {
-			const fm_op &src = p.op[i];
-			op_state &o = v.op[i];
-			o.carrier = is_carrier(p.alg, i);
-			// 変調する側は、強く弾くほど深く（半分は強さによらない）
-			o.level = o.carrier ? src.level : src.level * (0.5f + 0.5f * vv);
-			o.sustain = src.sustain;
-			o.d_attack = src.attack <= 0.0f ? 1.0f : float(1.0 / (double(src.attack) * RATE));
-			o.k_decay = src.decay <= 0.0f || src.sustain >= 1.0f ? 1.0f : fall(src.decay);
-			o.k_release = fall(std::max(src.release, 0.003f));
-		}
+		setup_ops(v, vv);
 	}
 
+	std::shared_ptr<const fm_bank> m_bank;
 	std::array<voice, VOICES> m_v{};
 	std::array<chan, 16> m_c = [] { std::array<chan, 16> a{}; a[9].drum = true; return a; }();
 	double m_lfo = 0.0;

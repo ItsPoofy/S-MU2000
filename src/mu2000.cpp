@@ -3762,7 +3762,7 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 	} else if (kind == VBOARD_FM16) {
 		// プログラム番号は GM の並び（分類ごとに 2 つの音色を 4 つずつ）。ドラムは 1 つ
 		for (int i = 0; i < 128; i++)
-			add(false, 0, 0, u8(i), smu2000::vboard::fm_patch_of(i).name);
+			add(false, 0, 0, u8(i), m_vb_fm.voice_of(i).name);
 		add(true, 0, 0, 0, "FM Kit");
 	} else if (kind == VBOARD_USER16 && m_vb_user_board) {
 		for (int i = 0; i < smu2000::vboard::user_board::PROGRAMS; i++)
@@ -3803,7 +3803,12 @@ void mu2000::board_parts(board_part out[16])
 		} else if (multi_kind() == VBOARD_FM16) {
 			o.program = m_vb_fm.program(i);
 			o.drum = m_vb_fm.drum(i);
-			name = o.drum ? "FM Kit" : smu2000::vboard::fm_patch_of(o.program).name;
+			if (o.drum) {
+				name = "FM Kit";
+			} else {
+				std::snprintf(o.name, sizeof(o.name), "%s", m_vb_fm.voice_of(o.program).name);
+				continue;                  // 名前はもう入れた（写しなので、下の name では渡せない）
+			}
 		} else if (multi_kind() == VBOARD_USER16) {
 			o.program = m_vb_user16.program(i);
 			name = m_vb_user16.program_name(o.program);

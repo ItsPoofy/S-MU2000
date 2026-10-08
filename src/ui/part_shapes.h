@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "fm_voice_editor.h"
 #include "overview.h"
 #include "xg_ui.h"
 
@@ -50,6 +51,8 @@ private:
 	bool m_drum_tab = false;
 	// 上のペインは一覧と同じ部品で描く（棒のドラッグや鍵盤の押さえを覚える入れ物として持つ）
 	overview m_strip;
+	// FM ボードのチャンネルを出しているときの、右の面の音色エディタ
+	fm_voice_editor m_fm_edit;
 };
 
 } // namespace ui
