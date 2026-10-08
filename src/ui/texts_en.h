@@ -13,8 +13,6 @@ inline const ui_texts &en_texts()
 		.tab_panel = "Panel",
 		.tab_editor = "Editor",
 		.tab_effects = "Effects",
-		.hint_front = "Turn the big dial with the wheel / click buttons / "
-		              "keys: A=PLAY E=EDIT U=UTIL F=EFFECT [ ]=PART",
 		.editor_hint = "Drag knobs up/down, or use the wheel.\n"
 		               "Sends XG parameter changes.\n"
 		               "Values are read back from the MU2000.",
@@ -57,8 +55,8 @@ inline const ui_texts &en_texts()
 		.menu_thru_b = "MIDI THRU B (sends out what B receives)",
 		.menu_open_list = "Open the list",
 		.menu_open_editor = "Open the editor",
-		.menu_native_fx = "Play effects in C++ (light; differs from hardware)",
-		.menu_native_engine = "Play without the firmware (fast; still differs)",
+		.menu_native_fx = "Play effects in C++",
+		.menu_native_engine = "Play without the firmware",
 		.menu_factory = "Factory reset...",
 		.menu_restart = "Restart the MU (power off and on)",
 		.menu_card_new = "Make a new SmartMedia image",
@@ -70,7 +68,7 @@ inline const ui_texts &en_texts()
 		.menu_stop_fmt = "Stop (%s)",
 		.menu_fold34 = "Fold ports 3+4 onto A and B (DIN ports only)",
 		.menu_drop34 = "Drop ports 3+4 (DIN ports only)",
-		.menu_thin_bends = "Lighten heavy MIDI: thin pitch bends, drop Roland display data (unlike the real unit)",
+		.menu_thin_bends = "Lighten heavy MIDI",
 		.menu_out_title = "Sound output",
 		.menu_out_digital = "Digital (S/PDIF; keeps DPCM DC)",
 		.menu_out_analog = "Analog (LINE OUT/PHONES; cuts DC)",
@@ -1087,6 +1085,8 @@ inline const ui_texts &en_texts()
 		.settings_volume = "Output volume",
 		.settings_dc = "Analog output DC filtering",
 		.settings_limiter = "Limit output peaks",
+		.settings_reset = "Reset MIDI mode",
+		.settings_panic = "Panic",
 	};
 	return t;
 }

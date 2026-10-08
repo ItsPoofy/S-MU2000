@@ -35,7 +35,6 @@ struct ui_texts {
 	const char *tab_panel;
 	const char *tab_editor;
 	const char *tab_effects;
-	const char *hint_front;
 	// Front page hint (panel.cpp)
 	// Editor page (editor.cpp)
 	const char *editor_hint;         // may contain \n
@@ -1119,6 +1118,8 @@ struct ui_texts {
 	const char *settings_volume;
 	const char *settings_dc;
 	const char *settings_limiter;
+	const char *settings_reset;
+	const char *settings_panic;
 };
 
 // Each language file defines one of these (never included directly).

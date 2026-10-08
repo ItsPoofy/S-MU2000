@@ -3,6 +3,7 @@
 #include "ui/settings.h"
 #include "ui/font_file.h"
 #include "ui/settings_view.h"
+#include "ui/midi_commands.h"
 #include "ui/output_limiter.h"
 #include "imgui_internal.h"
 #include <iostream>
@@ -82,8 +83,29 @@ static void persistence()
 	ui::remembered invalid;
 	ui::apply_settings({{"audio_rate", "48000garbage"}, {"audio_buffer", "-1"}, {"audio_left", "3"}, {"audio_right", "3"}}, invalid);
 	require(ui::valid_audio_request(invalid.audio.stream) && invalid.audio.stream.sample_rate == 0 && invalid.audio.stream.left == 0, "Malformed settings validation");
-	ui::menu_state menu;
-	for (const auto &groups : {ui::menu_ports(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
+	const auto general = ui::menu_ports({});
+	bool settings = false;
+	for (const auto &group : general) for (const auto &entry : group.items) {
+		settings |= entry.id == ui::ID_SETTINGS;
+		require(entry.id != ui::ID_NATIVE_FX && entry.id != ui::ID_NATIVE_ENGINE && entry.id != ui::ID_OVERVIEW, "Redundant general menu entries");
+	}
+	require(settings, "Settings menu entry missing");
+	ui::menu_state menu; menu.ready = menu.audio_ready = menu.thin_bends = menu.limiter = true;
+	menu.audio_rates = {44100, 48000};
+	bool thin = false, reset = false, factory = false, rate = false, peaks = false;
+	for (const auto &g : ui::menu_midi(menu)) for (const auto &e : g.items) {
+		thin |= e.id == ui::ID_THIN_BENDS && e.checked && e.label == "Lighten heavy MIDI";
+		reset |= e.id == ui::ID_RESET_XG && e.enabled;
+	}
+	for (const auto &g : ui::menu_card(menu)) for (const auto &e : g.items)
+		require(e.id != ui::ID_THIN_BENDS, "MIDI lightening remained in card menu");
+	for (const auto &g : ui::menu_power(menu)) for (const auto &e : g.items) factory |= e.id == ui::ID_FACTORY;
+	for (const auto &g : ui::menu_phones(menu)) for (const auto &e : g.items) {
+		rate |= e.id == ui::ID_RATE_BASE + 1 && e.label == "48000 Hz";
+		peaks |= e.id == ui::ID_OUTPUT_LIMITER && e.checked;
+	}
+	require(thin && reset && factory && rate && peaks, "Quick menu control placement");
+	for (const auto &groups : {ui::menu_midi(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
 		const auto &last = groups.back();
 		require(last.title.empty() && last.items.size() == 2 && last.items[0].separator
 			&& last.items[1].id == ui::ID_SETTINGS && last.items[1].enabled, "Quick menu lacks a separated Settings shortcut");
@@ -175,6 +197,11 @@ static void interface()
 	click("Resampler"); click("Linear");
 	require(calls == 3 && applied.preferences.stream.quality == ui::resampler_quality::linear, "Resampler selection did not apply immediately");
 	state.audio = applied; frame();
+	ui::send_midi_command(ui::ID_RESET_XG, bridge);
+	std::vector<u8> reset;
+	u8 b;
+	while (bridge.take_midi(b)) reset.push_back(b);
+	require(reset == std::vector<u8>({0xf0, 0x43, 0x10, 0x4c, 0, 0, 0x7e, 0, 0xf7}), "XG button MIDI message");
 	click("Emulation");
 	for (const char *label : {"Play effects in C++", "Lighten heavy MIDI", "Play without the firmware"}) {
 		const auto center = items.at(label).rect.GetCenter();

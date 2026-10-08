@@ -13,8 +13,6 @@ inline const ui_texts &ja_texts()
 		.tab_panel = "パネル",
 		.tab_editor = "エディタ",
 		.tab_effects = "エフェクト",
-		.hint_front = "大きなダイヤルはホイールで回す ／ ボタンはクリック ／ "
-		              "キー: A=PLAY E=EDIT U=UTIL F=EFFECT [ ]=PART",
 		.editor_hint = "つまみは上下にドラッグ、またはホイール。\n"
 		               "送っているのは XG のパラメータチェンジ。\n"
 		               "値は MU2000 に問い合わせて読み返している。",
@@ -57,8 +55,8 @@ inline const ui_texts &ja_texts()
 		.menu_thru_b = "MIDI THRU B（B で受けたものを外へ）",
 		.menu_open_list = "一覧を開く",
 		.menu_open_editor = "エディタを開く",
-		.menu_native_fx = "エフェクトを C++ で鳴らす（軽い・音は実機と違う）",
-		.menu_native_engine = "firmware を走らせずに鳴らす（速い・まだ音が違う）",
+		.menu_native_fx = "エフェクトを C++ で鳴らす",
+		.menu_native_engine = "firmware を走らせずに鳴らす",
 		.menu_factory = "工場出荷状態に戻す...",
 		.menu_restart = "MU を起動し直す（電源の入れ直し）",
 		.menu_card_new = "新しい SmartMedia を作って差す",
@@ -70,7 +68,7 @@ inline const ui_texts &ja_texts()
 		.menu_stop_fmt = "止める（%s）",
 		.menu_fold34 = "口 3・4 を A・B に重ねて鳴らす（DIN の口のとき）",
 		.menu_drop34 = "口 3・4 は鳴らさない（DIN の口のとき）",
-		.menu_thin_bends = "重い MIDI を軽くする（ピッチベンドの間引き・Roland の液晶のデータ。実機とは違う鳴り方）",
+		.menu_thin_bends = "重い MIDI を軽くする",
 		.menu_out_title = "音の出口",
 		.menu_out_digital = "デジタル（S/PDIF。DPCM の直流も残る）",
 		.menu_out_analog = "アナログ（LINE OUT・PHONES。直流を切る）",
@@ -1087,6 +1085,8 @@ inline const ui_texts &ja_texts()
 		.settings_volume = "出力音量",
 		.settings_dc = "アナログ出力の直流除去",
 		.settings_limiter = "出力ピークを制限",
+		.settings_reset = "MIDI モードをリセット",
+		.settings_panic = "全音停止",
 	};
 	return t;
 }
