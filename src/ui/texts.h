@@ -1101,6 +1101,10 @@ struct ui_texts {
 	const char *settings_nearest;
 	const char *settings_title;
 	const char *settings_audio;
+	const char *settings_midi;
+	const char *settings_midi_inputs;
+	const char *settings_midi_outputs;
+	const char *settings_disconnected;
 	const char *settings_emulation;
 	const char *settings_native_fx;
 	const char *settings_thin_bends;

@@ -20,6 +20,7 @@
 #define S_MU2000_UI_MENU_H
 
 #pragma once
+#include "midi_routes.h"
 
 #include <cstdio>
 #include <string>
@@ -154,8 +155,7 @@ struct menu_state {
 	std::vector<std::string> audio_outs;
 	std::string audio_name;  // empty selects the system default
 	bool audio_ready = false; // startup has released the output to the UI
-	int in_dev[5] = { -1, -1, -1, -1, -1 };
-	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
+	midi_routing midi;
 	std::string ain_name;
 	std::string card_path;
 	bool playing = false;
@@ -224,19 +224,17 @@ inline std::string basename(const std::string &path)
 // One port picker: "unused", then the devices, or "(no devices)". now is the
 // open device index (-1 is unused)
 inline menu_group menu_port_group(const char *title, const std::vector<std::string> &names,
-                                  int now, int id_none, int id_base)
+                                  const std::vector<midi_route> &routes, int column, int id_none, int id_base, bool ready)
 {
 	using namespace menu_detail;
 	menu_group g;
 	g.title = title;
-	g.items.push_back(text(UI_TEXT(menu_unused, "Unused"), id_none, now < 0, true));
+	const bool selected = std::any_of(routes.begin(), routes.end(), [&](const auto &r) { return (r.ports & (1u << column)) != 0; });
+	g.items.push_back(text(UI_TEXT(menu_unused, "Unused"), id_none, !selected, ready));
 	g.items.push_back(separator());
-	if (names.empty()) {
-		g.items.push_back(text(UI_TEXT(menu_no_devices, "(No devices)"), 0, false, false));
-		return g;
-	}
-	for (size_t i = 0; i < names.size(); i++)
-		g.items.push_back(text(names[i].c_str(), id_base + int(i), int(i) == now, true));
+	if (names.empty()) g.items.push_back(text(UI_TEXT(menu_no_devices, "(No devices)"), 0, false, false));
+	for (size_t i = 0; i < names.size() && i < 256; i++)
+		g.items.push_back(text(names[i].c_str(), id_base + int(i), (midi_route_mask(routes, names[i]) & (1u << column)) != 0, ready));
 	return g;
 }
 
@@ -282,18 +280,12 @@ inline std::vector<menu_group> menu_ports(const menu_state &s)
 {
 	using namespace menu_detail;
 	std::vector<menu_group> groups;
-	for (int p = 0; p < 4; p++)
-		groups.push_back(menu_port_group(in_label(p), s.midi_ins, s.in_dev[p],
-		                                 ID_IN_NONE + p * ID_IN_STRIDE,
-		                                 ID_IN_BASE + p * ID_IN_STRIDE));
-	// Port E: heard only by a multi-part plug-in board (the 16-part FC board)
-	groups.push_back(menu_port_group(in_label(4), s.midi_ins, s.in_dev[4], ID_INE_NONE, ID_INE_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_out_mu, "MIDI OUT (what the MU2000 sends)"), s.midi_outs,
-	                                 s.out_dev_mu, ID_OUTMU_NONE, ID_OUTMU_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_thru_a, "MIDI THRU A (sends out what A receives)"), s.midi_outs,
-	                                 s.out_dev, ID_OUT_NONE, ID_OUT_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_thru_b, "MIDI THRU B (sends out what B receives)"), s.midi_outs,
-	                                 s.out_dev_b, ID_OUTB_NONE, ID_OUTB_BASE));
+	for (int p = 0; p < 5; p++)
+		groups.push_back(menu_port_group(in_label(p), s.midi_ins, s.midi.inputs, p,
+		    p == 4 ? ID_INE_NONE : ID_IN_NONE + p * ID_IN_STRIDE, p == 4 ? ID_INE_BASE : ID_IN_BASE + p * ID_IN_STRIDE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_out_mu, "MIDI OUT (what the MU2000 sends)"), s.midi_outs, s.midi.outputs, 2, ID_OUTMU_NONE, ID_OUTMU_BASE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_thru_a, "MIDI THRU A (sends out what A receives)"), s.midi_outs, s.midi.outputs, 0, ID_OUT_NONE, ID_OUT_BASE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_thru_b, "MIDI THRU B (sends out what B receives)"), s.midi_outs, s.midi.outputs, 1, ID_OUTB_NONE, ID_OUTB_BASE, s.ready));
 	groups.push_back(menu_ain_group(s.audio_ins, s.ain_name));
 	groups.push_back(menu_audio_output(s));
 
