@@ -2521,6 +2521,38 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 					      "FC ボードの音色の組はボード 1 枚ごと: 差込口 3 の組を替えても、差込口 1 のボードの音は変わらない",
 					      "2 倍音 差込口 3 " + std::to_string(own2) + " 倍、差込口 1 " + std::to_string(other2) + " 倍、組を外すと " + std::to_string(back2) + " 倍" + (paths ? "" : "、ファイルの場所が違う"));
 				}
+				// 増設の差込口（PLG-4。firmware は知らない）: パート 4 に挿し、バンク MSB 93 を選ぶと FC ボードの矩形波で鳴る。
+				// firmware は見つけていないまま。バンクを 0 に戻すと内蔵の音。MIDI でなく XG のパラメーターチェンジでバンクを変えても
+				// （ボードには知らされない）、ワーク RAM を見て追う。マルチパートのボードは増設の差込口には挿さらない
+				{
+					const int msb = mu2000::board_bank_msb(3);
+					t.mu.set_virtual_board(mu2000::VBOARD_FC, 3, 3);
+					send({ 0xb3, 91, 0, 0xb3, 0, msb, 0xb3, 32, 0, 0xc3, 0 });
+					const std::vector<double> x1 = play({ 3 });
+					const bool live = t.mu.virtual_board_playing(3), unknown = !t.mu.virtual_board_known(3);
+					const double h1 = tone(x1, 440), h2 = tone(x1, 880), h3 = tone(x1, 1320);
+					send({ 0xb3, 0, 0, 0xb3, 32, 0, 0xc3, 0 });
+					const std::vector<double> x2 = play({ 3 });
+					const bool idle = !t.mu.virtual_board_playing(3);
+					const double i1 = tone(x2, 440), i2 = tone(x2, 880);
+					send({ 0xf0, 0x43, 0x10, 0x4c, 0x08, 0x03, 0x01, msb, 0xf7, 0xf0, 0x43, 0x10, 0x4c, 0x08, 0x03, 0x02, 0x00, 0xf7,
+					       0xf0, 0x43, 0x10, 0x4c, 0x08, 0x03, 0x03, 0x00, 0xf7 });
+					t.pump(300);
+					const bool followed = t.mu.virtual_board_playing(3);
+					const std::vector<double> x3 = play({ 3 });
+					const double f1 = tone(x3, 440), f2 = tone(x3, 880);
+					t.mu.set_virtual_board(mu2000::VBOARD_FC16, 0, 4);
+					const bool no_multi = t.mu.virtual_board_kind(4) == mu2000::VBOARD_NONE && t.mu.virtual_board_multi() == 0;
+					send({ 0xb3, 0, 0, 0xb3, 32, 0, 0xc3, 0 });
+					t.mu.set_virtual_board(mu2000::VBOARD_NONE, 3, 3);
+					check(msb == 93 && live && unknown && h1 > 0.01 && std::fabs(h3 / h1 - 1.0 / 3.0) < 0.05 && h2 < 0.05 * h1 &&
+					      idle && i2 > 0.05 * i1 && followed && f1 > 0.01 && f2 < 0.05 * f1 && no_multi,
+					      "増設の差込口（PLG-4）: firmware が知らないボードが、バンク MSB 93 を選んだパートで鳴る",
+					      "440Hz " + std::to_string(h1) + "（2 倍音 " + std::to_string(h2 / std::max(1e-12, h1)) + " 倍、3 倍音 " + std::to_string(h3 / std::max(1e-12, h1)) +
+					      " 倍）" + (live ? "" : "、鳴る状態でない") + (unknown ? "" : "、firmware が知っている？") + "、バンク 0 では内蔵の音（2 倍音 " +
+					      std::to_string(i2 / std::max(1e-12, i1)) + " 倍）" + (idle ? "" : "、まだ鳴る状態") + "、パラメーターチェンジで選ぶと" +
+					      (followed ? "追う" : "追わない") + "（2 倍音 " + std::to_string(f2 / std::max(1e-12, f1)) + " 倍）、マルチパートは" + (no_multi ? "挿さらない" : "挿さる"));
+				}
 				// パート 2 に差込口 1 のバンクを選ぶ: ボードは鳴らず、内蔵の音（倍音のある別の音）
 				send({ 0xb1, 0, mu2000::board_bank_msb(0), 0xb1, 32, 0, 0xc1, 0 });
 				const bool wrong_bank_idle = !t.mu.virtual_board_playing(1);
