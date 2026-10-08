@@ -480,8 +480,9 @@ public:
 		r.board_file = user_boards::current_path();
 		fm_banks::save(br);
 		r.board_fm = fm_banks::current_path();
-		fc_banks::save(br);
-		r.board_fc = fc_banks::current_path();
+		fc_banks::save_all(br);
+		for (int i = 0; i < fc_banks::TARGETS; i++)
+			r.board_fc[i] = fc_banks::current_path(i);
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1160,12 +1161,15 @@ public:
 				else
 					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
 			}
-			if (eng && !r.board_fc.empty()) {
+			// FC ボードの音色の組は、ボードごと（PLG-1・2・3 と 16 パートのボード）
+			for (int i = 0; eng && i < fc_banks::TARGETS; i++) {
+				if (r.board_fc[i].empty())
+					continue;
 				std::string err;
-				if (const auto b = fc_banks::adopt(r.board_fc, err))
-					eng->mu.set_fc_bank(b, r.board_fc);
+				if (const auto b = fc_banks::adopt(i, r.board_fc[i], err))
+					eng->mu.set_fc_bank(b, r.board_fc[i], i);
 				else
-					std::fprintf(stderr, CLI_T("FC voice set: %s (%s)\n", "FC ボードの音色の組: %s（%s）\n"), err.c_str(), r.board_fc.c_str());
+					std::fprintf(stderr, CLI_T("FC voice set: %s (%s)\n", "FC ボードの音色の組: %s（%s）\n"), err.c_str(), r.board_fc[i].c_str());
 			}
 			if (eng && !r.board_fm.empty()) {
 				std::string err;

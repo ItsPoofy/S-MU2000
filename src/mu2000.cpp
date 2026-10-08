@@ -3758,7 +3758,7 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 				add(i.drum, i.msb, i.lsb, i.program, i.name.c_str());
 	} else if (kind == VBOARD_FC16) {
 		// 初期の音色は 16 個（17 以降はそのくり返し）。音色の組を開いていれば 128 個とも自分の音色
-		for (int i = 0; i < (m_vb_fc_bank ? 128 : 16); i++)
+		for (int i = 0; i < (m_vb_fc_bank[FC_BANK_MULTI] ? 128 : 16); i++)
 			add(false, 0, 0, u8(i), m_vb16[0].fc.name(i));
 	} else if (kind == VBOARD_FM16) {
 		// プログラム番号は GM の並び（分類ごとに 2 つの音色を 4 つずつ）。ドラムは 1 つ

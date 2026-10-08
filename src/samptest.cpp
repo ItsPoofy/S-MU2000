@@ -2505,6 +2505,22 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 					send({ 0xb0 | ch, 91, 0, 0xb0 | ch, 0, mu2000::board_bank_msb(ch), 0xb0 | ch, 32, 0, 0xc0 | ch, 0 });
 				const std::vector<double> p1 = play({ 0 }), p2 = play({ 1 }), p3 = play({ 2 }), all = play({ 0, 1, 2 });
 				const double a1 = tone(p1, 440), a3 = tone(p1, 1320), b1 = tone(p2, 440), b3 = tone(p2, 1320), c1 = tone(p3, 440), c3 = tone(p3, 1320);
+				// FC ボードの音色の組はボード 1 枚ごと: 差込口 3 のボードだけ、プログラム 1 をデューティ 1/8 にする。
+				// 差込口 3（パート 3）には 1/2 に無い 2 倍音が出て、差込口 1（パート 1）は元のまま
+				{
+					auto thin = std::make_shared<smu2000::vboard::fc_bank>();
+					thin->prog[0].duty[0] = 0;
+					t.mu.set_fc_bank(thin, "thin", 2);
+					const std::vector<double> q1 = play({ 0 }), q3 = play({ 2 });
+					const double own2 = tone(q3, 880) / tone(q3, 440), other2 = tone(q1, 880) / tone(q1, 440);
+					const bool paths = t.mu.fc_bank_path(2) == "thin" && t.mu.fc_bank_path(0).empty() && t.mu.fc_bank_path(mu2000::FC_BANK_MULTI).empty();
+					t.mu.set_fc_bank(nullptr, "", 2);
+					const std::vector<double> r3 = play({ 2 });
+					const double back2 = tone(r3, 880) / tone(r3, 440);
+					check(own2 > 0.5 && other2 < 0.05 && back2 < 0.05 && paths,
+					      "FC ボードの音色の組はボード 1 枚ごと: 差込口 3 の組を替えても、差込口 1 のボードの音は変わらない",
+					      "2 倍音 差込口 3 " + std::to_string(own2) + " 倍、差込口 1 " + std::to_string(other2) + " 倍、組を外すと " + std::to_string(back2) + " 倍" + (paths ? "" : "、ファイルの場所が違う"));
+				}
 				// パート 2 に差込口 1 のバンクを選ぶ: ボードは鳴らず、内蔵の音（倍音のある別の音）
 				send({ 0xb1, 0, mu2000::board_bank_msb(0), 0xb1, 32, 0, 0xc1, 0 });
 				const bool wrong_bank_idle = !t.mu.virtual_board_playing(1);

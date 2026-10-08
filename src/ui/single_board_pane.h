@@ -81,7 +81,7 @@ public:
 	}
 
 	// プログラムの名前（後ろの空白は落とす）。オリジナルのボードで波形の入っていない番号は空
-	static std::string program_name(int kind, int prog)
+	static std::string program_name(int kind, int prog, int slot)
 	{
 		std::string name;
 		if (kind == mu2000::VBOARD_USER) {
@@ -89,7 +89,7 @@ public:
 			if (b && prog >= 0 && prog < user_boards::board::PROGRAMS && b->program[size_t(prog)])
 				name = b->program[size_t(prog)]->name;
 		} else {
-			const std::shared_ptr<const fc_banks::bank> b = fc_banks::current();
+			const std::shared_ptr<const fc_banks::bank> b = fc_banks::current(slot);
 			name = b ? b->prog[size_t(prog & 127)].name : smu2000::vboard::fc_program_name(prog);
 		}
 		while (!name.empty() && name.back() == ' ')
@@ -127,8 +127,8 @@ public:
 		ImGui::SeparatorText(title);
 		if (ImGui::BeginChild("sbvoices", ImVec2(0, 0))) {
 			int shown = 0;
-			for (int i = 0; i < programs(kind); i++) {
-				const std::string name = program_name(kind, i);
+			for (int i = 0; i < programs(kind, slot); i++) {
+				const std::string name = program_name(kind, i, slot);
 				if (name.empty() && kind == mu2000::VBOARD_USER && !has_program(i))
 					continue;
 				shown++;
@@ -147,8 +147,8 @@ public:
 		ImGui::EndChild();
 	}
 
-	// FC ボードの音色エディタだけ（16 パートの FC ボードのチャンネルを出しているとき。音色の組は 1 パートのものと同じ）
-	void edit_fc_voice(int prog, bridge &br) { m_fc.draw(prog, br); }
+	// FC ボードの音色エディタだけ（16 パートの FC ボードのチャンネルを出しているとき。音色の組は 16 パートのボードのもの）
+	void edit_fc_voice(int prog, bridge &br) { m_fc.draw(prog, br, fc_banks::MULTI); }
 
 	// 右の面: ボードの音色の中身
 	void edit(int slot, int kind, int part, int prog, bridge &br)
@@ -157,12 +157,11 @@ public:
 		const float fs = ImGui::GetFontSize();
 		if (kind == mu2000::VBOARD_USER) {
 			char title[80];
-			std::snprintf(title, sizeof(title), "PLG-%d  %s    %03d  %s", slot + 1, board_name(kind).c_str(), prog + 1, program_name(kind, prog).c_str());
+			std::snprintf(title, sizeof(title), "PLG-%d  %s    %03d  %s", slot + 1, board_name(kind).c_str(), prog + 1, program_name(kind, prog, slot).c_str());
 			ImGui::SeparatorText(title);
 			edit_user(prog, br, fs);
 		} else {
-			(void)slot;
-			m_fc.draw(prog, br);        // 番号と名前はエディタの 1 行目に出る
+			m_fc.draw(prog, br, slot);  // 番号と名前はエディタの 1 行目に出る。音色の組はこの差込口のボードのもの
 		}
 		ImGui::Spacing();
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -181,7 +180,7 @@ private:
 	int m_name_for = -1;
 
 	// FC ボードは、初期の音色なら 16 個（17 以降はそのくり返し）、音色の組を開いていれば 128 個
-	static int programs(int kind) { return kind == mu2000::VBOARD_USER ? user_boards::board::PROGRAMS : fc_banks::current() ? 128 : 16; }
+	static int programs(int kind, int slot) { return kind == mu2000::VBOARD_USER ? user_boards::board::PROGRAMS : fc_banks::current(slot) ? 128 : 16; }
 	static bool has_program(int prog)
 	{
 		const std::shared_ptr<const user_boards::board> b = user_boards::current();

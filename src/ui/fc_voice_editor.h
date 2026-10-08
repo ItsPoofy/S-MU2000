@@ -1,7 +1,7 @@
 // license:BSD-3-Clause
 //
 // FC ボードの音色エディタ（音色の窓で、FC ボードが鳴らしているパートやチャンネルを出しているときの右の面）。
-// いま選んでいるプログラムの音色（src/vboard.h の fc_voice）を触る。1 パートの FC ボードも 16 パートのものも同じ組を使う:
+// いま選んでいるプログラムの音色（src/vboard.h の fc_voice）を触る。音色の組はボード 1 枚ごと（fc_banks.h）:
 //   ・波（矩形波・三角波・ノイズ 2 種）と、矩形波のデューティの並び
 //   ・音量の下がり方（押している間・離してから）
 //   ・音程の動き（アルペジオ、鳴り始めのずれ、自動のビブラート）
@@ -30,8 +30,8 @@ namespace ui {
 class fc_voice_editor
 {
 public:
-	// program はいま選んでいるプログラム（0-127）
-	void draw(int program, bridge &br)
+	// program はいま選んでいるプログラム（0-127）。target はどのボードの組か（0-2 = PLG-1・2・3、fc_banks::MULTI = 16 パートのボード）
+	void draw(int program, bridge &br, int target)
 	{
 		namespace fb = fc_banks;
 		namespace vb = smu2000::vboard;
@@ -44,39 +44,40 @@ public:
 			m_listed = now;
 			m_list = fb::list();
 		}
-		std::shared_ptr<const fb::bank> cur = fb::current();
+		std::shared_ptr<const fb::bank> cur = fb::current(target);
 		fb::voice v = cur ? cur->prog[size_t(program)] : vb::fc_default_voice(program);
 		bool changed = false;
 
 		// ---- 組（128 個の音色のまとまり）
 		{
-			const std::string stem = fb::current_stem();
+			const std::string stem = fb::current_stem(target);
 			ImGui::SetNextItemWidth(fs * 9);
 			if (ImGui::BeginCombo("##fcset", cur ? cur->name : UI_TEXT(fme_default_set, "(initial voices)"))) {
 				if (ImGui::Selectable(UI_TEXT(fme_default_set, "(initial voices)"), !cur) && cur) {
-					fb::close(br);
+					fb::close(br, target);
 					m_note.clear();
 				}
 				for (const std::string &s : m_list)
 					if (ImGui::Selectable(s.c_str(), s == stem) && s != stem) {
 						std::string err;
-						m_note = fb::open(br, s, err) ? std::string() : err;
+						m_note = fb::open(br, target, s, err) ? std::string() : err;
 					}
 				ImGui::EndCombo();
 			}
 			if (ImGui::IsItemHovered())
-				xgui::hint("%s", UI_TEXT(fce_set_tip, "Voice set\nThe 128 voices of the FC board, kept as one file in the \"fcsets\" folder of the settings folder. The single-part FC board and the 16-part one share it. \"(initial voices)\" is the built-in set of 16; touching anything there makes a copy called FC SET, and the voice list grows to 128."));
+				xgui::hint("%s", UI_TEXT(fce_set_tip, "Voice set\nThe 128 voices of the FC board, kept as one file in the \"fcsets\" folder of the settings folder. Each FC board has its own: PLG-1, PLG-2, PLG-3 and the 16-part board can each open a different set, or the same one. \"(initial voices)\" is the built-in set of 16; touching anything there makes a copy called FC SET for this board, and its voice list grows to 128."));
 			ImGui::SameLine();
 			if (ImGui::SmallButton(UI_TEXT(fme_new_set, "New set"))) {
-				fb::create(br);
+				fb::create(br, target);
 				m_listed = -1;
 				m_note.clear();
 			}
-			cur = fb::current();
+			cur = fb::current(target);
 			if (cur) {
 				// 組の名前。変えるとファイルの名前も変わる
-				const std::string path = fb::current_path();
-				if (m_name_for != path && !ImGui::IsAnyItemActive()) {
+				const std::string path = fb::current_path(target);
+				if ((m_name_for != path || m_name_target != target) && !ImGui::IsAnyItemActive()) {
+					m_name_target = target;
 					m_name_for = path;
 					std::snprintf(m_set_name, sizeof(m_set_name), "%s", cur->name);
 				}
@@ -95,7 +96,7 @@ public:
 						m_note.clear();
 						auto nb = std::make_shared<fb::bank>(*cur);
 						std::snprintf(nb->name, sizeof(nb->name), "%s", clean);
-						fb::commit(br, nb);
+						fb::commit(br, target, nb);
 						cur = nb;
 					}
 					m_name_for.clear();
@@ -274,15 +275,15 @@ public:
 			if (cur) {
 				nb = std::make_shared<fb::bank>(*cur);
 			} else {
-				nb = fb::fresh();             // 初期の音色の写しから、新しい組を作る
+				nb = fb::fresh(target);             // 初期の音色の写しから、新しい組を作る
 				m_listed = -1;
 			}
 			nb->prog[size_t(program)] = v;
-			fb::commit(br, nb);
+			fb::commit(br, target, nb);
 		}
 		// つまみを離したら、ファイルへ書く
-		if (fb::unsaved() && !ImGui::IsAnyItemActive()) {
-			if (!fb::save(br))
+		if (fb::unsaved(target) && !ImGui::IsAnyItemActive()) {
+			if (!fb::save(br, target))
 				m_note = UI_TEXT(fme_save_fail, "Could not write the voice set file");
 			m_listed = -1;
 		}
@@ -428,6 +429,7 @@ private:
 	double m_listed = -1;
 	std::string m_note, m_name_for;
 	char m_set_name[15] = {};
+	int m_name_target = -1;
 };
 
 } // namespace ui

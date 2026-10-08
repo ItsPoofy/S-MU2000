@@ -1,9 +1,13 @@
 // license:BSD-3-Clause
 //
-// FC ボードの音色の組（src/vboard.h の fc_bank）の置き場と、いま開いている組。1 パートの FC ボードも 16 パートのものも同じ組で鳴る。
+// FC ボードの音色の組（src/vboard.h の fc_bank）の置き場と、いま開いている組。
+// **ボード 1 枚ごとに別の組を持つ**（実機のボードが 1 枚ずつ自分の音色を持つのと同じ）。持ち主（target）は 4 つ:
+// 差込口 PLG-1・2・3 の 1 パートの FC ボード（0-2）と、16 パートの FC ボード（3 = MULTI）。
 // 組は設定のフォルダーの下の fcsets に、名前ごとに 1 ファイル（<名前>.smufc）で置く。変えるたびに書く。
-// 何も開いていない間は、ボードは初期の 16 個で鳴る。音色エディタ（fc_voice_editor.h）が最初に何かを変えたとき、
-// 初期の組の写しを「FC SET」として作る。音源（mu2000）へは bridge::post で渡す
+// 何も開いていない間は、そのボードは初期の 16 個で鳴る。音色エディタ（fc_voice_editor.h）が最初に何かを変えたとき、
+// 初期の組の写しを「FC SET」として作る（名前が使われていれば番号を足す）。
+// 同じファイルを 2 枚のボードで開いてもよい。そのときは、片方で変えるともう片方にもすぐ届く。
+// 音源（mu2000）へは bridge::post で渡す
 
 #ifndef S_MU2000_UI_FC_BANKS_H
 #define S_MU2000_UI_FC_BANKS_H
@@ -26,18 +30,23 @@ using bank = smu2000::vboard::fc_bank;
 using voice = smu2000::vboard::fc_voice;
 
 inline constexpr const char *EXT = ".smufc";
+inline constexpr int TARGETS = mu2000::FC_BANKS;       // PLG-1・2・3 と 16 パートのボード
+inline constexpr int MULTI = mu2000::FC_BANK_MULTI;
 
 struct state {
 	std::mutex lock;
-	std::shared_ptr<const bank> now;
-	std::string path;
-	bool unsaved = false;
+	struct one {
+		std::shared_ptr<const bank> now;
+		std::string path;
+		bool unsaved = false;
+	} t[TARGETS];
 };
 inline state &st()
 {
 	static state s;
 	return s;
 }
+inline int clamp_target(int target) { return std::clamp(target, 0, TARGETS - 1); }
 
 // 置き場（無ければ作る）。作れなければ空
 inline std::string dir()
@@ -75,72 +84,98 @@ inline std::vector<std::string> list()
 	return out;
 }
 
-// いま開いている組（無ければ nullptr = 初期の音色）
-inline std::shared_ptr<const bank> current()
+// そのボードがいま開いている組（無ければ nullptr = 初期の音色）
+inline std::shared_ptr<const bank> current(int target)
 {
 	std::lock_guard<std::mutex> g(st().lock);
-	return st().now;
+	return st().t[clamp_target(target)].now;
 }
-inline std::string current_path()
+inline std::string current_path(int target)
 {
 	std::lock_guard<std::mutex> g(st().lock);
-	return st().path;
+	return st().t[clamp_target(target)].path;
 }
-inline std::string current_stem()
+inline std::string current_stem(int target)
 {
-	const std::string p = current_path();
+	const std::string p = current_path(target);
 	const size_t slash = p.find_last_of("/\\"), n = std::char_traits<char>::length(EXT);
 	const std::string name = p.substr(slash == std::string::npos ? 0 : slash + 1);
 	return name.size() > n ? name.substr(0, name.size() - n) : std::string();
 }
 
-// 起動のとき: 設定に覚えてあった組を読んでおく（音源へは呼んだ側が渡す）
-inline std::shared_ptr<const bank> adopt(const std::string &path, std::string &err)
+// 起動のとき: 設定に覚えてあった組を読んでおく（音源へは呼んだ側が渡す）。
+// ほかのボードがもう同じファイルを開いていれば、同じものを使う
+inline std::shared_ptr<const bank> adopt(int target, const std::string &path, std::string &err)
 {
-	std::shared_ptr<const bank> b = smu2000::vboard::load_fc_bank(path, err);
+	target = clamp_target(target);
+	std::shared_ptr<const bank> b;
+	{
+		std::lock_guard<std::mutex> g(st().lock);
+		for (const state::one &o : st().t)
+			if (o.now && o.path == path)
+				b = o.now;
+	}
+	if (!b)
+		b = smu2000::vboard::load_fc_bank(path, err);
 	if (b) {
 		std::lock_guard<std::mutex> g(st().lock);
-		st().now = b;
-		st().path = path;
+		st().t[target].now = b;
+		st().t[target].path = path;
+		st().t[target].unsaved = false;
 	}
 	return b;
 }
 
-inline void to_engine(bridge &br, std::shared_ptr<const bank> b, const std::string &path)
+inline void to_engine(bridge &br, int target, std::shared_ptr<const bank> b, const std::string &path)
 {
-	br.post([b, path](mu2000 &mu) {
-		mu.set_fc_bank(b, path);
+	br.post([target, b, path](mu2000 &mu) {
+		mu.set_fc_bank(b, path, target);
 		return std::string();
 	});
 }
 
-// 変えた組を音源へ渡す。ファイルへはまだ書かない（つまみを引いている間は書かず、save で 1 度に書く）
-inline void commit(bridge &br, std::shared_ptr<const bank> b)
+// 変えた組を音源へ渡す。ファイルへはまだ書かない（つまみを引いている間は書かず、save で 1 度に書く）。
+// 同じファイルを開いているほかのボードにも、同じものを渡す
+inline void commit(bridge &br, int target, std::shared_ptr<const bank> b)
 {
+	target = clamp_target(target);
 	std::string path;
+	bool also[TARGETS] = {};
 	{
 		std::lock_guard<std::mutex> g(st().lock);
-		st().now = b;
-		st().unsaved = true;
-		if (st().path.empty())
-			st().path = file_for(b->name);
-		path = st().path;
+		state::one &me = st().t[target];
+		if (me.path.empty())
+			me.path = file_for(b->name);
+		path = me.path;
+		me.now = b;
+		me.unsaved = true;
+		for (int i = 0; i < TARGETS; i++)
+			if (i != target && !path.empty() && st().t[i].now && st().t[i].path == path) {
+				st().t[i].now = b;
+				also[i] = true;
+			}
 	}
-	to_engine(br, std::move(b), path);
+	to_engine(br, target, b, path);
+	for (int i = 0; i < TARGETS; i++)
+		if (also[i])
+			to_engine(br, i, b, path);
 }
 
-// まだ書いていない変更をファイルへ。名前を変えていたら、ファイルの名前も変える（古いほうは消す）
-inline bool save(bridge &br)
+// まだ書いていない変更をファイルへ。名前を変えていたら、ファイルの名前も変える（古いほうは消す。
+// 同じファイルを開いていたほかのボードも、新しい名前についてくる）
+inline bool save(bridge &br, int target)
 {
+	target = clamp_target(target);
 	std::shared_ptr<const bank> b;
 	std::string old;
 	{
 		std::lock_guard<std::mutex> g(st().lock);
-		if (!st().unsaved || !st().now)
+		state::one &me = st().t[target];
+		if (!me.unsaved || !me.now)
 			return true;
-		st().unsaved = false;
-		b = st().now;
-		old = st().path;
+		me.unsaved = false;
+		b = me.now;
+		old = me.path;
 	}
 	const std::string path = file_for(b->name);
 	if (path.empty() || !smu2000::vboard::save_fc_bank(path, *b))
@@ -148,71 +183,88 @@ inline bool save(bridge &br)
 	if (path != old) {
 		if (!old.empty())
 			std::remove(old.c_str());
+		bool moved[TARGETS] = {};
 		{
 			std::lock_guard<std::mutex> g(st().lock);
-			st().path = path;
+			for (int i = 0; i < TARGETS; i++)
+				if (i == target || (!old.empty() && st().t[i].path == old)) {
+					st().t[i].path = path;
+					st().t[i].now = b;
+					moved[i] = true;
+				}
 		}
-		to_engine(br, b, path);
+		for (int i = 0; i < TARGETS; i++)
+			if (moved[i])
+				to_engine(br, i, b, path);
 	}
 	return true;
 }
-inline bool unsaved()
+inline void save_all(bridge &br)
+{
+	for (int i = 0; i < TARGETS; i++)
+		save(br, i);
+}
+inline bool unsaved(int target)
 {
 	std::lock_guard<std::mutex> g(st().lock);
-	return st().unsaved;
+	return st().t[clamp_target(target)].unsaved;
 }
 
-// 置き場の組を開く
-inline bool open(bridge &br, const std::string &stem, std::string &err)
+// 置き場の組を、そのボードで開く
+inline bool open(bridge &br, int target, const std::string &stem, std::string &err)
 {
-	save(br);
+	save(br, target);
 	const std::string d = dir();
 	if (d.empty()) {
 		err = "no settings folder";
 		return false;
 	}
 	const std::string path = smu2000::join(d, stem + EXT);
-	std::shared_ptr<const bank> b = adopt(path, err);
+	std::shared_ptr<const bank> b = adopt(target, path, err);
 	if (!b)
 		return false;
-	to_engine(br, std::move(b), path);
+	to_engine(br, target, std::move(b), path);
 	return true;
 }
 
-// 初期の音色の写しで、まだ使われていない名前の組を作る（置き場には書かない）。いま開いている組は閉じた扱いにする
-inline std::shared_ptr<bank> fresh()
+// 初期の音色の写しで、まだ使われていない名前の組を作る（置き場には書かない）。そのボードが開いていた組は閉じた扱いにする。
+// ほかのボードが開いている（まだ書いていない）組の名前も避ける
+inline std::shared_ptr<bank> fresh(int target)
 {
+	target = clamp_target(target);
 	auto b = std::make_shared<bank>();
+	std::lock_guard<std::mutex> g(st().lock);
 	for (int n = 1; n < 100; n++) {
 		std::snprintf(b->name, sizeof(b->name), n == 1 ? "FC SET" : "FC SET %d", n);
 		const std::string p = file_for(b->name);
-		if (p.empty() || !smu2000::is_file(p))
+		bool taken = !p.empty() && smu2000::is_file(p);
+		for (int i = 0; i < TARGETS && !taken; i++)
+			taken = i != target && !p.empty() && st().t[i].path == p;
+		if (!taken)
 			break;
 	}
-	std::lock_guard<std::mutex> g(st().lock);
-	st().path.clear();
+	st().t[target].path.clear();
 	return b;
 }
 
 // 新しい組（初期の音色の写し）。同じ名前のファイルがあれば、番号を足す
-inline void create(bridge &br)
+inline void create(bridge &br, int target)
 {
-	save(br);
-	commit(br, fresh());
-	save(br);
+	save(br, target);
+	commit(br, target, fresh(target));
+	save(br, target);
 }
 
-// 初期の音色に戻す（組を閉じる。ファイルは残る）
-inline void close(bridge &br)
+// 初期の音色に戻す（そのボードで組を閉じる。ファイルは残る）
+inline void close(bridge &br, int target)
 {
-	save(br);
+	target = clamp_target(target);
+	save(br, target);
 	{
 		std::lock_guard<std::mutex> g(st().lock);
-		st().now.reset();
-		st().path.clear();
-		st().unsaved = false;
+		st().t[target] = state::one();
 	}
-	to_engine(br, nullptr, std::string());
+	to_engine(br, target, nullptr, std::string());
 }
 
 } // namespace ui::fc_banks

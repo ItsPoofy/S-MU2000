@@ -266,7 +266,7 @@ inline const ui_texts &en_texts()
 		.sb_env = "Envelope (one key held for 1 second, then released)",
 		.sb_user_note = "Attack is the rise, Decay the fall to the Sustain level while the key is held (\"-\" keeps the level), Release the fade after the key is let go. Changes are heard at once and saved to the board file. Waves are put on the board in the Sampling window (Make a wave > Your own board).",
 		.sb_tab = "Board",
-		.fce_set_tip = "Voice set\nThe 128 voices of the FC board, kept as one file in the \"fcsets\" folder of the settings folder. The single-part FC board and the 16-part one share it. \"(initial voices)\" is the built-in set of 16; touching anything there makes a copy called FC SET, and the voice list grows to 128.",
+		.fce_set_tip = "Voice set\nThe 128 voices of the FC board, kept as one file in the \"fcsets\" folder of the settings folder. Each FC board has its own: PLG-1, PLG-2, PLG-3 and the 16-part board can each open a different set, or the same one. \"(initial voices)\" is the built-in set of 16; touching anything there makes a copy called FC SET for this board, and its voice list grows to 128.",
 		.fce_wave = "Wave",
 		.fce_w_square = "Square",
 		.fce_w_triangle = "Triangle",
