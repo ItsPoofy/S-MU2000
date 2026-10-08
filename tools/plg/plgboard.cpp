@@ -8,6 +8,7 @@
 //   AAAAAA=データ        機種 4E の番地への返事。011000=000100 010000=<名前 14 文字> など
 //   4f7f0000NN=データ    機種 4F の表の NN 番目への返事。最後を ** にすると何番目でも同じ返事
 //   qRR=KKデータ         F0 43 40 <RR> ... への返事。KK は返事の種類（40-43）。qRR#3= で 3 回目だけ
+//   qRR@AAAAAAAA=KKデータ  その番地（4 バイト）への問い合わせにだけ、この返事（番地ごとに違う値を返したいとき）
 //   midi@100=904064      10.0 秒に本体の MIDI IN へ送る
 //   inj@100=f043...f7    10.0 秒に、頼まれていないものをボードから本体へ送る
 //   key@100=Util         10.0 秒にパネルのボタンを押す（名前は mu2000::button_name のもの）
@@ -36,6 +37,7 @@ static std::map<std::vector<u8>, std::vector<u8>> g_table;   // 機種から番�
 static std::map<std::vector<u8>, std::vector<u8>> g_wild;    // 番地の最後の 1 バイトは何でもよいもの
 static int g_t = 0;
 static std::map<int, std::vector<u8>> g_q40;   // F0 43 40 03 ... への返事（種類 40-43 ごと）
+static std::map<std::vector<u8>, std::vector<u8>> g_q40_at;   // 要求 1 バイト + 番地 4 バイト → 返事（番地ごと）
 static int g_xg_bulk = 0;
 static std::map<u32, int> g_pc;
 static bool g_pc_on = std::getenv("PLG_PC") != nullptr;
@@ -93,6 +95,14 @@ static void on_message(int slots, const std::vector<u8> &m)
 	if (m.size() >= 9 && m[0] == 0xf0 && m[1] == 0x43 && m[2] == 0x40 && m[3] < 0x40) {
 		static std::map<int, int> seen;
 		const int nth = seen[m[3]]++;
+		if (const auto at = g_q40_at.find({ m[3], m[4], m[5], m[6], m[7] }); at != g_q40_at.end() && !at->second.empty()) {
+			std::vector<u8> r = { 0xf0, 0x43, 0x40, at->second[0], m[4], m[5], m[6], m[7] };
+			r.insert(r.end(), at->second.begin() + 1, at->second.end());
+			r.push_back(0xf7);
+			show("board->MU", 1, r);
+			M.plg_reply(0, r);
+			return;
+		}
 		auto it = g_q40.find(m[3] << 8 | (nth + 1));
 		if (it == g_q40.end())
 			it = g_q40.find(m[3] << 8);
@@ -138,6 +148,13 @@ int main(int argc, char **argv)
 		const size_t eq = a.find('=');
 		if (a.rfind("key@", 0) == 0) {
 			g_keys.push_back({ std::stoi(a.substr(4, eq - 4)), a.substr(eq + 1) });
+			continue;
+		}
+		if (a.rfind("q", 0) == 0 && a.size() > 3 && a[3] == '@') {
+			std::vector<u8> k = hex(a.substr(1, 2));
+			const std::vector<u8> addr = hex(a.substr(4, eq - 4));
+			k.insert(k.end(), addr.begin(), addr.end());
+			g_q40_at[k] = hex(a.substr(eq + 1));
 			continue;
 		}
 		if (a.rfind("q", 0) == 0 && (eq == 3 || a[3] == '#')) {
