@@ -21,23 +21,16 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace ui {
 
-class master_editor : public imgui_view
+// 架空のプラグインボード（src/vboard.h）の欄。差込口 3 つぶんの「挿すボードと、挿すパート」と、
+// マルチパートのボードの 16 チャンネルの表。gui ではプラグインボードの窓（board_editor）が、
+// プラグインではマスターの窓が持つ
+class board_panes
 {
 public:
-	const wchar_t *title() const override
-	{
-		return get_lang() == lang::ja ? L"S-MU2000 マスター" : L"S-MU2000 Master";
-	}
-	int default_width() const override  { return 900; }
-	int default_height() const override { return 640; }
-	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
-
-private:
-	// .syx の書き出し・読み込み（issue #35）
-	void sysex_pane(const xg_snapshot &ram, bridge &br);
 	// 架空のプラグインボード（src/vboard.h）。挿すボードと、挿すパート（1-64）
 	void board_pane(bridge &br);
 	void board_slot_pane(bridge &br, int slot, const std::string &kinds);
@@ -71,6 +64,41 @@ private:
 	double m_ub_listed = -1;
 	std::string m_ub_note;
 	bool m_board_booting[mu2000::PLG_SLOTS] = { false, false, false };   // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
+};
+
+// プラグインボードの窓（gui だけ）。上に差込口 3 つ、下にマルチパートのボードの 16 チャンネル。
+// マスターの窓の左上に詰め込んでいたものを、広げられる窓に出したもの
+class board_editor : public imgui_view
+{
+public:
+	const wchar_t *title() const override
+	{
+		return get_lang() == lang::ja ? L"S-MU2000 プラグインボード" : L"S-MU2000 Plug-in Boards";
+	}
+	int default_width() const override  { return 780; }
+	int default_height() const override { return 600; }
+	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
+
+private:
+	board_panes m_boards;
+};
+
+class master_editor : public imgui_view
+{
+public:
+	const wchar_t *title() const override
+	{
+		return get_lang() == lang::ja ? L"S-MU2000 マスター" : L"S-MU2000 Master";
+	}
+	int default_width() const override  { return 900; }
+	int default_height() const override { return 640; }
+	void draw(xg::model &m, const xg_snapshot &ram, bridge &br) override;
+
+private:
+	// .syx の書き出し・読み込み（issue #35）
+	void sysex_pane(const xg_snapshot &ram, bridge &br);
+	// 架空のプラグインボードの欄（gui ではプラグインボードの窓に出すので、ここは開くボタンだけ）
+	board_panes m_boards;
 	bool m_diff_only = true;              // 既定と違うものだけ書き出す
 	bool m_export_waiting = false;        // 既定値ができるのを待っている（bridge の request_defaults）
 	std::vector<u8> m_import;             // 読み込んだ中身。1 通ずつ音源へ流す

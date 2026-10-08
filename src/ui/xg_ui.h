@@ -108,6 +108,12 @@ void request_board(int channel);        // 音色の窓を、そのチャンネ�
 // ---- マスターの窓（マスターボリューム・移調・システムエフェクトの戻り・マスター EQ）を開く頼み。
 // 一覧のマスターの行（MASTER の名前、MASTER EQ の絵）のダブルクリックから
 void request_master();
+// プラグインボードの窓（gui だけが持つ）。持っているプログラムが set_board_window(true) にしておくと、マスターの窓は
+// ボードの欄を出さずに、その窓を開くボタンだけを出す。プラグインは窓を持たないので、今までどおりマスターの窓に欄が出る
+void set_board_window(bool on);
+bool board_window();
+void request_board_window();
+bool take_board_window_request();       // 頼みがあれば true（1 回だけ）
 bool take_master_request();             // 頼みがあれば true（1 回だけ）
 
 // ---- ドラムセットアップ（XG の 3n rr pp）。エディタのドラムの面と、音色の窓のドラムのタブが使う

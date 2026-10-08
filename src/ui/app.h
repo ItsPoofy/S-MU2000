@@ -102,6 +102,8 @@ public:
 	pc_window sampling{ std::make_unique<sampling_editor>() };
 	// MIDI プレイヤーの窓。gui だけが持つ（上の 6 つはプラグインにもある）
 	pc_window player_win{ std::make_unique<player_view>(play) };
+	// プラグインボードの窓。これも gui だけ（プラグインではマスターの窓に欄が出る。xgui::set_board_window）
+	pc_window board_win{ std::make_unique<board_editor>() };
 
 	struct engine *eng = nullptr;    // set once the ROMs are loaded
 	std::atomic<int> *state = nullptr; // the engine's, so menus can grey out
@@ -166,6 +168,10 @@ public:
 		{
 			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
 			player_win.frame(panel.xg(), panel.ram(), br);
+			board_win.frame(panel.xg(), panel.ram(), br);
+			// マスターの窓の「プラグインボード...」
+			if (xgui::take_board_window_request())
+				open_pc_window(board_win);
 			ImGui::SetCurrentContext(panel_ctx);
 		}
 	}
@@ -426,6 +432,10 @@ public:
 	{
 		if (kind == BAR_PLAYER) {
 			open_pc_window(player_win);
+			return;
+		}
+		if (kind == BAR_BOARD) {
+			open_pc_window(board_win);
 			return;
 		}
 		open_pc_window(*window_for_kind(kind, list, pc, fx, shapes, master, sampling));
@@ -1116,6 +1126,7 @@ public:
 		panel.set_lcd_only(lcd_only);
 		if (!lcd_only) {
 			bar.set_items(window_bar_items(true));
+			xgui::set_board_window(true);        // マスターの窓は、ボードの欄の代わりに窓を開くボタンを出す
 			panel.set_top_inset(toolbar::HEIGHT);
 		}
 		panel.resize(a.win_w, a.win_h);
@@ -1243,6 +1254,8 @@ public:
 			open_window_by_kind(BAR_SAMPLING);
 		if (w.open_player && !w.lcd_only)
 			open_window_by_kind(BAR_PLAYER);
+		if (w.open_board && !w.lcd_only)
+			open_window_by_kind(BAR_BOARD);
 	}
 
 	// Starts the audio device. False parks the engine on the failure and
@@ -1315,6 +1328,7 @@ public:
 		{
 			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
 			player_win.shutdown(br);
+			board_win.shutdown(br);
 			ImGui::SetCurrentContext(panel_ctx);
 		}
 		if (m_ain_lister.joinable())

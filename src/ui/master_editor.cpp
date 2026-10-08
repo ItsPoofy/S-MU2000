@@ -119,7 +119,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	const float row_h = ImGui::GetFrameHeightWithSpacing();
 	// 上の段は、左の区画（システム・SysEx・架空のボード）が巻かずに収まる行数で高さを決める
 	// （システムエフェクトの表は 区画の見出し + 表の見出し + 7 行で、それより低い）
-	const float top_h = std::min(avail.y * 0.6f, row_h * 12.0f + fs * 1.5f);
+	const float top_h = std::min(avail.y * 0.6f, row_h * (board_window() ? 11.0f : 12.0f) + fs * 1.5f);
 
 	// ---- 上の左: システム
 	const float sys_w = std::min(fs * 22.0f, avail.x * 0.35f);
@@ -135,7 +135,16 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		ImGui::Spacing();
 		sysex_pane(ram, br);
 		ImGui::Spacing();
-		board_pane(br);
+		if (board_window()) {
+			// gui: ボードは専用の窓で（ここは狭くて、差込口 3 つと説明が収まらない）
+			ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
+			if (ImGui::Button(UI_TEXT(me_board_open, "Plug-in boards...")))
+				request_board_window();
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", UI_TEXT(me_board_open_tip, "Opens the Plug-in Boards window: the three slots (PLG-1 to PLG-3) and, for a 16-part board, its channels."));
+		} else {
+			m_boards.board_pane(br);
+		}
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
@@ -231,7 +240,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// ---- 下: マスター EQ。マルチパートのボードが挿さっているときは、タブで「ボードのパート」に切り替えられる
 	bool show_board = false;
-	if (board_multi_kind() && ImGui::BeginTabBar("bottom")) {
+	if (!board_window() && m_boards.board_multi_kind() && ImGui::BeginTabBar("bottom")) {
 		if (ImGui::BeginTabItem(UI_TEXT(me_master_eq, "Master EQ")))
 			ImGui::EndTabItem();
 		if (ImGui::BeginTabItem(UI_TEXT(me_board_parts, "Board parts (port E)"))) {
@@ -242,7 +251,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	}
 	if (show_board) {
 		if (ImGui::BeginChild("boardparts", ImVec2(0, 0), ImGuiChildFlags_Borders))
-			board_parts_pane(m, br);
+			m_boards.board_parts_pane(m, br);
 		ImGui::EndChild();
 	} else if (ImGui::BeginChild("eq", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
 		ImGui::AlignTextToFramePadding();
@@ -405,9 +414,58 @@ void master_editor::sysex_pane(const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", xgui::file_note().c_str());
 }
 
+// プラグインボードの窓（gui）。上に差込口 3 つ（幅いっぱい）、下にマルチパートのボードの 16 チャンネル
+void board_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
+{
+	(void)ram;
+	const ImGuiViewport *vp = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(vp->WorkPos);
+	ImGui::SetNextWindowSize(vp->WorkSize);
+	const ImGuiWindowFlags wf = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+	                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+	ImGui::Begin("board_editor", nullptr, wf);
+	ImGui::PopStyleVar();
+
+	// 表示の大きさはマスターの窓と同じ値を使う（同じ欄を移したものなので）
+	float &zoom = master_zoom();
+	ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * zoom);
+	const float fs = ImGui::GetFontSize();
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted("PLUG-IN BOARDS");
+	ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 9);
+	if (ImGui::SmallButton("-"))
+		set_master_zoom(zoom - 0.1f);
+	ImGui::SameLine();
+	ImGui::Text("%d%%", int(std::lround(zoom * 100)));
+	ImGui::SameLine();
+	if (ImGui::SmallButton("+"))
+		set_master_zoom(zoom + 0.1f);
+
+	// ---- 差込口（中身の高さに合わせる）
+	if (ImGui::BeginChild("slots", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY))
+		m_boards.board_pane(br);
+	ImGui::EndChild();
+
+	// ---- マルチパートのボードの 16 チャンネル（残りの高さ全部）
+	if (ImGui::BeginChild("parts", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+		if (m_boards.board_multi_kind()) {
+			heading(UI_TEXT(me_board_parts, "Board parts (port E)"));
+			m_boards.board_parts_pane(m, br);
+		} else {
+			ImGui::TextDisabled("%s", UI_TEXT(me_board_no_parts, "The 16 channels of a 16-part board (port E) are listed here once one is plugged in."));
+		}
+	}
+	ImGui::EndChild();
+
+	ImGui::PopFont();
+	ImGui::End();
+}
+
 // 架空のプラグインボードを挿す・外す。実在しないボードを挿したことにして、選んだパートの MIDI で鳴らす。
 // 音は MU のミキサーとエフェクトを通り、そのパートの音量・パン・リバーブ／コーラスの送りが効く（src/vboard.h）
-void master_editor::board_pane(bridge &br)
+void board_panes::board_pane(bridge &br)
 {
 	ImGui::SeparatorText(UI_TEXT(me_board_title, "Imaginary plug-in board"));
 	const std::string kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
@@ -425,7 +483,7 @@ void master_editor::board_pane(bridge &br)
 }
 
 // 差込口 1 つぶん。挿すボードと、挿すパート（1 パートのボード）。その下に、いまの様子
-void master_editor::board_slot_pane(bridge &br, int slot, const std::string &kinds)
+void board_panes::board_slot_pane(bridge &br, int slot, const std::string &kinds)
 {
 	const float fs = ImGui::GetFontSize();
 	ImGui::AlignTextToFramePadding();
@@ -578,7 +636,7 @@ static void board_insert_combo(int ch, const mu2000::board_part &p, xg::model &m
 
 // マルチパートのボードの 16 チャンネル。様子は音声の糸に聞き、動かした値は口 E へ MIDI で送る
 // （ボードは MIDI で動くので、外から送ったのと同じ結果になる）
-void master_editor::board_parts_pane(xg::model &m, bridge &br)
+void board_panes::board_parts_pane(xg::model &m, bridge &br)
 {
 	const float fs = ImGui::GetFontSize();
 	br.post([info = m_board_parts](mu2000 &mu) {
@@ -670,7 +728,7 @@ void master_editor::board_parts_pane(xg::model &m, bridge &br)
 }
 
 // オリジナルのボード: 置き場（設定のフォルダーの boards）のボードから選ぶ。中身はサンプリングの窓の「波形を作る」で作る
-void master_editor::board_user_pane(bridge &br)
+void board_panes::board_user_pane(bridge &br)
 {
 	namespace ub = user_boards;
 	const float fs = ImGui::GetFontSize();
@@ -702,7 +760,7 @@ void master_editor::board_user_pane(bridge &br)
 }
 
 // DLS のボード: 読むファイルを選ぶ。選んだら音声の糸で読ませ、結果（音色と波形の数、または読めなかった訳）を出す
-void master_editor::board_dls_pane(bridge &br)
+void board_panes::board_dls_pane(bridge &br)
 {
 	const float fs = ImGui::GetFontSize();
 	std::string picked;

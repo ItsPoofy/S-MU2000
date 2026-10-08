@@ -92,6 +92,7 @@ inline const ui_texts &en_texts()
 		              "        [--master-window] also open the master window (double-click the master row)\n"
 		              "        [--sampling-window] also open the sampling window\n"
 		              "        [--player-window] also open the MIDI player window\n"
+		              "        [--board-window] also open the plug-in boards window\n"
 		              "        [--lang ja|en] language (else lang= in editor.ini, else the locale: Japanese iff it says ja)\n"
 		              "        [--help]      show this help\n"
 		              "        gui --dump-layout panel.txt   write out the current layout\n"
@@ -318,6 +319,9 @@ inline const ui_texts &en_texts()
 		.me_reading_defaults = "Reading defaults...",
 		.me_sysex_title = "SysEx (.syx)",
 		.me_board_title = "Imaginary plug-in board",
+		.me_board_open = "Plug-in boards...",
+		.me_board_open_tip = "Opens the Plug-in Boards window: the three slots (PLG-1 to PLG-3) and, for a 16-part board, its channels.",
+		.me_board_no_parts = "The 16 channels of a 16-part board (port E) are listed here once one is plugged in.",
 		.me_board_none = "(none)",
 		.me_board_fc = "FC board (8-bit console sounds)",
 		.me_board_fc16 = "FC board, 16 parts on port E",
@@ -533,6 +537,7 @@ inline const ui_texts &en_texts()
 		.ov_silent = "(silent)",
 		.bar_sampling = "Sampling",
 		.bar_player = "Player",
+		.bar_board = "Boards",
 		.ply_idle = "Nothing is playing",
 		.ply_prev = "Prev",
 		.ply_play = "Play",
