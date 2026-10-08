@@ -156,7 +156,9 @@ struct out_hooks {
 };
 void set_out_hooks(out_hooks h);
 bool out_ready();
-void out_port_combo();                  // 送り先の品書き（と、送った結果のひとこと）
+// 送り先の品書き（と、送った結果のひとこと）。ctrl_click: その窓では Ctrl＋右クリックでしか送らないとき。
+// 名前を「Ctrl＋右クリックの送り先」にする（「送る」ボタンのある窓は、ただの「送り先」）
+void out_port_combo(bool ctrl_click = false);
 // 部品がカーソルの下にあるとき、送る中身を名乗る（1 コマごとに out_begin_frame で空に戻る）
 void out_begin_frame();
 void out_hover_param(const xg::param &p, int part);  // パートや共通のパラメータ 1 つ

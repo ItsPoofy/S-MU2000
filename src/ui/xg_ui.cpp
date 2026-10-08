@@ -601,7 +601,7 @@ void out_hover_group(const std::vector<const char *> &keys, int part)
 	g_hover.part = part;
 }
 
-void out_port_combo()
+void out_port_combo(bool ctrl_click)
 {
 	if (!out_ready())
 		return;
@@ -609,7 +609,9 @@ void out_port_combo()
 	const std::string cur = g_out.chosen ? g_out.chosen() : std::string();
 	const char *panel = UI_TEXT(ps_out_panel, "Panel ports");
 	ImGui::AlignTextToFramePadding();
-	ImGui::TextDisabled("%s", UI_TEXT(ps_out_label, "Send to"));
+	// 名前だけ「送り先」だと、つまみを動かした変更もここへ行くように読める（issue #149）。
+	// Ctrl＋右クリックでしか使わない窓では、そう書く
+	ImGui::TextDisabled("%s", ctrl_click ? UI_TEXT(ps_out_label_ctrl, "Ctrl+right-click sends to") : UI_TEXT(ps_out_label, "Send to"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(fs * 10.0f);
 	if (ImGui::BeginCombo("##sendout", cur.empty() ? panel : cur.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -629,7 +631,7 @@ void out_port_combo()
 		ImGui::EndCombo();
 	}
 	if (ImGui::IsItemHovered())
-		hint("%s", UI_TEXT(ps_out_hint, "Where Ctrl+right-click sends\nCtrl+right-click a value, fader or key to send just that parameter (not to the sound engine) so a sequencer can record it. A section heading sends the whole section, the MW wheel sends CC1, the bend wheel sends pitch bend, a voice or kit row sends bank select and program change; in the editor's drum page, a cell sends that item and a key or name sends the whole key. Panel ports: parts on A go to THRU A, on B to THRU B"));
+		hint("%s", UI_TEXT(ps_out_hint, "Where Ctrl+right-click sends. Ordinary edits (dragging a knob or slider) do not go here, they go to the built-in sound engine\nCtrl+right-click a value, fader or key to send just that parameter (not to the sound engine) so a sequencer can record it. A section heading sends the whole section, the MW wheel sends CC1, the bend wheel sends pitch bend, a voice or kit row sends bank select and program change; in the editor's drum page, a cell sends that item and a key or name sends the whole key. Panel ports: parts on A go to THRU A, on B to THRU B"));
 	if (!g_out_note.empty() && ImGui::GetTime() - g_out_note_at < 4.0) {
 		ImGui::SameLine();
 		ImGui::TextDisabled("%s", g_out_note.c_str());

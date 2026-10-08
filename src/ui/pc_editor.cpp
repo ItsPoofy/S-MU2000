@@ -406,7 +406,7 @@ void pc_editor::drum_page(xg::model &m, const xg_snapshot &ram, bridge &br)
 	// Ctrl＋右クリックで外へ送る先（音色の窓と同じ設定）
 	if (out_ready()) {
 		ImGui::SameLine(0, fs * 1.5f);
-		out_port_combo();
+		out_port_combo(true);
 	}
 	// 楽器名は、その組を使う最初のパートのキットから（ROM の鍵ごとの名前）。使うパートが無ければ GM の並びを目安に
 	const std::string kit = first_user >= 0 ? drum_kit_name(m, first_user) : std::string();

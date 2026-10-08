@@ -1473,8 +1473,8 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// 送り先（Ctrl＋右クリックで送る先）、表示の大きさと、説明のチェックボックスは右端へ
 	if (out_ready()) {
-		ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 34);
-		out_port_combo();
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 42);
+		out_port_combo(true);
 	}
 	ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 18);
 	if (ImGui::SmallButton("-"))
