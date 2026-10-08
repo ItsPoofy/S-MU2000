@@ -14,7 +14,7 @@
 
 #include "imgui.h"
 
-#include "ui/lang.h"      // get_lang(), so an English UI skips the merge below
+#include "ui/lang.h"
 
 #include <cstddef>
 #include "font_check.h"
@@ -748,11 +748,8 @@ inline ImFont *add_cjk_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = fa
 // choose, and either choice loses: the CJK-only face draws the English labels
 // as nothing, and a Latin face leaves （） and the kanji as tofu.
 //
-// Which glyphs to bring across. MergeMode rasterises every glyph in the range
-// it is handed, so English asks for much less: overview.cpp formats its
-// parameter captions with fullwidth parentheses whatever the language, and
-// Halfwidth and Fullwidth Forms covers those. Japanese mode gets the standard
-// Japanese range, for the kana and kanji.
+// English needs fullwidth punctuation; Japanese is merged when selected.
+inline constexpr ImWchar cjk_fullwidth_ranges[] = { 0xFF00, 0xFFEF, 0 };
 inline ImFont *add_cjk_ui_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = false)
 {
 	ImFont *primary = add_cjk_font(atlas, px, bold);
@@ -767,16 +764,37 @@ inline ImFont *add_cjk_ui_font(ImFontAtlas *atlas, float px = 16.0f, bool bold =
 	const void *extra = cjk_japanese_only_data(bytes, face, em);
 	if (!extra)
 		return primary;
-	static ImWchar fullwidth[] = { 0xFF00, 0xFFEF, 0 };
 	ImFontConfig cfg;
 	cfg.FontDataOwnedByAtlas = false;
 	cfg.FontNo = face;
 	cfg.MergeMode = true;            // into the font added just above
-	cfg.GlyphRanges = ui::show_english() ? fullwidth
-	                                    : atlas->GetGlyphRangesJapanese();
+	cfg.GlyphRanges = ui::show_english() ? cjk_fullwidth_ranges : atlas->GetGlyphRangesJapanese();
 	atlas->AddFontFromMemoryTTF(const_cast<void *>(extra), int(bytes), px, &cfg);
 #endif
 	return primary;
+}
+
+// Call before NewFrame. Existing windows keep their fonts when language changes.
+inline void ensure_cjk_ui_fonts(ImFontAtlas *atlas)
+{
+	if (ui::show_english()) return;
+	std::vector<ImFontConfig> pending;
+	for (const auto &source : atlas->Sources) {
+		if (!source.MergeMode || source.GlyphRanges != cjk_fullwidth_ranges) continue;
+		bool merged = false;
+		for (const auto &other : atlas->Sources)
+			merged |= other.DstFont == source.DstFont && other.GlyphRanges == atlas->GetGlyphRangesJapanese();
+		if (!merged) pending.push_back(source);
+	}
+	for (const auto &source : pending) {
+		ImFontConfig cfg;
+		cfg.FontDataOwnedByAtlas = false;
+		cfg.FontNo = source.FontNo;
+		cfg.MergeMode = true;
+		cfg.DstFont = source.DstFont;
+		cfg.GlyphRanges = atlas->GetGlyphRangesJapanese();
+		atlas->AddFontFromMemoryTTF(source.FontData, source.FontDataSize, source.SizePixels, &cfg);
+	}
 }
 
 #endif // S_MU2000_UI_FONT_FILE_H
