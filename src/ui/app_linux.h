@@ -166,11 +166,11 @@ public:
 	}
 	void say_audio_opened(bool) override
 	{
-		std::printf("音声の出口: %s\n", out->device_name().c_str());
+		std::printf(CLI_T("Audio output: %s\n", "音声の出口: %s\n"), out->device_name().c_str());
 	}
 	void say_audio_running() override
 	{
-		std::printf("鳴らしている（待ち時間 %.1f ms）\n",
+		std::printf(CLI_T("Playing (latency %.1f ms)\n", "鳴らしている（待ち時間 %.1f ms）\n"),
 		            1000.0 * out->buffer_frames() / AUDIO_RATE);
 	}
 	// ALSA underruns are this platform's drop counter (ui/status.h);
@@ -178,7 +178,8 @@ public:
 	u64 audio_drops() override { return out->starved(); }
 	void print_audio_details() override
 	{
-		std::printf("独り占め: %s\n", out->exclusive() ? "取れた" : "取れなかった");
+		std::printf(CLI_T("Exclusive use: %s\n", "独り占め: %s\n"),
+		            out->exclusive() ? CLI_T("taken", "取れた") : CLI_T("not taken", "取れなかった"));
 	}
 
 	// The status middle: what ALSA measures (ui/status.h keeps the shape)
