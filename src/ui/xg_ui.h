@@ -291,6 +291,9 @@ void bend_now_line(int part, xg::model &m, const xg_snapshot *ram);
 int shown_bank_msb(int part, xg::model &m, int msb);
 // 試聴で鳴らしている音を止める（窓を閉じたとき）
 void audition_stop(bridge &br);
+// 音色を替えて試聴する（音色を選ぶ面から）。audition_tick は鳴らし始めと止めを進める（面を描くたびに呼ぶ）
+void pick_voice(int part, int msb, int lsb, int prog, xg::model &m, bridge &br);
+void audition_step(bridge &br);
 // **試聴で鳴らす鍵**。パートの音色の窓の鍵盤を右クリックすると印が付き、
 // もう一度右クリックすると消える。**何鍵でも付けられる**ので、和音で試聴できる。
 // パートごとに別に持つ。**覚えない**ので、開き直すと印は無し

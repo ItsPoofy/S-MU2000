@@ -1164,6 +1164,10 @@ const std::vector<bank_choice> &bank_choices(const xg::voice_rom &vr, int mode, 
 
 } // namespace
 
+// ほかの面（1 パートのボードの音色選び。single_board_pane.h）から
+void pick_voice(int part, int msb, int lsb, int prog, xg::model &m, bridge &br) { select_and_audition(part, msb, lsb, prog, m, br); }
+void audition_step(bridge &br) { audition_tick(br); }
+
 void audition_stop(bridge &br)
 {
 	audition_off(br);

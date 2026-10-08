@@ -1453,14 +1453,27 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	ImGui::SameLine();
 	int msb = 0, lsb = 0, prog = 0;
 	std::string voice = "--";
+	// 1 パートのボード（FC・オリジナル）がこのパートを借りていて、いまボードのバンクが選ばれているか。
+	// そのときは音色選びと編集の面を、ボードのものに差し替える（single_board_pane.h）
+	m_single.poll(br);
+	int sb_kind = 0, raw_msb = 0;
+	const int sb_slot = bch >= 0 ? -1 : m_single.slot_of(part, sb_kind);
+	bool sb_playing = false;
 	if (bch >= 0) {
 		char buf[48];
 		std::snprintf(buf, sizeof(buf), "%3d  %s", bparts[bch].program + 1, bparts[bch].name[0] ? bparts[bch].name : "--");
 		voice = buf;
 	} else if (m.get(P("part.bank_msb"), part, msb) && m.get(P("part.bank_lsb"), part, lsb) && m.get(P("part.program"), part, prog)) {
+		raw_msb = msb;
+		sb_playing = single_board_pane::playing(sb_slot, msb, lsb);
 		msb = shown_bank_msb(part, m, msb);      // GS のドラム（issue #52）
 		voice = voice_text(msb, lsb, prog);
-		if (const xg::voice_rom *vr = voices()) {
+		if (sb_playing) {
+			char buf[80];
+			std::snprintf(buf, sizeof(buf), "%3d  %s   [PLG-%d %s]", prog + 1, single_board_pane::program_name(sb_kind, prog).c_str(),
+			              sb_slot + 1, single_board_pane::board_name(sb_kind).c_str());
+			voice = buf;
+		} else if (const xg::voice_rom *vr = voices()) {
 			const std::string real = vr->name(ram.parts[part], msb, prog);
 			if (!real.empty()) {
 				char buf[48];
@@ -1569,10 +1582,16 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		{
 			ImGui::PushFont(nullptr, fs * 0.85f);   // 分類・音色・バンク違いの 3 つは小さめの字で
 			// ドラムのタブのときは、左にキット・右にいまのキットの鍵ごとの楽器名
-			if (m_drum_tab)
+			if (sb_playing) {
+				m_single.voices(sb_slot, sb_kind, part, prog, m, br);
+			} else if (m_drum_tab) {
 				drum_pane(part, m, br);
-			else
+			} else {
+				// ボードが借りているパートなら、上にボードへ切り替えるボタン
+				if (sb_slot >= 0)
+					m_single.switch_row(sb_slot, sb_kind, part, raw_msb, lsb, prog, m, br);
 				program_pane(part, m, &ram, br);
+			}
 			// 面の上なら、Ctrl＋右クリックで今の音色（バンクセレクトとプログラムチェンジ）を送る
 			if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
 				out_hover_program(part);
@@ -1619,7 +1638,15 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	const bool was_drum = m_drum_tab;
 	m_drum_tab = false;
 	if (ImGui::BeginTabBar("right")) {
-		if (ImGui::BeginTabItem(UI_TEXT(ps_tab_shape, "Shape"))) {
+		// ボードが鳴っているパート: 形・ドラム・マトリクス（どれも内蔵の音色のためのもの）の代わりに、ボードのタブ
+		if (sb_playing && ImGui::BeginTabItem(UI_TEXT(sb_tab, "Board"), nullptr, m_single_was ? 0 : ImGuiTabItemFlags_SetSelected)) {
+			if (ImGui::BeginChild("sbedit", ImVec2(0, body_h - (ImGui::GetCursorScreenPos().y - top_y)), ImGuiChildFlags_Borders))
+				m_single.edit(sb_slot, sb_kind, part, prog, br);
+			ImGui::EndChild();
+			ImGui::EndTabItem();
+		}
+		m_single_was = sb_playing;
+		if (!sb_playing && ImGui::BeginTabItem(UI_TEXT(ps_tab_shape, "Shape"))) {
 			scope = part;
 			scope = part;
 			// 列を横へ並べ、画面に入るのは 3 列ぶん（残りは横に送って見る）。
@@ -1700,13 +1727,13 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 		}
 		// ドラムのタブ。エディタのドラムの面からの頼みなら前に出す
 		const ImGuiTabItemFlags drum_flags = take_drum_tab() ? ImGuiTabItemFlags_SetSelected : 0;
-		if (ImGui::BeginTabItem(UI_TEXT(ps_tab_drum, "Drum"), nullptr, drum_flags)) {
+		if (!sb_playing && ImGui::BeginTabItem(UI_TEXT(ps_tab_drum, "Drum"), nullptr, drum_flags)) {
 			scope = part;
 			m_drum_tab = true;
 			drum_tab(part, m, ram, br, body_h - (ImGui::GetCursorScreenPos().y - top_y));
 			ImGui::EndTabItem();
 		}
-		if (ImGui::BeginTabItem(UI_TEXT(ps_tab_matrix, "Matrix"))) {
+		if (!sb_playing && ImGui::BeginTabItem(UI_TEXT(ps_tab_matrix, "Matrix"))) {
 			// 操作子 6 つ × 行き先 6 つ（モジュレーションのマトリクス）
 			const float room_h = body_h - (ImGui::GetCursorScreenPos().y - top_y);
 			if (ImGui::BeginChild("matrix", ImVec2(0, room_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar)) {
