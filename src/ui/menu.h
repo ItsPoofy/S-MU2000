@@ -92,12 +92,14 @@ enum : int {
 	ID_PLAY_FILE = 5100, ID_STOP_FILE = 5101, ID_PORTS34_FOLD = 5102, ID_PORTS34_DROP = 5103,
 	ID_THIN_BENDS = 5104,    // the player lightens heavy MIDI (issue #82)
 	ID_FACTORY = 5200,
+	ID_RESTART = 5201,       // power the MU off and on
 	ID_NATIVE_FX = 5215,     // lightweight mode (C++ effects)
 	ID_NATIVE_ENGINE = 5216, // firmware を走らせない口（聞き比べ用）
 	ID_PC_EDITOR = 5201,
 	ID_OVERVIEW = 5202,
 	ID_OUTPUT_DIGITAL = 5300, ID_OUTPUT_ANALOG = 5301,
 	ID_AUDIO_DEFAULT = 5500, ID_AUDIO_BASE = 5501,
+	ID_INE_NONE = 6000, ID_INE_BASE = 6001,     // MIDI IN E (the plug-in board's port)
 };
 
 // Checked at compile time, because the failure is silent: a menu id that lands
@@ -106,16 +108,16 @@ enum : int {
 static_assert([] {
 	const int bases[] = { ID_IN_BASE, ID_IN_BASE + ID_IN_STRIDE, ID_IN_BASE + 2 * ID_IN_STRIDE,
 	                      ID_IN_BASE + 3 * ID_IN_STRIDE,
-	                      ID_OUT_BASE, ID_OUTB_BASE, ID_OUTMU_BASE, ID_AIN_BASE, ID_AUDIO_BASE };
+	                      ID_OUT_BASE, ID_OUTB_BASE, ID_OUTMU_BASE, ID_AIN_BASE, ID_AUDIO_BASE, ID_INE_BASE };
 	const int singles[] = { ID_IN_NONE, ID_IN_NONE + ID_IN_STRIDE, ID_IN_NONE + 2 * ID_IN_STRIDE,
 	                        ID_IN_NONE + 3 * ID_IN_STRIDE,
 	                        ID_OUT_NONE, ID_OUTB_NONE, ID_OUTMU_NONE,
 	                        ID_AIN_NONE, ID_CARD_NEW16, ID_CARD_NEW32, ID_CARD_NEW64,
 	                        ID_CARD_NEW128, ID_CARD_OPEN, ID_CARD_EJECT,
-	                        ID_PLAY_FILE, ID_STOP_FILE, ID_FACTORY, ID_NATIVE_FX,
+	                        ID_PLAY_FILE, ID_STOP_FILE, ID_FACTORY, ID_RESTART, ID_NATIVE_FX,
 	                        ID_NATIVE_ENGINE,
 	                        ID_PORTS34_FOLD, ID_PORTS34_DROP, ID_THIN_BENDS, ID_PC_EDITOR, ID_OVERVIEW,
-	                        ID_OUTPUT_DIGITAL, ID_OUTPUT_ANALOG, ID_AUDIO_DEFAULT };
+	                        ID_OUTPUT_DIGITAL, ID_OUTPUT_ANALOG, ID_AUDIO_DEFAULT, ID_INE_NONE };
 	for (int base : bases) {
 		for (int id : singles)
 			if (id >= base && id < base + 256)
@@ -136,7 +138,8 @@ inline const char *in_label(int p)
 	case 0: return UI_TEXT(menu_in_a, "MIDI IN A (parts 1-16)");
 	case 1: return UI_TEXT(menu_in_b, "MIDI IN B (parts 17-32)");
 	case 2: return UI_TEXT(menu_in_c, "MIDI IN C (parts 33-48)");
-	default: return UI_TEXT(menu_in_d, "MIDI IN D (parts 49-64)");
+	case 3: return UI_TEXT(menu_in_d, "MIDI IN D (parts 49-64)");
+	default: return UI_TEXT(menu_in_e, "MIDI IN E (multi-part plug-in board)");
 	}
 }
 
@@ -150,7 +153,7 @@ struct menu_state {
 	std::vector<std::string> audio_outs;
 	std::string audio_name;  // empty selects the system default
 	bool audio_ready = false; // startup has released the output to the UI
-	int in_dev[4] = { -1, -1, -1, -1 };
+	int in_dev[5] = { -1, -1, -1, -1, -1 };
 	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
 	std::string ain_name;
 	std::string card_path;
@@ -274,6 +277,8 @@ inline std::vector<menu_group> menu_ports(const menu_state &s)
 		groups.push_back(menu_port_group(in_label(p), s.midi_ins, s.in_dev[p],
 		                                 ID_IN_NONE + p * ID_IN_STRIDE,
 		                                 ID_IN_BASE + p * ID_IN_STRIDE));
+	// Port E: heard only by a multi-part plug-in board (the 16-part FC board)
+	groups.push_back(menu_port_group(in_label(4), s.midi_ins, s.in_dev[4], ID_INE_NONE, ID_INE_BASE));
 	groups.push_back(menu_port_group(UI_TEXT(menu_out_mu, "MIDI OUT (what the MU2000 sends)"), s.midi_outs,
 	                                 s.out_dev_mu, ID_OUTMU_NONE, ID_OUTMU_BASE));
 	groups.push_back(menu_port_group(UI_TEXT(menu_thru_a, "MIDI THRU A (sends out what A receives)"), s.midi_outs,
@@ -296,6 +301,7 @@ inline std::vector<menu_group> menu_ports(const menu_state &s)
 	// once the firmware is actually up
 	menu_group g;
 	g.items.push_back(separator());
+	g.items.push_back(text(UI_TEXT(menu_restart, "Restart the MU (power off and on)"), ID_RESTART, false, s.ready));
 	g.items.push_back(text(UI_TEXT(menu_factory, "Factory reset..."), ID_FACTORY, false, s.ready));
 	groups.push_back(g);
 	return groups;
@@ -357,6 +363,15 @@ inline std::vector<menu_group> menu_phones(const menu_state &s)
 	g.items.push_back(text(UI_TEXT(menu_out_analog, "Analog (LINE OUT/PHONES; cuts DC)"),
 	                       ID_OUTPUT_ANALOG, s.analog, true));
 	return { menu_audio_output(s), g };
+}
+
+// The POWER switch: restart the machine
+inline std::vector<menu_group> menu_power(const menu_state &s)
+{
+	using namespace menu_detail;
+	menu_group g;
+	g.items.push_back(text(UI_TEXT(menu_restart, "Restart the MU (power off and on)"), ID_RESTART, false, s.ready));
+	return { g };
 }
 
 // The A/D INPUT jack on its own: the recording-device picker under its heading

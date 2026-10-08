@@ -58,6 +58,8 @@
 #include "ui/snapshot.h"
 #include "ui/status.h"
 #include "ui/toolbar.h"
+#include "ui/user_boards.h"
+#include "ui/fm_banks.h"
 
 #include "nvram.h"
 #include "smartmedia.h"
@@ -109,8 +111,8 @@ public:
 	// The remembered ports, by name (empty = default/unused). *_keep is the
 	// name to fall back on when a port is not there (yet). Four entries,
 	// like ui::SET_IN_KEYS (both front ends run 4 MIDI ports)
-	std::string in_name[4];
-	std::string in_keep[4];
+	std::string in_name[IN_PORTS];
+	std::string in_keep[IN_PORTS];
 	std::string out_name, out_name_b, out_name_mu;
 	// 音色の窓の送り先（Ctrl＋右クリックで送るもの）。空ならパネルの設定（A → THRU A、B → THRU B）。
 	// THRU A・B と同じ機器を選んだときはそちらの出力を使い、ほかの機器なら edit_out を開く
@@ -133,7 +135,7 @@ public:
 
 	// Device indices being opened (-1 unused). Names above outlive them:
 	// unplugging USB shifts numbers, so reconnects look the names up again
-	int in_dev[4] = { -1, -1, -1, -1 };
+	int in_dev[IN_PORTS] = { -1, -1, -1, -1, -1 };
 	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
 	int ain_dev = -1;
 	u64 reported_drops = 0;          // MIDI drops the UI thread last reported
@@ -154,6 +156,8 @@ public:
 	void frame_work()
 	{
 		run_deferred();
+		if (br.take_restart_request())
+			defer_outside_paint([this] { do_restart(); });
 		poll();
 		serve_ain_requests();
 		pc_frame_all(list, pc, fx, shapes, master, sampling, panel.xg(), panel.ram(), br,
@@ -244,7 +248,7 @@ public:
 		// The jacks and the card slot are pressed, not clicked: they open a
 		// menu instead of moving a panel control
 		if (panel.on_midi_jack(x, y) || panel.on_ad_input(x, y) ||
-		    panel.on_card_slot(x, y) || panel.on_phones(x, y)) {
+		    panel.on_card_slot(x, y) || panel.on_phones(x, y) || panel.on_power(x, y)) {
 			h.handled = true;
 			h.menu = true;
 			return h;
@@ -349,6 +353,8 @@ public:
 			return menu_card(menu_snapshot());
 		if (panel.on_phones(x, y))
 			return menu_phones(menu_snapshot());
+		if (panel.on_power(x, y))
+			return menu_power(menu_snapshot());
 		if (panel.on_ad_input(x, y))
 			return menu_ain_only(audio_in::list(), ain_name);
 		return menu_ports(menu_snapshot());
@@ -410,7 +416,7 @@ public:
 		if (lcd_only)
 			return false;
 		return panel.on_midi_jack(x, y) || panel.on_ad_input(x, y) ||
-		       panel.on_card_slot(x, y) || panel.on_phones(x, y);
+		       panel.on_card_slot(x, y) || panel.on_phones(x, y) || panel.on_power(x, y);
 	}
 
 	// ---- per-platform acts (thin shells implement these)
@@ -438,7 +444,7 @@ public:
 		if (path.empty())
 			return;
 		remembered r;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			r.in[p] = in_name[p].empty() ? in_keep[p] : in_name[p];
 		r.out       = out_name.empty()    ? out_keep    : out_name;
 		r.out_b     = out_name_b.empty()  ? out_keep_b  : out_name_b;
@@ -451,6 +457,18 @@ public:
 		r.thin_bends = play.thin_bends();
 		r.analog    = eng && eng->analog.load();
 		r.edit_out  = edit_out_name.empty() ? edit_out_keep : edit_out_name;
+		// the imaginary plug-in board stays plugged in, like a real one
+		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
+		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
+		for (int i = 0; i < 2; i++) {
+			r.board_more[i]      = eng ? eng->mu.virtual_board_kind(i + 1) : 0;
+			r.board_more_part[i] = eng ? eng->mu.virtual_board_part(i + 1) + 1 : i + 2;
+		}
+		r.board_dls  = eng ? eng->mu.board_dls_path() : std::string();
+		user_boards::save(br);
+		r.board_file = user_boards::current_path();
+		fm_banks::save(br);
+		r.board_fm = fm_banks::current_path();
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -474,7 +492,7 @@ public:
 	// menu_error only for menu picks (never boot-time).
 	bool choose_in(int port, int dev, bool keep = false)
 	{
-		if (port < 0 || port >= 4)
+		if (port < 0 || port >= IN_PORTS)
 			return false;
 		if (!keep)
 			in_keep[port].clear();
@@ -630,7 +648,7 @@ public:
 					if (!keep)
 						menu_error(err);
 				} else {
-					std::printf("A/D INPUT: %s（%s）\n",
+					std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"),
 					            ain->device_name().c_str(),
 					            ain->format_line().c_str());
 					std::fflush(stdout);
@@ -884,6 +902,18 @@ public:
 		reboot = std::thread([this] { eng->factory_reset(); });
 	}
 
+	// Power the machine off and on. The settings carry over (as with the real
+	// unit's battery-backed memory); the firmware boots from scratch, which is
+	// also when it looks for plug-in boards
+	void do_restart()
+	{
+		if (!eng || !state || state->load() != 1)
+			return;
+		play.stop();
+		join_reboot();
+		reboot = std::thread([this] { eng->restart(); });
+	}
+
 	void set_fold34(bool on)
 	{
 		play.set_fold_extra_ports(on);
@@ -926,7 +956,7 @@ public:
 		s.audio_ready = audio_ready.load() && state && (state->load() == 1 || audio_failed);
 		if (s.audio_ready)
 			s.audio_name = audio_name;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			s.in_dev[p] = in_dev[p];
 		s.out_dev = out_dev;
 		s.out_dev_b = out_dev_b;
@@ -949,8 +979,9 @@ public:
 	// (the hooks below); everything else is the same calls in the same order
 	void menu_chosen(int id)
 	{
-		for (int p = 0; p < 4; p++) {
-			const int none = ID_IN_NONE + p * ID_IN_STRIDE, base = ID_IN_BASE + p * ID_IN_STRIDE;
+		for (int p = 0; p < IN_PORTS; p++) {
+			const int none = p == 4 ? int(ID_INE_NONE) : ID_IN_NONE + p * ID_IN_STRIDE;
+			const int base = p == 4 ? int(ID_INE_BASE) : ID_IN_BASE + p * ID_IN_STRIDE;
 			if (id == none)                    { choose_in(p, -1); return; }
 			if (id >= base && id < base + 256) { choose_in(p, id - base); return; }
 		}
@@ -975,6 +1006,7 @@ public:
 		else if (id == ID_NATIVE_FX)                                  toggle_fx();
 		else if (id == ID_NATIVE_ENGINE)                              toggle_engine();
 		else if (id == ID_FACTORY)                                    do_factory_reset();
+		else if (id == ID_RESTART)                                    do_restart();
 		else if (id == ID_PC_EDITOR)                                  open_window_by_kind(BAR_EDITOR);
 		else if (id == ID_OVERVIEW)                                   open_window_by_kind(BAR_LIST);
 		else if (id == ID_OUTPUT_DIGITAL || id == ID_OUTPUT_ANALOG)   set_analog(id == ID_OUTPUT_ANALOG);
@@ -989,7 +1021,7 @@ public:
 			o.voicecache = 1;
 		apply_engine_options(eng.mu, o);
 		eng.native_fx.store(o.native_fx);
-		for (int p = 1; p < mu2000::MIDI_PORTS; p++)
+		for (int p = 1; p <= mu2000::MIDI_PORTS; p++)        // the last one is port E (the plug-in board)
 			eng.midi_p[p] = &midi[p];
 		eng.mout_b = &thru_b;
 		eng.mout_edit = &edit_out;
@@ -1100,6 +1132,32 @@ public:
 				std::printf(CLI_T("Sound output: analogue (DC removed)\n", "音の出口: アナログ（直流を切る）\n"));
 			play.set_fold_extra_ports(r.fold34);
 			play.set_thin_bends(r.thin_bends);
+			// The imaginary plug-in board goes in before the firmware boots, so
+			// that its "Checking PLG" finds it (the boot then skips the snapshot)
+			if (eng && !r.board_dls.empty()) {
+				std::string err;
+				if (!eng->mu.load_board_dls(r.board_dls, err))
+					std::fprintf(stderr, CLI_T("DLS board: %s (%s)\n", "DLS のボード: %s（%s）\n"), err.c_str(), r.board_dls.c_str());
+			}
+			if (eng && !r.board_file.empty()) {
+				std::string err;
+				if (const auto b = user_boards::adopt(r.board_file, err))
+					eng->mu.set_user_board(b, r.board_file);
+				else
+					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
+			}
+			if (eng && !r.board_fm.empty()) {
+				std::string err;
+				if (const auto b = fm_banks::adopt(r.board_fm, err))
+					eng->mu.set_fm_bank(b, r.board_fm);
+				else
+					std::fprintf(stderr, CLI_T("FM voice set: %s (%s)\n", "FM ボードの音色の組: %s（%s）\n"), err.c_str(), r.board_fm.c_str());
+			}
+			if (eng && r.board)
+				eng->mu.set_virtual_board(r.board, r.board_part - 1);
+			for (int i = 0; i < 2; i++)
+				if (eng && r.board_more[i])
+					eng->mu.set_virtual_board(r.board_more[i], r.board_more_part[i] - 1, i + 1);
 		}
 		// Only the window boots from remembered settings: --shot must give
 		// the same picture every time
@@ -1137,19 +1195,19 @@ public:
 		// (empty is off). Opened by start_ad once the firmware is up
 		if (o.audio_in_dev)
 			ain_name = o.audio_in_dev;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			if (a.in_dev[p] == -2)
 				a.in_dev[p] = find_device(midi_in::list(), want.in[p]);
 		if (a.mout_dev == -2)   a.mout_dev   = find_device(midi_out::list(), want.out);
 		if (a.moutb_dev == -2)  a.moutb_dev  = find_device(midi_out::list(), want.out_b);
 		if (a.moutmu_dev == -2) a.moutmu_dev = find_device(midi_out::list(), want.out_mu);
 		// A port that is not there yet keeps its name in the settings
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			in_keep[p] = want.in[p];
 		out_keep    = want.out;
 		out_keep_b  = want.out_b;
 		out_keep_mu = want.out_mu;
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			choose_in(p, a.in_dev[p], true);
 		choose_out(a.mout_dev, true);
 		choose_out_b(a.moutb_dev, true);
@@ -1160,7 +1218,7 @@ public:
 			choose_edit_out(find_device(midi_out::list(), want.edit_out), true);
 		// A port that would not open keeps showing its remembered name
 		// until it is picked again
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			show_port(in_label(p), in_name[p], in_keep[p]);
 		show_port("MIDI OUT", out_name_mu, out_keep_mu);
 		show_port("MIDI THRU A", out_name, out_keep);
@@ -1238,7 +1296,7 @@ public:
 		const int dev = find_device(names, ain_name);
 		std::string aerr;
 		if (dev >= 0 && ain->start(names[size_t(dev)], aerr))
-			std::printf("A/D INPUT: %s（%s）\n", ain->device_name().c_str(),
+			std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"), ain->device_name().c_str(),
 			            ain->format_line().c_str());
 		else
 			std::printf(CLI_T("A/D INPUT: none (%s)\n", "A/D INPUT: なし（%s）\n"),
@@ -1304,7 +1362,7 @@ public:
 			}
 		}
 		play.stop();
-		for (int p = 0; p < 4; p++)
+		for (int p = 0; p < IN_PORTS; p++)
 			midi[p].close();
 		thru_a.close();
 		thru_b.close();

@@ -9,6 +9,7 @@
 //   4f7f0000NN=データ    機種 4F の表の NN 番目への返事。最後を ** にすると何番目でも同じ返事
 //   qRR=KKデータ         F0 43 40 <RR> ... への返事。KK は返事の種類（40-43）。qRR#3= で 3 回目だけ
 //   midi@100=904064      10.0 秒に本体の MIDI IN へ送る
+//   inj@100=f043...f7    10.0 秒に、頼まれていないものをボードから本体へ送る
 //   key@100=Util         10.0 秒にパネルのボタンを押す（名前は mu2000::button_name のもの）
 //
 // 環境変数:
@@ -39,6 +40,7 @@ static int g_xg_bulk = 0;
 static std::map<u32, int> g_pc;
 static bool g_pc_on = std::getenv("PLG_PC") != nullptr;
 static std::vector<std::pair<int, std::string>> g_keys;       // (秒 × 10, 押すボタンの名前)
+static std::vector<std::pair<int, std::vector<u8>>> g_inject; // (秒 × 10, ボードから頼まれずに送るバイト)
 static std::vector<std::pair<int, std::vector<u8>>> g_midi;   // (秒 × 10, 本体の MIDI IN へ送るバイト)
 
 static std::vector<u8> hex(const std::string &s)
@@ -141,6 +143,10 @@ int main(int argc, char **argv)
 		if (a.rfind("q", 0) == 0 && (eq == 3 || a[3] == '#')) {
 			const int nth = eq == 3 ? 0 : std::stoi(a.substr(4, eq - 4));
 			g_q40[std::stoi(a.substr(1, 2), nullptr, 16) << 8 | nth] = hex(a.substr(eq + 1));
+			continue;
+		}
+		if (a.rfind("inj@", 0) == 0) {
+			g_inject.push_back({ std::stoi(a.substr(4, eq - 4)), hex(a.substr(eq + 1)) });
 			continue;
 		}
 		if (a.rfind("midi@", 0) == 0) {
@@ -260,6 +266,11 @@ int main(int argc, char **argv)
 		if (g_t % 4410 == 0) {
 			if (tr)
 				std::fprintf(tr, "t %d%c", g_t / 4410, 10);
+			for (const auto &m : g_inject)
+				if (m.first == g_t / 4410) {
+					show("board->MU", 1, m.second);
+					M.plg_reply(0, m.second);
+				}
 			for (const auto &m : g_midi)
 				if (m.first == g_t / 4410) {
 					show("host->MU ", 0, m.second);

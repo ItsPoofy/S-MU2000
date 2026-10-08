@@ -33,7 +33,7 @@ namespace ui {
 // The text lives in the texts table (help_usage), so --lang reaches it.
 inline void print_usage()
 {
-	std::fprintf(stderr, "%s", UI_TEXT(help_usage, "Usage: gui <rom directory> [--midi N] [--midi-b N] [--midi-c N] [--midi-d N]"
+	std::fprintf(stderr, "%s", UI_TEXT(help_usage, "Usage: gui <rom directory> [--midi N] [--midi-b N] [--midi-c N] [--midi-d N] [--midi-e N]"
                                     " [--midiout N] [--midiout-b N] [--midiout-mu N]"
                                     " [--latency ms] [--exclusive] [--layout panel.txt] [--play song.mid] [--lcd] [--fast-midi] [--host-midi]\n"
                                     "        [--factory]   forget remembered settings and boot factory-fresh\n"
@@ -55,7 +55,7 @@ struct tool_args {
 	std::string dir, shot_path, dump_layout, play_path, layout_path;
 	std::string shot_mid;
 	double shot_secs = 0.0;
-	int in_dev[4] = { -2, -2, -2, -2 };   // -2 unset (remembered), -1 unused
+	int in_dev[5] = { -2, -2, -2, -2, -2 };   // -2 unset (remembered), -1 unused
 	int mout_dev = -2, moutb_dev = -2, moutmu_dev = -2;
 	bool usb_host = true;                  // HOST SELECT = USB (ports C/D work)
 	int latency = 30;                      // preset per backend before parsing
@@ -116,6 +116,7 @@ inline int parse_tool_args(int argc, char **argv, tool_args &a,
 		else if (!std::strcmp(argv[i], "--midi-b") && i + 1 < argc) a.in_dev[1] = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--midi-c") && i + 1 < argc) a.in_dev[2] = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--midi-d") && i + 1 < argc) a.in_dev[3] = std::atoi(argv[++i]);
+		else if (!std::strcmp(argv[i], "--midi-e") && i + 1 < argc) a.in_dev[4] = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--midiout") && i + 1 < argc) a.mout_dev = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--midiout-b") && i + 1 < argc) a.moutb_dev = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--midiout-mu") && i + 1 < argc) a.moutmu_dev = std::atoi(argv[++i]);

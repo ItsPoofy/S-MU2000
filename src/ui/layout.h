@@ -110,6 +110,7 @@ struct layout
 	double card_slot[4] = { 0, 0, 0, 0 };
 	double adin[4];                        // A/D INPUT のジャック
 	double phones[4];                      // PHONES のジャック。音の出口（デジタル / アナログ）を選ぶ
+	double power[4] = { 0, 0, 0, 0 };      // 電源スイッチ。押すと「起動し直す」の品書き。幅 0 なら無い
 
 	std::vector<deco> decos;
 

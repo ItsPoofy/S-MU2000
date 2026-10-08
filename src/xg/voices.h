@@ -319,6 +319,24 @@ public:
 		return true;
 	}
 
+	// 本体のパートではないもの（プラグインボードのチャンネル）の絵: GM の番号の楽器の絵か、ドラムの絵
+	bool icon_gm(int prog, bool drum, u16 rows[16]) const
+	{
+		if (!m_ok)
+			return false;
+		if (drum) {
+			if (word(DRUM_ICON) != 0x000e)
+				return false;
+			for (int y = 0; y < 16; y++)
+				rows[y] = word(DRUM_ICON + u32(y) * 2) & 0xfffe;
+			return true;
+		}
+		const u32 p = ICONS + u32((*m_rom)[ICON_OF_PROGRAM + u32(prog & 0x7f)]) * 32;
+		for (int y = 0; y < 16; y++)
+			rows[y] = word(p + u32(y) * 2);
+		return true;
+	}
+
 	bool icon(const u8 *part_ram, int msb, int prog, u16 rows[16]) const
 	{
 		if (!m_ok)

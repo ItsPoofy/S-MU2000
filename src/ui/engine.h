@@ -48,7 +48,7 @@ struct engine {
 	midi_in  &midi;        // MIDI IN A（パート 1-16）
 	// B-D。B は実機の 2 つめの DIN、C・D は USB だけの口（パート 33-64）。
 	// [0] は使わない（midi が A）
-	midi_in  *midi_p[mu2000::MIDI_PORTS] = {};
+	midi_in  *midi_p[mu2000::MIDI_PORTS + 1] = {};   // 最後は口 E（マルチパートのプラグインボード）
 	midi_out *mout = nullptr;     // MIDI THRU A（A で受けたものを外へ）
 	midi_out *mout_b = nullptr;   // MIDI THRU B（B で受けたものを外へ）
 	midi_out *mout_edit = nullptr; // 音色の窓で選んだ送り先（Ctrl＋右クリックで送るもの）
@@ -102,11 +102,14 @@ struct engine {
 			std::printf(UI_TEXT(engine_nvram_fmt, "Settings: %s\n"), smu2000::nvram::path(mu).c_str());
 		// 鍵は起動に使うワーク RAM も混ぜるので、reset() の前に作る
 		const u64 key = smu2000::bootcache::key(mu);
+		// 架空のボードが挿さっているときは写しを使わない（写しはボード無しで起動したもの。firmware が
+		// 「Checking PLG」でボードを見つけるところを通らせる）
+		const bool cache = !mu.virtual_board_any();
 		mu.reset();
 		// 前に起動し切った姿を取ってあれば、そこから始める（bootcache.h）。
 		// 回した結果と 1 ビットも違わないので、音は同じ。
 		// **reset() のあとで読むこと**（タイマが揃っていないと形が合わない）
-		if (smu2000::bootcache::load(mu, key)) {
+		if (cache && smu2000::bootcache::load(mu, key)) {
 			std::printf(UI_TEXT(engine_boot_cached_fmt, "Booted from snapshot (%s)\n"), smu2000::bootcache::path(key).c_str());
 			publish();
 			return true;
@@ -120,7 +123,7 @@ struct engine {
 			message = UI_TEXT(engine_boot_failed, "Boot failed");
 			return false;
 		}
-		if (smu2000::bootcache::save(mu, key))
+		if (cache && smu2000::bootcache::save(mu, key))
 			std::printf(UI_TEXT(engine_boot_saved_fmt, "Saved boot snapshot: %s\n"), smu2000::bootcache::path(key).c_str());
 		publish();
 		return true;
@@ -169,6 +172,22 @@ struct engine {
 		std::printf("%s", UI_TEXT(engine_reset_done, "Factory reset done\n"));
 		std::fflush(stdout);
 		state.store(1);
+		publish();
+	}
+
+	// 電源を入れ直す。設定（ワーク RAM）は今のまま持ち越す（実機の電池で残る分と同じ扱い）
+	void restart()
+	{
+		state.store(0);
+		message = UI_TEXT(engine_restarting, "Restarting...");
+		publish();
+		while (in_fill.load())
+			smu2000::sleep_ms(1);
+		const bool keep = use_nvram;
+		use_nvram = false;
+		const bool ok = boot();
+		use_nvram = keep;
+		state.store(ok ? 1 : 2);
 		publish();
 	}
 
@@ -240,6 +259,10 @@ struct engine {
 				if (p == 1 && mout_b && guard_b.pass(b)) mout_b->send(b);
 			}
 		}
+		// 口 E。本体（firmware）には行かず、マルチパートのプラグインボードだけが聞く
+		if (midi_p[mu2000::MIDI_PORTS])
+			while (midi_p[mu2000::MIDI_PORTS]->pop(b))
+				mu.board_midi_in(b);
 
 		const float g = br.gain();
 		// アナログにした最初のブロックで、前に使ったときの状態を捨てる

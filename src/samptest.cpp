@@ -19,6 +19,8 @@
 #include "ui/panel_macro.h"
 #include "xg/wave_catalog.h"
 
+#include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1952,9 +1954,35 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				for (int x : { 0xb2, 0, int(mu2000::VBOARD_BANK_MSB), 0xb2, 32, int(mu2000::VBOARD_BANK_LSB), 0xc2, 0 })
 					p.mu.midi_in(u8(x), 0);
 				p.pump(500);
+				const std::string by_midi = p.lcd();          // MIDI で選んだだけでも名前が出る（実機の PLG150-VL で確かめた動き）
 				p.press(B::value_plus, 150);
 				const std::string named = p.lcd();
 				const bool playing = p.mu.virtual_board_playing();
+				// [AUDITION] の音符は MIDI では来ない。本体がボードへ聞かせる線（SCI4 の 1 本目）で届く。
+				// 内蔵の音源ではこのバンクは無音なので、音が出ていればボードが鳴っている
+				p.out.clear();
+				p.collect = true;
+				p.press(B::audition, 150);
+				p.pump(1500);
+				p.collect = false;
+				double aud = 0;
+				for (double v : p.out)
+					aud += v * v;
+				aud = std::sqrt(aud / double(std::max<size_t>(1, p.out.size())));
+				// 電源を入れ直す。パートの音色（ボードのバンク）は持ち越されるので、何も選び直さなくても [AUDITION] で鳴る
+				p.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !p.mu.midi_ready(); i += RATE / 100)
+					p.pump(10);
+				p.pump(3000);
+				p.out.clear();
+				p.collect = true;
+				p.press(B::audition, 150);
+				p.pump(1500);
+				p.collect = false;
+				double aud2 = 0;
+				for (double v : p.out)
+					aud2 += v * v;
+				aud2 = std::sqrt(aud2 / double(std::max<size_t>(1, p.out.size())));
 				p.press(B::util, 150);
 				for (int i = 0; i < 6; i++)
 					p.press(B::select_right, 150);
@@ -1978,12 +2006,593 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				const std::string by_xg = p.lcd();
 				const int part_xg = p.mu.virtual_board_part();
 				auto has = [](const std::string &t, const char *what) { return t.find(what) != std::string::npos; };
-				check(has(named, "Square25") && playing && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
+				check(has(by_midi, "Square50") && has(named, "Square25") && playing && aud > 0.002 && aud2 > 0.002 && known && has(list, "PLUGIN SELECT") && has(list, "FC BOARD") && has(page, "PartAssign=03") &&
 				      has(down, "PartAssign=02") && part_down == 1 && has(off, "PartAssign=off") && off_seen &&
 				      has(outside, "PartAssign=06") && has(by_xg, "PartAssign=10") && part_xg == 9 && p.mu.virtual_board_assigned(),
 				      "架空のボードを firmware が見つけて、UTIL → PLG の PartAssign で動かせる",
-				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + named + "] [" + list + "] [" + page + "] [" + down + "] パート " +
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + by_midi + "] [" + named + "] AUDITION " + std::to_string(aud) + "、入れ直した後 " + std::to_string(aud2) + " [" + list + "] [" + page + "] [" + down + "] パート " +
 				      std::to_string(part_down + 1) + " [" + off + "] [" + outside + "] [" + by_xg + "] パート " + std::to_string(part_xg + 1));
+			}
+
+			// 16 パートの FC ボード（VBOARD_FC16）。実機の PLG100-XG と同じマルチパートのボードで、本体のパートは借りず、
+			// 5 つ目の口（口 E）の 16 チャンネルを受け持つ。firmware は UTIL → PLG に名前を並べるだけ。
+			// ケーブルメッセージ F5 05 のあとの MIDI で鳴り、音量（CC7）とパン（CC10）はボードが自分で効かせる。
+			// 口 A に戻して弾けば、今までどおり内蔵の音が鳴る
+			{
+				using B = mu2000::button;
+				static rig q;
+				if (!q.mu.load_program(dir + "/mu2000_flash.bin") || !q.mu.load_wave(dir + "/dump"))
+					return 1;
+				q.mu.load_sintab(dir + "/standin/sin-table.bin");
+				q.mu.set_virtual_board(mu2000::VBOARD_FC16, 0);
+				q.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !q.mu.midi_ready(); i += RATE / 100)
+					q.pump(10);
+				q.pump(3000);
+				const bool known = q.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						q.mu.midi_in(u8(x), 0);
+				};
+				struct shot { std::vector<double> mono; double l = 0, r = 0; };
+				auto play = [&](int ch) {
+					shot o;
+					q.pump(200);
+					q.out.clear();
+					q.sum_l = q.sum_r = 0;
+					q.collect = true;
+					send({ 0x90 | ch, 69, 127 });
+					q.pump(300);
+					q.collect = false;
+					send({ 0x80 | ch, 69, 0 });
+					o.mono = q.out;
+					o.l = std::sqrt(q.sum_l / double(std::max<size_t>(1, q.out.size())));
+					o.r = std::sqrt(q.sum_r / double(std::max<size_t>(1, q.out.size())));
+					q.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb1, 91, 0, 0xc0, 0, 0xc1, 0 });       // 口 E へ。リバーブの送りは切って測る
+				const shot sq = play(0);
+				const double f1 = tone(sq.mono, 440), f2 = tone(sq.mono, 880), f3 = tone(sq.mono, 1320);
+				send({ 0xb1, 10, 1 });
+				const shot left = play(1);
+				send({ 0xb0, 7, 0 });
+				const shot quiet = play(0);
+				send({ 0xb0, 7, 100, 0xf5, 1 });                                   // 口 A に戻す
+				const shot inner = play(0);
+				const double i1 = tone(inner.mono, 440), i2 = tone(inner.mono, 880);
+				// チャンネル 1 をインサーション 1 へ通す。割り当ての無いインサーションは音を通さない。
+				// ディストーションにしてパート 1 に割り当てると、そこを通って出てくる
+				q.mu.set_board_insert(0, 1);
+				send({ 0xf5, 5 });
+				const shot ins_off = play(0);
+				send({ 0xf5, 1, 0xf0, 0x43, 0x10, 0x4c, 0x03, 0x00, 0x00, 0x49, 0x00, 0xf7, 0xf0, 0x43, 0x10, 0x4c, 0x03, 0x00, 0x0c, 0x00, 0xf7 });
+				q.pump(500);
+				send({ 0xf5, 5 });
+				const shot ins_on = play(0);
+				q.mu.set_board_insert(0, 0);
+				send({ 0xf5, 1 });
+				q.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					q.press(B::select_right, 150);
+				q.press(B::enter, 150);
+				const std::string list = q.lcd();
+				check(known && list.find("FC16 BOARD") != std::string::npos &&
+				      f1 > 0.01 && std::fabs(f3 / f1 - 1.0 / 3.0) < 0.05 && f2 < 0.05 * f1 &&
+				      left.r < 0.01 * left.l && left.l > 0.3 * sq.l &&
+				      level(quiet.mono) < 0.002 * level(sq.mono) &&
+				      level(inner.mono) > 0.003 && i2 > 0.05 * i1 &&
+				      level(ins_off.mono) < 0.05 * level(sq.mono) && level(ins_on.mono) > 0.05 * level(sq.mono),
+				      "16 パートの FC ボードが口 E で鳴り、本体のパートはそのまま。インサーションにも通せる",
+				      std::string("見つけた ") + (known ? "はい" : "いいえ") + " [" + list + "] 440Hz " + std::to_string(f1) +
+				      "、3 倍音 " + std::to_string(f3 / std::max(1e-12, f1)) + " 倍、左に振って右は左の " +
+				      std::to_string(left.r / std::max(1e-12, left.l)) + " 倍、音量 0 で " +
+				      std::to_string(level(quiet.mono) / std::max(1e-12, level(sq.mono))) + " 倍、口 A の内蔵の音 " +
+				      std::to_string(level(inner.mono)) + "（2 倍音 " + std::to_string(i2 / std::max(1e-12, i1)) + " 倍）、インサーション 1 へ: 割り当て前 " +
+				      std::to_string(level(ins_off.mono) / std::max(1e-12, level(sq.mono))) + " 倍 / 割り当て後 " +
+				      std::to_string(level(ins_on.mono) / std::max(1e-12, level(sq.mono))) + " 倍");
+			}
+
+			// DLS のボード（VBOARD_DLS）。DLS のファイルを読んで、口 E の 16 チャンネルで鳴らす。ここでは小さな DLS を
+			// その場で作る（440Hz の正弦 1 つ。メロディの音色 1 つと、鍵 36 だけに音があるドラムキット 1 つ）。
+			// 基準の鍵で 440Hz、1 オクターブ上で 880Hz。チャンネル 10 はドラムの音色を引く。DLS でないファイルは断って、前のものを残す
+			{
+				auto put32 = [](std::vector<u8> &v, u32 x) { for (int i = 0; i < 4; i++) v.push_back(u8(x >> (8 * i))); };
+				auto put16 = [](std::vector<u8> &v, u32 x) { v.push_back(u8(x)); v.push_back(u8(x >> 8)); };
+				auto chunk = [&](const char *id, const std::vector<u8> &body) {
+					std::vector<u8> v(id, id + 4);
+					put32(v, u32(body.size()));
+					v.insert(v.end(), body.begin(), body.end());
+					if (body.size() & 1)
+						v.push_back(0);
+					return v;
+				};
+				auto list = [&](const char *type, const std::vector<std::vector<u8>> &kids) {
+					std::vector<u8> body(type, type + 4);
+					for (const auto &k : kids)
+						body.insert(body.end(), k.begin(), k.end());
+					return chunk("LIST", body);
+				};
+				const u32 frames = 2205;                       // 22050Hz で 0.1 秒。440Hz がちょうど 44 周期
+				std::vector<u8> fmt, data, wsmp;
+				put16(fmt, 1); put16(fmt, 1); put32(fmt, 22050); put32(fmt, 44100); put16(fmt, 2); put16(fmt, 16);
+				for (u32 i = 0; i < frames; i++)
+					put16(data, u32(s16(std::lround(20000.0 * std::sin(2 * PI * 440.0 * i / 22050.0)))) & 0xffff);
+				put32(wsmp, 20); put16(wsmp, 69); put16(wsmp, 0); put32(wsmp, 0); put32(wsmp, 0); put32(wsmp, 1);
+				put32(wsmp, 16); put32(wsmp, 0); put32(wsmp, 0); put32(wsmp, frames);
+				auto instrument = [&](bool drum, int key_lo, int key_hi) {
+					std::vector<u8> insh, rgnh, wlnk;
+					put32(insh, 1); put32(insh, drum ? 0x80000000u : 0u); put32(insh, 0);
+					put16(rgnh, u32(key_lo)); put16(rgnh, u32(key_hi)); put16(rgnh, 0); put16(rgnh, 127); put16(rgnh, 0); put16(rgnh, 0);
+					put16(wlnk, 0); put16(wlnk, 0); put32(wlnk, 1); put32(wlnk, 0);
+					return list("ins ", { chunk("insh", insh), list("lrgn", { list("rgn ", { chunk("rgnh", rgnh), chunk("wsmp", wsmp), chunk("wlnk", wlnk) }) }) });
+				};
+				std::vector<u8> colh, ptbl;
+				put32(colh, 2);
+				put32(ptbl, 8); put32(ptbl, 1); put32(ptbl, 0);
+				std::vector<u8> body = { 'D', 'L', 'S', ' ' };
+				for (const auto &k : { chunk("colh", colh), list("lins", { instrument(false, 0, 127), instrument(true, 36, 36) }), chunk("ptbl", ptbl),
+				                       list("wvpl", { list("wave", { chunk("fmt ", fmt), chunk("data", data), chunk("wsmp", wsmp) }) }) })
+					body.insert(body.end(), k.begin(), k.end());
+				const std::vector<u8> file = chunk("RIFF", body);
+				const std::string good = (std::filesystem::temp_directory_path() / "smu2000_test.dls").string();
+				const std::string bad = (std::filesystem::temp_directory_path() / "smu2000_test_bad.dls").string();
+				{
+					std::ofstream f(good, std::ios::binary);
+					f.write(reinterpret_cast<const char *>(file.data()), std::streamsize(file.size()));
+					std::ofstream g(bad, std::ios::binary);
+					g << "this is not a DLS file";
+				}
+				static rig d;
+				if (!d.mu.load_program(dir + "/mu2000_flash.bin") || !d.mu.load_wave(dir + "/dump"))
+					return 1;
+				d.mu.load_sintab(dir + "/standin/sin-table.bin");
+				std::string err, err_bad;
+				const bool loaded = d.mu.load_board_dls(good, err);
+				const bool refused = !d.mu.load_board_dls(bad, err_bad) && d.mu.board_dls_path() == good;
+				d.mu.set_virtual_board(mu2000::VBOARD_DLS, 0);
+				d.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !d.mu.midi_ready(); i += RATE / 100)
+					d.pump(10);
+				d.pump(3000);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						d.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](int ch, int key) {
+					d.pump(200);
+					d.out.clear();
+					d.collect = true;
+					send({ 0x90 | ch, key, 127 });
+					d.pump(300);
+					d.collect = false;
+					send({ 0x80 | ch, key, 0 });
+					const std::vector<double> o = d.out;
+					d.pump(300);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb9, 91, 0, 0xc0, 0 });
+				const std::vector<double> a4 = play(0, 69), a5 = play(0, 81), kick = play(9, 36), none = play(9, 40);
+				// ゲートの無い音（ノートオンのすぐ後にノートオフ）も、リリースの長いドラムは鳴りきる（gm.dls のドラムは
+				// リリースが 40 秒ほど）。上の小さな DLS にはエンベロープが無いので、音源に直に音色を渡して確かめる
+				double tap = 0, held = 0;
+				{
+					namespace vb = smu2000::vboard;
+					auto bank = std::make_shared<vb::dls_bank>();
+					vb::dls_wave w;
+					w.rate = 44100;
+					for (int i = 0; i < 22050; i++)
+						w.pcm.push_back(s16(12000 * std::sin(i * 0.0627)));
+					bank->waves.push_back(w);
+					vb::dls_instrument kit;
+					kit.drum = true;
+					vb::dls_region r;
+					r.wave = 0;
+					r.art.eg1_release = 40.0;
+					kit.regions.push_back(r);
+					bank->instruments.push_back(kit);
+					vb::dls_synth syn;
+					syn.set_bank(bank);
+					auto rms = [&]() {
+						double e = 0;
+						for (int i = 0; i < 4410; i++) {
+							float ch[16][2] = {};
+							syn.render(ch);
+							e += double(ch[9][0]) * ch[9][0];
+						}
+						return std::sqrt(e / 4410);
+					};
+					syn.midi(0x99, 60, 127);
+					held = rms();
+					syn.midi(0xb9, 120, 0);
+					syn.midi(0x99, 60, 127);
+					syn.midi(0x89, 60, 0);
+					tap = rms();
+				}
+				// GS の「リズムパートに使う」でチャンネル 2 をドラムに（鍵 36 が鳴り、鍵 40 は鳴らない）。0 で戻すとメロディの音色
+				send({ 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x12, 0x15, 0x02, 0x17, 0xf7, 0xb1, 91, 0 });
+				const std::vector<double> kick2 = play(1, 36), none2 = play(1, 40);
+				send({ 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x12, 0x15, 0x00, 0x19, 0xf7 });
+				const std::vector<double> mel2 = play(1, 40);
+				send({ 0xf5, 1 });
+				const double a4_440 = tone(a4, 440), a4_880 = tone(a4, 880), a5_880 = tone(a5, 880), a5_440 = tone(a5, 440);
+				std::remove(good.c_str());
+				std::remove(bad.c_str());
+				// 画面の音色の品書きが使う並び: メロディの音色 1 つとドラムキット 1 つ
+				const std::vector<mu2000::board_voice> bv = d.mu.board_voices();
+				const bool listed = bv.size() == 2 && bv[0].drum != bv[1].drum;
+				check(loaded && refused && listed && d.mu.board_dls_instruments() == 2 && d.mu.virtual_board_known() &&
+				      a4_440 > 0.01 && a4_880 < 0.02 * a4_440 && a5_880 > 0.01 && a5_440 < 0.02 * a5_880 &&
+				      level(kick) > 0.01 && level(none) < 0.001 * level(kick) &&
+				      held > 0.01 && tap > 0.9 * held && level(kick2) > 0.8 * level(kick) && level(none2) < 0.001 * level(kick) &&
+				      level(mel2) > 0.01,
+				      "DLS のボードが、読んだ DLS の音色を口 E で鳴らす（ゲートの無いドラムも鳴り、GS でドラムのパートを増やせる）",
+				      std::string(loaded ? "読めた" : "読めない: " + err) + "、DLS でないものは「" + err_bad + "」、音色 " +
+				      std::to_string(d.mu.board_dls_instruments()) + "、A4 の 440Hz " + std::to_string(a4_440) + "（880Hz " +
+				      std::to_string(a4_880) + "）、A5 の 880Hz " + std::to_string(a5_880) + "、ドラム 鍵 36 " + std::to_string(level(kick)) +
+				      " / 鍵 40 " + std::to_string(level(none)) + "、ゲートなし " + std::to_string(tap) + "（押したまま " + std::to_string(held) + "）" + "、チャンネル 2 をドラムに: 鍵 36 " +
+				      std::to_string(level(kick2)) + " / 鍵 40 " + std::to_string(level(none2)) + "、戻して鍵 40 " + std::to_string(level(mel2)));
+			}
+
+			// オリジナルのボード（VBOARD_USER。src/vboard_user.h）。「波形を作る」の波形をプログラム番号に入れたもの。
+			// プログラム 1 に正弦、3 に矩形を入れて、パート 1 に挿す。鍵 69 で 440Hz（波形は鍵 60 で C3）、正弦は倍音が無く、
+			// 矩形は 3 倍音が 3 分の 1。空いているプログラム 2 は鳴らない。液晶には付けた名前が出る。
+			// ファイルの形にして読み戻すと、同じものになる
+			{
+				namespace vb = smu2000::vboard;
+				namespace wg = smu2000::wavegen;
+				using B = mu2000::button;
+				auto board = std::make_shared<vb::user_board>();
+				std::snprintf(board->name, sizeof(board->name), "TEST BOARD");
+				auto prog = [](const char *name, std::vector<s16> pcm) {
+					auto q = std::make_shared<vb::user_program>();
+					vb::detail::clean_name(q->name, name, 8, true);
+					q->pcm = std::make_shared<std::vector<s16>>(std::move(pcm));
+					return q;
+				};
+				board->program[0] = prog("MYSINE", wg::render(wg::basic(wg::shape::sine)));
+				board->program[2] = prog("MYSQUARE", wg::render(wg::basic(wg::shape::square)));
+				const std::vector<u8> bytes = vb::write_user_board(*board);
+				std::string ferr;
+				const auto back = vb::read_user_board(bytes.data(), bytes.size(), ferr);
+				const bool same = back && vb::write_user_board(*back) == bytes && back->count() == 2;
+				const bool cut = !vb::read_user_board(bytes.data(), bytes.size() - 100, ferr);
+
+				static rig u;
+				if (!u.mu.load_program(dir + "/mu2000_flash.bin") || !u.mu.load_wave(dir + "/dump"))
+					return 1;
+				u.mu.load_sintab(dir + "/standin/sin-table.bin");
+				u.mu.set_user_board(board, "");
+				u.mu.set_virtual_board(mu2000::VBOARD_USER, 0);
+				u.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !u.mu.midi_ready(); i += RATE / 100)
+					u.pump(10);
+				u.pump(3000);
+				const bool known = u.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						u.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&]() {
+					u.pump(300);
+					u.out.clear();
+					u.collect = true;
+					send({ 0x90, 69, 127 });
+					u.pump(300);
+					u.collect = false;
+					send({ 0x80, 69, 0 });
+					std::vector<double> o = u.out;
+					u.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xb0, 91, 0, 0xb0, 0, int(mu2000::VBOARD_BANK_MSB), 0xb0, 32, int(mu2000::VBOARD_BANK_LSB), 0xc0, 0 });
+				const std::vector<double> sine = play();
+				const std::string lcd_sine = u.lcd();
+				// ノートオンのすぐ後にノートオフが来ても、音は立ち上がってからリリースで消えていく
+				u.pump(300);
+				u.out.clear();
+				u.collect = true;
+				send({ 0x90, 69, 127, 0x80, 69, 0 });
+				u.pump(20);
+				u.collect = false;
+				const std::vector<double> tap = u.out;
+				u.pump(500);
+				const double s1 = tone(sine, 440), s2 = tone(sine, 880), s3 = tone(sine, 1320);
+				send({ 0xc0, 1 });
+				const std::vector<double> none = play();
+				send({ 0xc0, 2 });
+				const std::vector<double> sq = play();
+				const std::string lcd_sq = u.lcd();
+				const double q1 = tone(sq, 440), q3 = tone(sq, 1320);
+				u.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					u.press(B::select_right, 150);
+				u.press(B::enter, 150);
+				const std::string list = u.lcd();
+				check(same && cut && known && list.find("TEST BOARD") != std::string::npos &&
+				      lcd_sine.find("MYSINE") != std::string::npos && lcd_sq.find("MYSQUARE") != std::string::npos &&
+				      s1 > 0.01 && s2 < 0.02 * s1 && s3 < 0.02 * s1 && level(none) < 0.002 * level(sine) &&
+				      level(tap) > 0.2 * level(sine) &&
+				      q1 > 0.01 && std::fabs(q3 / q1 - 1.0 / 3.0) < 0.05,
+				      "オリジナルのボード: 作った波形がプログラムごとに鳴り、名前が液晶に出る。ファイルにして読み戻せる",
+				      std::string("読み戻し ") + (same ? "同じ" : "違う") + "、欠けたファイルは" + (cut ? "断る" : "通る") + "、見つけた " +
+				      (known ? "はい" : "いいえ") + " [" + list + "] [" + lcd_sine + "] [" + lcd_sq + "] 正弦 440Hz " + std::to_string(s1) +
+				      "（2 倍音 " + std::to_string(s2 / std::max(1e-12, s1)) + " 倍、3 倍音 " + std::to_string(s3 / std::max(1e-12, s1)) +
+				      " 倍）、ゲートなしの頭 20 ミリ秒 " + std::to_string(level(tap) / std::max(1e-12, level(sine))) + " 倍、空きは " + std::to_string(level(none) / std::max(1e-12, level(sine))) + " 倍、矩形 440Hz " + std::to_string(q1) +
+				      "（3 倍音 " + std::to_string(q3 / std::max(1e-12, q1)) + " 倍）");
+			}
+
+			// 差込口は 3 つ（PLG-1〜3）。FC ボード・オリジナルのボード・FC ボードをパート 1・2・3 に挿す。
+			// firmware は 3 枚とも見つけ、それぞれ自分のバンク（MSB 90・91・92）を選んだパートで鳴る:
+			// パート 1 と 3 は矩形（3 倍音が 3 分の 1）、パート 2 は正弦（倍音なし）。パート 2 に差込口 1 のバンク（90）を
+			// 選んでも、そのボードは鳴らない（内蔵の音になる）。3 枚を同時に鳴らすと、音は足し合わさる。
+			// UTIL → PLG には 3 枚が並び、差込口 2 のボードを外から動かすと、メニューの PartAssign も付いてくる
+			{
+				namespace vb = smu2000::vboard;
+				namespace wg = smu2000::wavegen;
+				using B = mu2000::button;
+				auto board = std::make_shared<vb::user_board>();
+				std::snprintf(board->name, sizeof(board->name), "SLOT2 BOARD");
+				auto q = std::make_shared<vb::user_program>();
+				vb::detail::clean_name(q->name, "MYSINE", 8, true);
+				q->pcm = std::make_shared<std::vector<s16>>(wg::render(wg::basic(wg::shape::sine)));
+				board->program[0] = q;
+
+				static rig t;
+				if (!t.mu.load_program(dir + "/mu2000_flash.bin") || !t.mu.load_wave(dir + "/dump"))
+					return 1;
+				t.mu.load_sintab(dir + "/standin/sin-table.bin");
+				t.mu.set_user_board(board, "");
+				t.mu.set_virtual_board(mu2000::VBOARD_FC, 0, 0);
+				t.mu.set_virtual_board(mu2000::VBOARD_USER, 1, 1);
+				t.mu.set_virtual_board(mu2000::VBOARD_FC, 2, 2);
+				t.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !t.mu.midi_ready(); i += RATE / 100)
+					t.pump(10);
+				t.pump(3000);
+				const bool known = t.mu.virtual_board_known(0) && t.mu.virtual_board_known(1) && t.mu.virtual_board_known(2);
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						t.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](std::initializer_list<int> chans) {
+					t.pump(300);
+					t.out.clear();
+					t.collect = true;
+					for (int ch : chans)
+						send({ 0x90 | ch, 69, 127 });
+					t.pump(300);
+					t.collect = false;
+					for (int ch : chans)
+						send({ 0x80 | ch, 69, 0 });
+					std::vector<double> o = t.out;
+					t.pump(500);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				for (int ch = 0; ch < 3; ch++)
+					send({ 0xb0 | ch, 91, 0, 0xb0 | ch, 0, mu2000::board_bank_msb(ch), 0xb0 | ch, 32, 0, 0xc0 | ch, 0 });
+				const std::vector<double> p1 = play({ 0 }), p2 = play({ 1 }), p3 = play({ 2 }), all = play({ 0, 1, 2 });
+				const double a1 = tone(p1, 440), a3 = tone(p1, 1320), b1 = tone(p2, 440), b3 = tone(p2, 1320), c1 = tone(p3, 440), c3 = tone(p3, 1320);
+				// パート 2 に差込口 1 のバンクを選ぶ: ボードは鳴らず、内蔵の音（倍音のある別の音）
+				send({ 0xb1, 0, mu2000::board_bank_msb(0), 0xb1, 32, 0, 0xc1, 0 });
+				const bool wrong_bank_idle = !t.mu.virtual_board_playing(1);
+				send({ 0xb1, 0, mu2000::board_bank_msb(1), 0xb1, 32, 0, 0xc1, 0 });
+				// メニュー: 3 枚が並ぶ
+				t.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					t.press(B::select_right, 150);
+				t.press(B::enter, 150);
+				const std::string list1 = t.lcd();
+				t.press(B::select_right, 150);
+				const std::string list2 = t.lcd();
+				t.press(B::select_right, 150);
+				const std::string list3 = t.lcd();
+				t.press(B::select_left, 150);
+				t.press(B::enter, 150);
+				const std::string page2 = t.lcd();
+				// 差込口 2 を外からパート 6 へ（XG の PartAssign を firmware に送る）。メニューの値も 06 になる
+				t.mu.set_virtual_board(mu2000::VBOARD_USER, 5, 1);
+				t.pump(500);
+				const std::string moved = t.lcd();
+				t.press(B::exit, 150);
+				t.press(B::exit, 150);
+				t.press(B::play, 150);
+				check(known && a1 > 0.01 && std::fabs(a3 / a1 - 1.0 / 3.0) < 0.05 && b1 > 0.01 && b3 < 0.02 * b1 &&
+				      c1 > 0.01 && std::fabs(c3 / c1 - 1.0 / 3.0) < 0.05 && tone(all, 440) > 0.9 * (a1 + b1 + c1) && wrong_bank_idle &&
+				      // 同じ名前のボードが 2 枚あると、firmware は名前の後ろに差込口の番号を付ける。名前は 10 文字まで
+				      list1.find("FC BOARD1") != std::string::npos && list2.find("SLOT2 BOAR") != std::string::npos &&
+				      list3.find("FC BOARD3") != std::string::npos && page2.find("PartAssign=02") != std::string::npos &&
+				      moved.find("PartAssign=06") != std::string::npos,
+				      "差込口 3 つ: 3 枚のボードがそれぞれのパートとバンクで鳴り、UTIL → PLG に 3 枚並ぶ",
+				      std::string("見つけた ") + (known ? "3 枚" : "足りない") + "、パート 1 矩形 " + std::to_string(a1) + "（3 倍音 " +
+				      std::to_string(a3 / std::max(1e-12, a1)) + " 倍）、パート 2 正弦 " + std::to_string(b1) + "（3 倍音 " +
+				      std::to_string(b3 / std::max(1e-12, b1)) + " 倍）、パート 3 矩形 " + std::to_string(c1) + "、3 枚いっしょ " +
+				      std::to_string(tone(all, 440)) + "、別の差込口のバンクでは" + (wrong_bank_idle ? "鳴らない" : "鳴る") + " [" + list1 +
+				      "] [" + list2 + "] [" + list3 + "] [" + page2 + "] [" + moved + "]");
+			}
+
+			// FM ボード（VBOARD_FM16。src/vboard_fm.h）。4 オペレーターの FM 音源で、口 E の 16 パート。
+			// まず音源だけで: 128 個のプログラムがどれも鳴り（振り切れず、数として壊れず）、離して 6 秒で全部消える。
+			// ドラム（チャンネル 10）は、ノートオンのすぐ後にノートオフが来ても鳴る。閉じたハイハットは開いた音を止める。
+			// 次に本体に挿して: firmware が見つけ、口 E のチャンネル 1 でオルガン（鍵 69 で 440Hz）が鳴り、
+			// 音量 0 で消える。チャンネル 10 でキックが鳴る
+			{
+				namespace vb = smu2000::vboard;
+				using B = mu2000::button;
+				vb::fm_synth syn;
+				auto run = [&](int samples, int ch, double &peak, bool &bad) {
+					double e = 0;
+					for (int i = 0; i < samples; i++) {
+						float o[16] = {};
+						syn.render(o);
+						const double v = o[ch];
+						if (!(v == v) || std::fabs(v) > 4.0)
+							bad = true;
+						peak = std::max(peak, std::fabs(v));
+						e += v * v;
+					}
+					return std::sqrt(e / samples);
+				};
+				int silent = 0, stuck = 0;
+				bool bad = false;
+				double loudest = 0;
+				for (int prog = 0; prog < 128; prog++) {
+					syn.reset();
+					syn.midi(0xc0, u8(prog), 0);
+					for (int k : { 48, 60, 64, 67 })
+						syn.midi(0x90, u8(k), 110);
+					double peak = 0;
+					if (run(4410, 0, peak, bad) < 0.002)
+						silent++;
+					loudest = std::max(loudest, peak);
+					for (int k : { 48, 60, 64, 67 })
+						syn.midi(0x80, u8(k), 0);
+					double dummy = 0;
+					run(44100 * 6, 0, dummy, bad);
+					if (syn.sounding())
+						stuck++;
+				}
+				syn.reset();
+				double dp = 0;
+				syn.midi(0x99, 36, 120);
+				const double kick_held = run(4410, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 36, 120);
+				syn.midi(0x89, 36, 0);
+				const double kick_tap = run(4410, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 46, 120);
+				run(2205, 9, dp, bad);
+				const double open_ring = run(2205, 9, dp, bad);
+				syn.midi(0xb9, 120, 0);
+				syn.midi(0x99, 46, 120);
+				run(2205, 9, dp, bad);
+				syn.midi(0x99, 42, 30);                  // 弱く閉じる: 開いた音が止まる
+				run(2205, 9, dp, bad);
+				const double choked = run(2205, 9, dp, bad);
+
+				// 音色の組: 書き換えて渡すと、その番号の音が変わる（オペレーターを 1 つだけ鳴らして 2 倍の比にすると 1 オクターブ上）。
+				// 鳴っている音にもすぐ効く。ファイルの形にして読み戻すと同じになる。欠けたファイルは断る
+				auto bank = std::make_shared<vb::fm_bank>();
+				vb::fm_voice one;
+				std::snprintf(one.name, sizeof(one.name), "ONE SINE");
+				one.alg = 7;
+				one.op[0] = { 1.0f, 1.0f, 0.001f, 0.0f, 1.0f, 0.05f };
+				for (int i = 1; i < 4; i++)
+					one.op[i].level = 0.0f;
+				bank->prog[5] = one;
+				syn.reset();
+				syn.set_bank(bank);
+				syn.midi(0xc0, 5, 0);
+				syn.midi(0x90, 69, 100);
+				std::vector<double> held1, held2;
+				for (int i = 0; i < 22050; i++) {
+					float o[16] = {};
+					syn.render(o);
+					held1.push_back(o[0]);
+				}
+				auto bank2 = std::make_shared<vb::fm_bank>(*bank);
+				bank2->prog[5].op[0].ratio = 2.0f;
+				syn.set_bank(bank2);                    // 鍵は押したまま
+				for (int i = 0; i < 22050; i++) {
+					float o[16] = {};
+					syn.render(o);
+					held2.push_back(o[0]);
+				}
+				syn.midi(0x80, 69, 0);
+				const double e440 = tone(held1, 440), e880 = tone(held1, 880), l440 = tone(held2, 440), l880 = tone(held2, 880);
+				const std::vector<u8> fbytes = vb::write_fm_bank(*bank2);
+				std::string fmerr;
+				const auto fback = vb::read_fm_bank(fbytes.data(), fbytes.size(), fmerr);
+				const bool fm_same = fback && vb::write_fm_bank(*fback) == fbytes && std::string(fback->prog[5].name) == "ONE SINE";
+				const bool fm_cut = !vb::read_fm_bank(fbytes.data(), fbytes.size() - 50, fmerr);
+				syn.set_bank(nullptr);
+
+				static rig f;
+				if (!f.mu.load_program(dir + "/mu2000_flash.bin") || !f.mu.load_wave(dir + "/dump"))
+					return 1;
+				f.mu.load_sintab(dir + "/standin/sin-table.bin");
+				f.mu.set_virtual_board(mu2000::VBOARD_FM16, 0);
+				f.mu.reset();
+				for (u32 i = 0; i < 30 * RATE && !f.mu.midi_ready(); i += RATE / 100)
+					f.pump(10);
+				f.pump(3000);
+				const bool known = f.mu.virtual_board_known();
+				auto send = [&](std::initializer_list<int> msg) {
+					for (int x : msg)
+						f.mu.midi_in(u8(x), 0);
+				};
+				auto play = [&](int ch, int key) {
+					f.pump(300);
+					f.out.clear();
+					f.collect = true;
+					send({ 0x90 | ch, key, 127 });
+					f.pump(300);
+					f.collect = false;
+					send({ 0x80 | ch, key, 0 });
+					std::vector<double> o = f.out;
+					f.pump(600);
+					return o;
+				};
+				auto level = [](const std::vector<double> &x) {
+					double e = 0;
+					for (double v : x)
+						e += v * v;
+					return std::sqrt(e / double(std::max<size_t>(1, x.size())));
+				};
+				send({ 0xf5, 5, 0xb0, 91, 0, 0xb9, 91, 0, 0xc0, 16 });      // 口 E へ。チャンネル 1 はオルガン
+				const std::vector<double> organ = play(0, 69);
+				const double o440 = tone(organ, 440), o220 = tone(organ, 220);
+				send({ 0xb0, 7, 0 });
+				const std::vector<double> quiet = play(0, 69);
+				send({ 0xb0, 7, 100 });
+				const std::vector<double> kick = play(9, 36);
+				const std::vector<mu2000::board_voice> bv = f.mu.board_voices();
+				send({ 0xf5, 1 });
+				f.press(B::util, 150);
+				for (int i = 0; i < 6; i++)
+					f.press(B::select_right, 150);
+				f.press(B::enter, 150);
+				const std::string list = f.lcd();
+				check(!silent && !stuck && !bad && loudest < 1.5 && kick_held > 0.01 && kick_tap > 0.5 * kick_held &&
+				      open_ring > 0.005 && choked < 0.5 * open_ring &&
+				      e440 > 0.01 && e880 < 0.02 * e440 && l880 > 0.01 && l440 < 0.02 * l880 && fm_same && fm_cut &&
+				      known && list.find("FM BOARD") != std::string::npos && o440 > 0.01 && o220 > 0.3 * o440 &&
+				      level(quiet) < 0.002 * level(organ) && level(kick) > 0.005 && bv.size() == 129,
+				      "FM ボード: 128 個のプログラムが鳴って消え、ドラムも鳴る。口 E の 16 パートのボードとして挿さる",
+				      "鳴らないプログラム " + std::to_string(silent) + "、消えないプログラム " + std::to_string(stuck) +
+				      (bad ? "、壊れた値あり" : "") + "、いちばん大きい山 " + std::to_string(loudest) + "、キック " + std::to_string(kick_held) +
+				      "（ゲートなし " + std::to_string(kick_tap) + "）、開いたハイハット " + std::to_string(open_ring) + " → 閉じて " +
+				      std::to_string(choked) + "、見つけた " + (known ? "はい" : "いいえ") + " [" + list + "] オルガン 440Hz " +
+				      std::to_string(o440) + "（220Hz " + std::to_string(o220) + "）、音量 0 で " +
+				      std::to_string(level(quiet) / std::max(1e-12, level(organ))) + " 倍、口 E のキック " + std::to_string(level(kick)) +
+				      "、音色の並び " + std::to_string(bv.size()) + "、書き換え: 前 440Hz " + std::to_string(e440) + " → 押したまま比を 2 に 880Hz " +
+				      std::to_string(l880) + "（440Hz " + std::to_string(l440) + "）、組の読み戻し " + (fm_same ? "同じ" : "違う") + "、欠けたファイルは" +
+				      (fm_cut ? "断る" : "通る"));
 			}
 
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、

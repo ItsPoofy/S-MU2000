@@ -313,6 +313,14 @@ bool panel::on_phones(int x, int y) const
 	return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 }
 
+bool panel::on_power(int x, int y) const
+{
+	if (m_page != page::front || m_lay.power[2] <= 0)
+		return false;
+	const RECT r = scale(m_lay.power[0], m_lay.power[1], m_lay.power[2], m_lay.power[3]);
+	return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
 // 論理座標の点を実座標へ
 POINT panel::at(double x, double y) const
 {
@@ -663,6 +671,13 @@ struct panel::lcd_canvas {
 		t = std::max(t, 0);
 		r = std::min(r, w);
 		b = std::min(b, h);
+		// Wholly outside. Each edge is clipped on its own, so a rect past the
+		// right edge comes out with l > r, and std::fill from a first beyond
+		// its last does not stop: it writes on through the heap. A minimized
+		// window gets there -- the LCD is a few dozen pixels then, and the
+		// dot grid (a pitch of at least one pixel) no longer fits inside it
+		if (l >= r || t >= b)
+			return;
 		const uint32_t v = 0xff000000u | (uint32_t(GetRValue(c)) << 16) |
 		                   (uint32_t(GetGValue(c)) << 8) | uint32_t(GetBValue(c));
 		for (int y = t; y < b; y++)

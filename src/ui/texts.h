@@ -55,6 +55,7 @@ struct ui_texts {
 	const char *engine_boot_saved_fmt;    // %s: snapshot path
 	const char *engine_boot_failed;       // shown in the window's message area
 	const char *engine_resetting;         // shown in the window's message area
+	const char *engine_restarting;
 	const char *engine_reset_done;
 	const char *bootcache_read_error_fmt; // %s
 	// Top strip buttons (toolbar.h)
@@ -69,6 +70,7 @@ struct ui_texts {
 	const char *menu_in_b;
 	const char *menu_in_c;
 	const char *menu_in_d;
+	const char *menu_in_e;
 	const char *menu_unused;
 	const char *menu_no_devices;
 	const char *menu_ain_title;
@@ -85,6 +87,7 @@ struct ui_texts {
 	const char *menu_native_fx;
 	const char *menu_native_engine;
 	const char *menu_factory;
+	const char *menu_restart;
 	const char *menu_card_new;
 	const char *menu_card_open;
 	const char *menu_card_eject;
@@ -282,6 +285,38 @@ struct ui_texts {
 	const char *ps_about_route;      // may contain \n
 	const char *ps_tab_matrix;
 	const char *ps_hint_bar;
+	const char *ps_board_note;
+	const char *fme_default_set;
+	const char *fme_set_tip;
+	const char *fme_new_set;
+	const char *fme_name_taken;
+	const char *fme_program_fmt;
+	const char *fme_reset_voice;
+	const char *fme_reset_tip;
+	const char *fme_copy;
+	const char *fme_paste;
+	const char *fme_alg;
+	const char *fme_alg_tip;
+	const char *fme_feedback;
+	const char *fme_feedback_tip;
+	const char *fme_drop;
+	const char *fme_drop_tip;
+	const char *fme_noise;
+	const char *fme_noise_tip;
+	const char *fme_op_carrier;
+	const char *fme_op_mod;
+	const char *fme_ratio;
+	const char *fme_ratio_tip;
+	const char *fme_level;
+	const char *fme_level_car_tip;
+	const char *fme_level_mod_tip;
+	const char *fme_attack;
+	const char *fme_decay;
+	const char *fme_decay_tip;
+	const char *fme_sustain;
+	const char *fme_release;
+	const char *fme_save_fail;
+	const char *fme_drum_note;
 	// Insertion editor (fx_editor.cpp); kind/part covered by fx_kind/fx_part.
 	const char *fxe_slider_tip_fmt;  // %s %s + how to turn
 	const char *fxe_noeffect;
@@ -317,9 +352,48 @@ struct ui_texts {
 	const char *me_board_title;
 	const char *me_board_none;
 	const char *me_board_fc;
+	const char *me_board_fc16;
+	const char *me_board_dls;
+	const char *me_board_user;
+	const char *me_board_user16;
+	const char *me_board_fm16;
+	const char *me_board_user_none;
+	const char *me_board_user_tip;
+	const char *me_board_user_empty;
+	const char *me_board_user_count_fmt;
+	const char *me_board_parts;
+	const char *me_board_parts_note;
+	const char *me_bp_ch;
+	const char *me_bp_voice;
+	const char *me_bp_bank;
+	const char *me_bp_program;
+	const char *me_bp_volume;
+	const char *me_bp_pan;
+	const char *me_bp_reverb;
+	const char *me_bp_chorus;
+	const char *me_bp_level;
+	const char *me_bp_drum;
+	const char *me_bp_insert;
+	const char *me_bp_variation;
+	const char *me_bp_insert_tip;
+	const char *ov_board_row_tip;
+	const char *ov_board_sub_fmt;
+	const char *ov_board_ins_none;
+	const char *ov_board_no_voices;
+	const char *me_board_dls_open;
+	const char *me_board_dls_path;
+	const char *me_board_dls_load;
+	const char *me_board_dls_tip;
+	const char *me_board_dls_error_fmt;
+	const char *me_board_dls_empty;
+	const char *me_board_dls_loaded_fmt;
+	const char *dlg_dls_desc;
+	const char *me_board_port_e;
 	const char *me_board_tip;
 	const char *me_board_part;
+	const char *me_board_booting;
 	const char *me_board_idle;
+	const char *me_board_one_multi;
 	const char *me_board_unknown;
 	const char *me_board_off;
 	const char *me_board_known;
@@ -908,6 +982,29 @@ struct ui_texts {
 	const char *smp_make_add_tip;
 	const char *smp_make_assign_fmt;
 	const char *smp_make_assign_tip;
+	const char *smp_ub_title;
+	const char *smp_ub_new;
+	const char *smp_ub_intro;
+	const char *smp_ub_board_name;
+	const char *smp_ub_name_empty;
+	const char *smp_ub_name_taken;
+	const char *smp_ub_board_name_tip;
+	const char *smp_ub_program;
+	const char *smp_ub_replace;
+	const char *smp_ub_put;
+	const char *smp_ub_put_tip;
+	const char *smp_ub_col_wave;
+	const char *smp_ub_col_attack;
+	const char *smp_ub_col_decay;
+	const char *smp_ub_col_sustain;
+	const char *smp_ub_col_release;
+	const char *smp_ub_loop_fmt;
+	const char *smp_ub_once_fmt;
+	const char *smp_ub_remove;
+	const char *smp_ub_table_tip;
+	const char *smp_ub_save_fail;
+	const char *smp_ub_footer_fmt;
+	const char *smp_ub_how;
 	const char *smp_tab_edit;
 	const char *smp_tab_card;
 	const char *smp_card;

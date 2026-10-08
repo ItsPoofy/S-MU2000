@@ -42,6 +42,7 @@ const xg::param &P(const char *key);
 std::string part_name(int part);        // A1-A16 ... D1-D16
 std::string channel_name(int value);    // 受信チャンネル。127 は OFF
 const char *gm_name(int program);       // General MIDI の楽器名（規格の名前）
+const char *gm_group_name(int group);   // その分類（0-15。8 番ずつ）の名前
 std::string voice_text(int msb, int lsb, int program);
 
 // 音色の名前と絵を読む ROM。音源を読み込んだあとで 1 回渡す（無ければ GM の名前で出す）
@@ -98,6 +99,11 @@ void request_part(int part);            // part は 0-63
 bool take_part_request();               // 頼みがあれば true（1 回だけ）
 int  shape_window_part();               // パートの音色の窓で見ているパート（一覧で行を選んでも替わる）
 void set_shape_window_part(int part);
+// 音色の窓で、マルチパートのボードのチャンネル（口 E の 0-15）を見ているとき、そのチャンネル。見ていなければ -1。
+// 本体のパートを選ぶ（set_shape_window_part・request_part）と -1 に戻る
+int  shape_window_board();
+void set_shape_window_board(int channel);
+void request_board(int channel);        // 音色の窓を、そのチャンネルで開く頼み
 
 // ---- マスターの窓（マスターボリューム・移調・システムエフェクトの戻り・マスター EQ）を開く頼み。
 // 一覧のマスターの行（MASTER の名前、MASTER EQ の絵）のダブルクリックから
@@ -190,6 +196,11 @@ bool midi_dialog();
 bool file_ask_is_card();                            // 持ち主が、今の頼みがカードかを見る（take_file_ask の前に）
 void give_opened_card(const std::string &path);     // 持ち主が、選ばれた場所を返す
 bool take_opened_card(std::string &path);           // 頼んだ側が受け取る（1 回だけ）
+// DLS のファイル（マスターの窓の「DLS のボード」）。これも場所（UTF-8）だけを返す
+void ask_open_dls();
+bool file_ask_is_dls();
+void give_opened_dls(const std::string &path);
+bool take_opened_dls(std::string &path);
 void set_file_note(std::string text);               // 結果のひとこと（「書き出した」など）
 const std::string &file_note();
 
@@ -280,6 +291,11 @@ bool audition_key(int part, int note);
 void toggle_audition_key(int part, int note);
 // 印の付いた鍵を若い順に集める。戻りは数（out には最大 max 個）
 int  audition_keys(int part, int *out, int max);
+// 印は、マルチパートのボードのチャンネル（口 E の 0-15）にも付けられる。part に XG_PARTS + チャンネルを渡す。
+// audition_board は、そのチャンネルの音色を替えたときの試聴（印の付いた鍵を 1 秒鳴らす。印が無ければ鳴らさない）。
+// audition_poll は、鳴らし始めと止めを進める（描くたびに呼ぶ）
+void audition_board(int channel, bridge &br);
+void audition_poll(bridge &br);
 
 // ---- 説明（ヘルプ）。見出しや名前にカーソルを当てると、何に効くのかを出す（日本語・英語）。
 // 邪魔な人もいるので、窓の上のチェックボックスで消せる。選んだ状態は
