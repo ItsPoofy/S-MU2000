@@ -122,7 +122,8 @@ static void run()
 	require(received[0] == received[1] && received[1].size() == 1, "Rollback lost original input routing");
 	input::names = {"Pads", "Third"};
 	require(r->needs_refresh(config, input::list(), output::list()), "Disconnect was not detected");
-	require(r->apply(config, true, error) && !input::active.contains("Keyboard") && r->removed_input_ports() == 3, "Disconnected input remained active or held notes were not released");
+	require(r->apply(config, true, error) && !input::active.contains("Keyboard"), "Disconnected input remained active");
+	require(output::sent == before, "Disconnecting an input sent unsolicited MIDI");
 	auto edited = config; ui::set_midi_route(edited.inputs, "Pads", 17);
 	require(r->apply(edited, false, error), "Remembered disconnected device blocked unrelated edit");
 	input::names = {"Third", "Pads", "Keyboard"}; // enumeration order changed
@@ -135,6 +136,7 @@ static void run()
 	require(received[0] == received[4] && received[4].size() == 1, "Port E route failed");
 	ui::clear_midi_column(edited.inputs, 0);
 	require(r->apply(edited, false, error), "Clearing route failed");
+	require(output::sent == before, "Removing an input route sent unsolicited MIDI");
 	push("Keyboard", {0x80, 70, 0}); received = drain(*r);
 	require(received[0].empty() && received[1].size() == 1, "Disabling one route disabled other routes");
 	// Large dumps stay whole, and malformed fragments cannot contaminate the next sender.
@@ -145,6 +147,9 @@ static void run()
 	push("Keyboard", {0x90, 60, 0x91, 61, 100}); received = drain(*r);
 	require(received[1] == std::vector<std::vector<u8>>{{0x91, 61, 100}}, "Malformed short message leaked");
 	const auto before_unassign = output::sent;
+	auto no_inputs = edited; no_inputs.inputs.clear();
+	require(r->apply(no_inputs, false, error) && input::active.empty(), "Input unassignment failed");
+	require(output::sent == before_unassign, "Unassigning inputs sent unsolicited MIDI");
 	auto no_outputs = edited; no_outputs.outputs.clear();
 	require(r->apply(no_outputs, false, error), "Output unassignment failed");
 	require(output::sent == before_unassign, "Unassigning an output sent unsolicited MIDI");

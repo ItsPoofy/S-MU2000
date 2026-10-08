@@ -22,14 +22,6 @@ public:
 			while (eng.in_fill.load()) smu2000::sleep_ms(1);
 			m_result = {};
 			m_result.selected = eng.midi.apply(routes, missing_ok, m_result.error);
-			if (m_result.selected) {
-				const unsigned removed = eng.midi.removed_input_ports();
-				for (int p = 0; p < 5; p++) if (removed & (1u << p)) for (int ch = 0; ch < 16; ch++) {
-					const u8 release[] = {u8(0xb0 | ch), 64, 0, u8(0xb0 | ch), 123, 0};
-					eng.br.send_port(p, release, sizeof(release));
-					if (p < 2) for (u8 byte : release) eng.midi.send(p, byte);
-				}
-			}
 			m_done.store(true);
 		});
 	}

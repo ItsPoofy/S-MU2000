@@ -25,7 +25,6 @@ class basic_midi_router {
 	endpoints<endpoint<Output>> m_outputs;
 	std::array<basic_midi_split<65536>, 4> m_output_messages{{{true}, {true}, {true}, {true}}};
 	midi_routing m_routes;
-	unsigned m_removed_inputs = 0;
 	template <typename Entry>
 	static bool prepare(const std::vector<midi_route> &routes, const endpoints<Entry> &current,
 	                    const std::vector<std::string> &available, const std::vector<midi_route> &previous, endpoints<Entry> &added,
@@ -69,11 +68,6 @@ public:
 		endpoints<input_endpoint> inputs; endpoints<endpoint<Output>> outputs;
 		if (!prepare(routes.inputs, m_inputs, ins, m_routes.inputs, inputs, missing_ok, error) ||
 		    !prepare(routes.outputs, m_outputs, outs, m_routes.outputs, outputs, missing_ok, error)) return false;
-		m_removed_inputs = 0;
-		for (const auto &e : m_inputs) {
-			const unsigned mask = std::find(ins.begin(), ins.end(), e->name) == ins.end() ? 0 : midi_route_mask(routes.inputs, e->name);
-			m_removed_inputs |= e->mask & ~mask;
-		}
 		commit(m_inputs, inputs, routes.inputs, ins);
 		commit(m_outputs, outputs, routes.outputs, outs);
 		m_routes = routes;
@@ -116,7 +110,6 @@ public:
 				e->port.send(bytes, n);
 		}, &ctx);
 	}
-	unsigned removed_input_ports() const { return m_removed_inputs; }
 	void close() { m_inputs.clear(); m_outputs.clear(); m_routes = {}; for (auto &parser : m_output_messages) parser.reset(); }
 };
 using midi_router = basic_midi_router<>;
