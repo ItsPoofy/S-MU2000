@@ -2495,6 +2495,43 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				run(2205, 9, dp, bad);
 				const double choked = run(2205, 9, dp, bad);
 
+				// 音色の組: 書き換えて渡すと、その番号の音が変わる（オペレーターを 1 つだけ鳴らして 2 倍の比にすると 1 オクターブ上）。
+				// 鳴っている音にもすぐ効く。ファイルの形にして読み戻すと同じになる。欠けたファイルは断る
+				auto bank = std::make_shared<vb::fm_bank>();
+				vb::fm_voice one;
+				std::snprintf(one.name, sizeof(one.name), "ONE SINE");
+				one.alg = 7;
+				one.op[0] = { 1.0f, 1.0f, 0.001f, 0.0f, 1.0f, 0.05f };
+				for (int i = 1; i < 4; i++)
+					one.op[i].level = 0.0f;
+				bank->prog[5] = one;
+				syn.reset();
+				syn.set_bank(bank);
+				syn.midi(0xc0, 5, 0);
+				syn.midi(0x90, 69, 100);
+				std::vector<double> held1, held2;
+				for (int i = 0; i < 22050; i++) {
+					float o[16] = {};
+					syn.render(o);
+					held1.push_back(o[0]);
+				}
+				auto bank2 = std::make_shared<vb::fm_bank>(*bank);
+				bank2->prog[5].op[0].ratio = 2.0f;
+				syn.set_bank(bank2);                    // 鍵は押したまま
+				for (int i = 0; i < 22050; i++) {
+					float o[16] = {};
+					syn.render(o);
+					held2.push_back(o[0]);
+				}
+				syn.midi(0x80, 69, 0);
+				const double e440 = tone(held1, 440), e880 = tone(held1, 880), l440 = tone(held2, 440), l880 = tone(held2, 880);
+				const std::vector<u8> fbytes = vb::write_fm_bank(*bank2);
+				std::string fmerr;
+				const auto fback = vb::read_fm_bank(fbytes.data(), fbytes.size(), fmerr);
+				const bool fm_same = fback && vb::write_fm_bank(*fback) == fbytes && std::string(fback->prog[5].name) == "ONE SINE";
+				const bool fm_cut = !vb::read_fm_bank(fbytes.data(), fbytes.size() - 50, fmerr);
+				syn.set_bank(nullptr);
+
 				static rig f;
 				if (!f.mu.load_program(dir + "/mu2000_flash.bin") || !f.mu.load_wave(dir + "/dump"))
 					return 1;
@@ -2543,6 +2580,7 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				const std::string list = f.lcd();
 				check(!silent && !stuck && !bad && loudest < 1.5 && kick_held > 0.01 && kick_tap > 0.5 * kick_held &&
 				      open_ring > 0.005 && choked < 0.5 * open_ring &&
+				      e440 > 0.01 && e880 < 0.02 * e440 && l880 > 0.01 && l440 < 0.02 * l880 && fm_same && fm_cut &&
 				      known && list.find("FM BOARD") != std::string::npos && o440 > 0.01 && o220 > 0.3 * o440 &&
 				      level(quiet) < 0.002 * level(organ) && level(kick) > 0.005 && bv.size() == 129,
 				      "FM ボード: 128 個のプログラムが鳴って消え、ドラムも鳴る。口 E の 16 パートのボードとして挿さる",
@@ -2552,7 +2590,9 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(choked) + "、見つけた " + (known ? "はい" : "いいえ") + " [" + list + "] オルガン 440Hz " +
 				      std::to_string(o440) + "（220Hz " + std::to_string(o220) + "）、音量 0 で " +
 				      std::to_string(level(quiet) / std::max(1e-12, level(organ))) + " 倍、口 E のキック " + std::to_string(level(kick)) +
-				      "、音色の並び " + std::to_string(bv.size()));
+				      "、音色の並び " + std::to_string(bv.size()) + "、書き換え: 前 440Hz " + std::to_string(e440) + " → 押したまま比を 2 に 880Hz " +
+				      std::to_string(l880) + "（440Hz " + std::to_string(l440) + "）、組の読み戻し " + (fm_same ? "同じ" : "違う") + "、欠けたファイルは" +
+				      (fm_cut ? "断る" : "通る"));
 			}
 
 			// 同じ SysEx を直に読み込む（sampling_load_sysex）。「全部を消す」だけ MIDI で送って firmware に消させ、
