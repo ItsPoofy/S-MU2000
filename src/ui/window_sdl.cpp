@@ -266,6 +266,7 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 	// shutdown runs afterwards; on closed windows its calls do nothing.)
 	pc_shutdown_all(gui.list, gui.pc, gui.fx, gui.shapes, gui.master, gui.sampling, gui.br);
 	gui.player_win.shutdown(gui.br);
+	gui.board_win.shutdown(gui.br);
 	gui.list.close();
 	gui.pc.close();
 	gui.fx.close();
@@ -273,6 +274,7 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 	gui.master.close();
 	gui.sampling.close();
 	gui.player_win.close();
+	gui.board_win.close();
 	g_linux = nullptr;
 
 	// sdl_stop() drops the panel's textures and takes the ImGui context down.

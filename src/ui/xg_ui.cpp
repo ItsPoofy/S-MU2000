@@ -344,6 +344,13 @@ bool g_master_request = false;
 }
 
 void request_master() { g_master_request = true; }
+namespace {
+bool g_board_window = false, g_board_window_request = false;
+}
+void set_board_window(bool on) { g_board_window = on; }
+bool board_window() { return g_board_window; }
+void request_board_window() { g_board_window_request = true; }
+bool take_board_window_request() { const bool r = g_board_window_request; g_board_window_request = false; return r; }
 bool take_master_request() { const bool r = g_master_request; g_master_request = false; return r; }
 
 // ---- ドラムセットアップ

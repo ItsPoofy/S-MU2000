@@ -350,6 +350,9 @@ struct ui_texts {
 	const char *me_reading_defaults;
 	const char *me_sysex_title;
 	const char *me_board_title;
+	const char *me_board_open;
+	const char *me_board_open_tip;
+	const char *me_board_no_parts;
 	const char *me_board_none;
 	const char *me_board_fc;
 	const char *me_board_fc16;
@@ -566,6 +569,7 @@ struct ui_texts {
 	// Sampling window (sampling_editor.cpp) and its toolbar button.
 	const char *bar_sampling;
 	const char *bar_player;
+	const char *bar_board;
 	const char *ply_idle;
 	const char *ply_prev;
 	const char *ply_play;

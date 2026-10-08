@@ -92,6 +92,7 @@ inline const ui_texts &ja_texts()
 		              "        [--master-window] マスターの窓も開く（一覧でマスターの行をダブルクリック）\n"
 		              "        [--sampling-window] サンプリングの窓も開く\n"
 		              "        [--player-window] MIDI プレイヤーの窓も開く\n"
+		              "        [--board-window] プラグインボードの窓も開く\n"
 		              "        [--lang ja|en] 言葉（無ければ editor.ini の lang=、さらに無ければロケール: 日本語なら日本語、ほかは英語）\n"
 		              "        [--help]      この説明を出す\n"
 		              "        gui --dump-layout panel.txt   いまの配置を書き出す\n"
@@ -318,6 +319,9 @@ inline const ui_texts &ja_texts()
 		.me_reading_defaults = "既定値を読んでいる...",
 		.me_sysex_title = "SysEx（.syx）",
 		.me_board_title = "架空のプラグインボード",
+		.me_board_open = "プラグインボード…",
+		.me_board_open_tip = "プラグインボードのウィンドウを開く。差込口 3 つ（PLG-1〜3）と、16 パートのボードならそのチャンネルが並ぶ。",
+		.me_board_no_parts = "16 パートのボード（口 E）を挿すと、その 16 チャンネルがここに並ぶ。",
 		.me_board_none = "（挿さない）",
 		.me_board_fc = "FC ボード（8 ビットのゲーム機ふうの音）",
 		.me_board_fc16 = "FC ボード（16 パート・口 E）",
@@ -533,6 +537,7 @@ inline const ui_texts &ja_texts()
 		.ov_silent = "（鳴っていない）",
 		.bar_sampling = "サンプリング",
 		.bar_player = "プレイヤー",
+		.bar_board = "ボード",
 		.ply_idle = "鳴らしていません",
 		.ply_prev = "前",
 		.ply_play = "再生",
