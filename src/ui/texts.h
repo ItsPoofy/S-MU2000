@@ -261,6 +261,7 @@ struct ui_texts {
 	const char *ps_tab_all;
 	const char *ps_tab_drum;
 	const char *ps_out_label;
+	const char *ps_out_label_ctrl;
 	const char *ps_out_panel;
 	const char *ps_out_hint;
 	const char *ps_out_sent_fmt;
@@ -299,6 +300,38 @@ struct ui_texts {
 	const char *ps_about_route;      // may contain \n
 	const char *ps_tab_matrix;
 	const char *ps_hint_bar;
+	const char *ps_board_note;
+	const char *fme_default_set;
+	const char *fme_set_tip;
+	const char *fme_new_set;
+	const char *fme_name_taken;
+	const char *fme_program_fmt;
+	const char *fme_reset_voice;
+	const char *fme_reset_tip;
+	const char *fme_copy;
+	const char *fme_paste;
+	const char *fme_alg;
+	const char *fme_alg_tip;
+	const char *fme_feedback;
+	const char *fme_feedback_tip;
+	const char *fme_drop;
+	const char *fme_drop_tip;
+	const char *fme_noise;
+	const char *fme_noise_tip;
+	const char *fme_op_carrier;
+	const char *fme_op_mod;
+	const char *fme_ratio;
+	const char *fme_ratio_tip;
+	const char *fme_level;
+	const char *fme_level_car_tip;
+	const char *fme_level_mod_tip;
+	const char *fme_attack;
+	const char *fme_decay;
+	const char *fme_decay_tip;
+	const char *fme_sustain;
+	const char *fme_release;
+	const char *fme_save_fail;
+	const char *fme_drum_note;
 	// Insertion editor (fx_editor.cpp); kind/part covered by fx_kind/fx_part.
 	const char *fxe_slider_tip_fmt;  // %s %s + how to turn
 	const char *fxe_noeffect;
@@ -332,6 +365,9 @@ struct ui_texts {
 	const char *me_reading_defaults;
 	const char *me_sysex_title;
 	const char *me_board_title;
+	const char *me_board_open;
+	const char *me_board_open_tip;
+	const char *me_board_no_parts;
 	const char *me_board_none;
 	const char *me_board_fc;
 	const char *me_board_fc16;
@@ -548,6 +584,7 @@ struct ui_texts {
 	// Sampling window (sampling_editor.cpp) and its toolbar button.
 	const char *bar_sampling;
 	const char *bar_player;
+	const char *bar_board;
 	const char *ply_idle;
 	const char *ply_prev;
 	const char *ply_play;

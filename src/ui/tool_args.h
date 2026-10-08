@@ -44,6 +44,7 @@ inline void print_usage()
                                     "        [--master-window] also open the master window (double-click the master row)\n"
                                     "        [--sampling-window] also open the sampling window\n"
                                     "        [--player-window] also open the MIDI player window\n"
+                                    "        [--board-window] also open the plug-in boards window\n"
                                     "        [--lang ja|en] language (else lang= in editor.ini, else the locale: Japanese iff it says ja)\n"
                                     "        [--help]      show this help\n"
                                     "        gui --dump-layout panel.txt   write out the current layout\n"

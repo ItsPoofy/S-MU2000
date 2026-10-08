@@ -1409,29 +1409,55 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	int part = shape_window_part();
 	int scope = -1;                   // パートの音を拾うか（形のタブのフィルタが絵のときだけ）
 
+	// マルチパートのボードが挿さっていれば、口 E の 16 チャンネル（E01-E16）も選べる。bch はそのチャンネル（-1 = 本体のパート）
+	mu2000::board_part bparts[16];
+	const int bkind = m_strip.board_state(br, bparts);
+	// ボードの様子は 1 コマ遅れて届くので、まだ分からない間は選びを消さず、本体のパートを出しておく
+	int bch = bkind ? shape_window_board() : -1;
+	const auto board_name = [](int ch) {
+		char label[8];
+		std::snprintf(label, sizeof(label), "E%02d", ch + 1);
+		return std::string(label);
+	};
+	// 並びの中の位置（本体の 64 パートの後ろにボードの 16 チャンネル）で選ぶ
+	const int total = PARTS + (bkind ? 16 : 0);
+	const auto select = [&](int index) {
+		if (index < PARTS) {
+			set_shape_window_part(part = index);
+			bch = -1;
+		} else {
+			set_shape_window_board(bch = index - PARTS);
+		}
+	};
+	const int index = bch >= 0 ? PARTS + bch : part;
+
 	// ---- パートを選ぶ。音色の名前も出す
 	ImGui::SetNextItemWidth(fs * 5);
-	if (ImGui::BeginCombo("##part", part_name(part).c_str(), ImGuiComboFlags_HeightLarge)) {
-		for (int p = 0; p < PARTS; p++) {
+	if (ImGui::BeginCombo("##part", bch >= 0 ? board_name(bch).c_str() : part_name(part).c_str(), ImGuiComboFlags_HeightLarge)) {
+		for (int p = 0; p < total; p++) {
 			if (p && p % 16 == 0)
 				ImGui::Separator();          // 口の境目
-			if (ImGui::Selectable(part_name(p).c_str(), p == part))
-				set_shape_window_part(part = p);
-			if (p == part && ImGui::IsWindowAppearing())
+			if (ImGui::Selectable(p < PARTS ? part_name(p).c_str() : board_name(p - PARTS).c_str(), p == index))
+				select(p);
+			if (p == index && ImGui::IsWindowAppearing())
 				ImGui::SetScrollHereY();
 		}
 		ImGui::EndCombo();
 	}
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##prev", ImGuiDir_Left))
-		set_shape_window_part(part = (part + PARTS - 1) % PARTS);
+		select((index + total - 1) % total);
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##next", ImGuiDir_Right))
-		set_shape_window_part(part = (part + 1) % PARTS);
+		select((index + 1) % total);
 	ImGui::SameLine();
 	int msb = 0, lsb = 0, prog = 0;
 	std::string voice = "--";
-	if (m.get(P("part.bank_msb"), part, msb) && m.get(P("part.bank_lsb"), part, lsb) && m.get(P("part.program"), part, prog)) {
+	if (bch >= 0) {
+		char buf[48];
+		std::snprintf(buf, sizeof(buf), "%3d  %s", bparts[bch].program + 1, bparts[bch].name[0] ? bparts[bch].name : "--");
+		voice = buf;
+	} else if (m.get(P("part.bank_msb"), part, msb) && m.get(P("part.bank_lsb"), part, lsb) && m.get(P("part.program"), part, prog)) {
 		msb = shown_bank_msb(part, m, msb);      // GS のドラム（issue #52）
 		voice = voice_text(msb, lsb, prog);
 		if (const xg::voice_rom *vr = voices()) {
@@ -1447,8 +1473,8 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 
 	// 送り先（Ctrl＋右クリックで送る先）、表示の大きさと、説明のチェックボックスは右端へ
 	if (out_ready()) {
-		ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 34);
-		out_port_combo();
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 42);
+		out_port_combo(true);
 	}
 	ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - fs * 18);
 	if (ImGui::SmallButton("-"))
@@ -1461,8 +1487,60 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	ImGui::SameLine();
 	help_checkbox();
 
-	// ---- 上のペイン: エフェクト、棒、鍵盤
 	const ImGuiStyle &st = ImGui::GetStyle();
+	// ---- ボードのチャンネルを見ているとき: 上に一覧と同じ 1 行、左に音色選び、右にそのボードで触れるものの説明。
+	// 本体のパートの絵（VIB・FILTER・EG・EQ など）は、ボードの音源には無いので出さない
+	if (bch >= 0) {
+		const mu2000::board_part &bp = bparts[bch];
+		if (ImGui::BeginChild("bstrip", ImVec2(0, fs * 2.3f + ImGui::GetTextLineHeightWithSpacing() + st.WindowPadding.y * 2.0f + fs * 0.4f),
+		                      ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar))
+			m_strip.board_strip(bkind, bch, bp, m, br);
+		ImGui::EndChild();
+		const ImVec2 avail = ImGui::GetContentRegionAvail();
+		const bool show_bar = help_on();
+		ImGui::PushFont(nullptr, fs * BAR_SCALE);
+		const float bar_h = show_bar ? ImGui::GetTextLineHeightWithSpacing() * 3.0f + st.WindowPadding.y * 2.0f + st.ItemSpacing.y : 0.0f;
+		ImGui::PopFont();
+		const float body_h = std::max(fs * 8.0f, avail.y - bar_h);
+		if (ImGui::BeginChild("bvoices", ImVec2(std::min(fs * 17.0f, avail.x * 0.34f), body_h), ImGuiChildFlags_Borders)) {
+			ImGui::PushFont(nullptr, fs * 0.85f);
+			m_strip.board_voice_pane(bkind, bch, bp, br);
+			ImGui::PopFont();
+		}
+		ImGui::EndChild();
+		ImGui::SameLine();
+		if (ImGui::BeginChild("bnote", ImVec2(0, body_h), ImGuiChildFlags_Borders)) {
+			if (bkind == mu2000::VBOARD_FM16 && !bp.drum) {
+				// FM ボードのメロディの音色は、ここで中身を触れる
+				m_fm_edit.draw(bp.program, br);
+			} else {
+				if (bkind == mu2000::VBOARD_FM16)
+					ImGui::TextWrapped("%s", UI_TEXT(fme_drum_note, "This channel plays the FM board's drums. The drum sounds are fixed; pick a melodic voice on the left to edit its sound here."));
+				ImGui::TextWrapped("%s", UI_TEXT(ps_board_note, "This is a channel of the plug-in board on port E, not one of the MU's parts. Pick its voice on the left. In the row above, drag the bars for volume, expression, pan, pitch bend, modulation and the variation / chorus / reverb sends; click INS to send the channel through an insertion effect; press the keys to play it, or play from the PC keyboard. Right-click keys to mark them: marked keys sound for a second each time you pick a voice.\n\nThe vibrato, filter, envelope and EQ pictures belong to the MU's own tone generator, so there are none for a board channel."));
+			}
+		}
+		ImGui::EndChild();
+		if (show_bar) {
+			if (ImGui::BeginChild("hint", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+				ImGui::PushFont(nullptr, fs * BAR_SCALE);
+				const std::string &t = hint_text();
+				if (t.empty())
+					ImGui::TextDisabled("%s", UI_TEXT(ps_hint_bar, "Hover over an item for an explanation here (uncheck Show help to hide this bar)"));
+				else
+					ImGui::TextWrapped("%s", t.c_str());
+				ImGui::PopFont();
+			}
+			ImGui::EndChild();
+		}
+		end_hint_bar();
+		out_end_frame(m, ram, br);
+		br.want_scope(-1);
+		ImGui::PopFont();
+		ImGui::End();
+		return;
+	}
+
+	// ---- 上のペイン: エフェクト、棒、鍵盤
 	{
 		// インサーションの行、見出しと棒の行、鍵盤の行
 		const float strip_h = overview::part_strip_height() + st.WindowPadding.y * 2.0f + fs * 0.2f;

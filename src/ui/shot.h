@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "compat/cli_text.h"
 #include "ui/bridge.h"
 #include "ui/panel.h"
 #include "ui/png.h"
@@ -70,7 +71,7 @@ inline void shot_frame(rig &r, ImDrawList *dl, const im::fonts &f, int w, int h,
 	panel &p = r.p;
 	std::string lerr;
 	if (!layout_path.empty() && !p.lay().load(layout_path, lerr))
-		std::fprintf(stderr, "配置: %s を開けない\n", layout_path.c_str());
+		std::fprintf(stderr, CLI_T("Layout: cannot open %s\n", "配置: %s を開けない\n"), layout_path.c_str());
 	if (!lerr.empty())
 		std::fprintf(stderr, "%s", lerr.c_str());
 	p.set_lcd_only(lcd_only);
@@ -186,16 +187,16 @@ inline int write_shot(const std::string &path, int w, int h, bridge &br,
 			}
 			bgra = std::move(got);
 			if (!drew)
-				std::fprintf(stderr, "絵を GPU から読めない: %s\n", SDL_GetError());
+				std::fprintf(stderr, CLI_T("Cannot read the picture back from the GPU: %s\n", "絵を GPU から読めない: %s\n"), SDL_GetError());
 			imshell::sdl_stop(st);
 		} else {
-			std::fprintf(stderr, "画面を作れない: %s\n", SDL_GetError());
+			std::fprintf(stderr, CLI_T("Cannot create the screen: %s\n", "画面を作れない: %s\n"), SDL_GetError());
 		}
 		if (win) SDL_DestroyWindow(win);
 		imshell::gpu_device_release();
 		SDL_Quit();
 	} else {
-		std::fprintf(stderr, "画面を作れない: %s\n", SDL_GetError());
+		std::fprintf(stderr, CLI_T("Cannot create the screen: %s\n", "画面を作れない: %s\n"), SDL_GetError());
 	}
 #endif
 
@@ -203,9 +204,9 @@ inline int write_shot(const std::string &path, int w, int h, bridge &br,
 	if (drew)
 		ok = write_png(path, bgra.data(), w, h, w * 4);
 	else
-		std::fprintf(stderr, "画面を作れない\n");
+		std::fprintf(stderr, "%s", CLI_T("Cannot create the screen\n", "画面を作れない\n"));
 
-	std::printf(ok ? "書き出した: %s（%d×%d）\n" : "書き出せない: %s\n",
+	std::printf(ok ? CLI_T("Wrote %s (%d x %d)\n", "書き出した: %s（%d×%d）\n") : CLI_T("Cannot write %s\n", "書き出せない: %s\n"),
 	            path.c_str(), w, h);
 	return ok ? 0 : 1;
 }

@@ -59,6 +59,7 @@
 #include "ui/status.h"
 #include "ui/toolbar.h"
 #include "ui/user_boards.h"
+#include "ui/fm_banks.h"
 
 #include "nvram.h"
 #include "smartmedia.h"
@@ -120,6 +121,8 @@ public:
 	pc_window sampling{ std::make_unique<sampling_editor>() };
 	// MIDI プレイヤーの窓。gui だけが持つ（上の 6 つはプラグインにもある）
 	pc_window player_win{ std::make_unique<player_view>(play) };
+	// プラグインボードの窓。これも gui だけ（プラグインではマスターの窓に欄が出る。xgui::set_board_window）
+	pc_window board_win{ std::make_unique<board_editor>() };
 
 	struct engine *eng = nullptr;    // set once the ROMs are loaded
 	std::atomic<int> *state = nullptr; // the engine's, so menus can grey out
@@ -185,6 +188,10 @@ public:
 		{
 			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
 			player_win.frame(panel.xg(), panel.ram(), br);
+			board_win.frame(panel.xg(), panel.ram(), br);
+			// マスターの窓の「プラグインボード...」
+			if (xgui::take_board_window_request())
+				open_pc_window(board_win);
 			ImGui::SetCurrentContext(panel_ctx);
 		}
 	}
@@ -468,6 +475,10 @@ public:
 			open_pc_window(player_win);
 			return;
 		}
+		if (kind == BAR_BOARD) {
+			open_pc_window(board_win);
+			return;
+		}
 		open_pc_window(*window_for_kind(kind, list, pc, fx, shapes, master, sampling));
 	}
 
@@ -507,6 +518,8 @@ public:
 		r.board_dls  = eng ? eng->mu.board_dls_path() : std::string();
 		user_boards::save(br);
 		r.board_file = user_boards::current_path();
+		fm_banks::save(br);
+		r.board_fm = fm_banks::current_path();
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -702,7 +715,7 @@ public:
 						menu_error(err);
 				} else {
 					attach_ain(true);
-					std::printf("A/D INPUT: %s（%s）→ engine\n",
+					std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"),
 					            ain->device_name().c_str(),
 					            ain->format_line().c_str());
 					std::fflush(stdout);
@@ -1193,6 +1206,7 @@ public:
 		panel.set_lcd_only(lcd_only);
 		if (!lcd_only) {
 			bar.set_items(window_bar_items(true));
+			xgui::set_board_window(true);        // マスターの窓は、ボードの欄の代わりに窓を開くボタンを出す
 			panel.set_top_inset(toolbar::HEIGHT);
 		}
 		panel.resize(a.win_w, a.win_h);
@@ -1222,6 +1236,13 @@ public:
 					eng->mu.set_user_board(b, r.board_file);
 				else
 					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
+			}
+			if (eng && !r.board_fm.empty()) {
+				std::string err;
+				if (const auto b = fm_banks::adopt(r.board_fm, err))
+					eng->mu.set_fm_bank(b, r.board_fm);
+				else
+					std::fprintf(stderr, CLI_T("FM voice set: %s (%s)\n", "FM ボードの音色の組: %s（%s）\n"), err.c_str(), r.board_fm.c_str());
 			}
 			if (eng && r.board)
 				eng->mu.set_virtual_board(r.board, r.board_part - 1);
@@ -1313,6 +1334,8 @@ public:
 			open_window_by_kind(BAR_SAMPLING);
 		if (w.open_player && !w.lcd_only)
 			open_window_by_kind(BAR_PLAYER);
+		if (w.open_board && !w.lcd_only)
+			open_window_by_kind(BAR_BOARD);
 	}
 
 	// Starts the audio device. False parks the engine on the failure and
@@ -1367,8 +1390,8 @@ public:
 		std::string aerr;
 		if (dev >= 0 && ain->start(names[size_t(dev)], aerr)) {
 			attach_ain(true);
-			std::printf(CLI_T("A/D INPUT: %s（%s）→ engine\n", "A/D INPUT: %s（%s）→ 音源\n"),
-			            ain->device_name().c_str(), ain->format_line().c_str());
+			std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"), ain->device_name().c_str(),
+			            ain->format_line().c_str());
 		} else {
 			attach_ain(false);
 			std::printf(CLI_T("A/D INPUT: none (%s)\n", "A/D INPUT: なし（%s）\n"),
@@ -1401,6 +1424,7 @@ public:
 		{
 			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();
 			player_win.shutdown(br);
+			board_win.shutdown(br);
 			ImGui::SetCurrentContext(panel_ctx);
 		}
 		if (m_ain_lister.joinable())

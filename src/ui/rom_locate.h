@@ -15,6 +15,7 @@
 
 #include "rom_search.h"
 #include "texts.h"
+#include "../compat/cli_text.h"
 
 #include <cstdio>
 #include <string>
@@ -77,7 +78,7 @@ inline std::string locate_roms_for_gui(const std::string &exe_dir)
 	const std::string found = smu2000::find_roms(exe_dir, true, tried);
 	if (!found.empty())
 		return found;
-	std::fprintf(stderr, "ROM が見つからない。探した場所:\n%s", tried.c_str());
+	std::fprintf(stderr, CLI_T("ROMs not found. Looked in:\n%s", "ROM が見つからない。探した場所:\n%s"), tried.c_str());
 
 	std::string message = roms_needed_message();
 	for (;;) {

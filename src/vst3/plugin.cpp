@@ -25,6 +25,7 @@
 #include "automation.h"
 #include "automation_host.h"
 #include "engine.h"
+#include "pc_order.h"
 #include "state.h"
 #include "view.h"
 #include "ui/xg_state.h"
@@ -929,7 +930,7 @@ private:
 		uint8          b[16];
 		const uint8   *sysex;
 		uint32         sysex_len;
-		uint8          rank = 1;      // 0 はリセット。同じ時刻なら先に流す（is_reset_sysex）
+		uint8          rank = smu2000::vst3::RANK_OTHER;   // 同じ時刻のなかの順番（pc_order.h。リセットが先、次にバンクセレクト、プログラムチェンジ）
 	};
 
 	void queue(int32 port, int32 off, uint8 a, uint8 b = 0, uint8 c = 0, int n = 3)
@@ -1134,12 +1135,17 @@ tresult PLUGIN_API mu_plugin::process(ProcessData &data)
 					const int bend = std::clamp(int(std::lround(v * 16383.0)), 0, 16383);
 					queue(port, off, uint8(0xe0 | ch), uint8(bend & 127), uint8(bend >> 7));
 				} else {
+					// プログラムチェンジ。バンクセレクトより先に並ばないよう、下でまとめて直す（pc_order.h）
 					queue(port, off, uint8(0xc0 | ch),
 					      uint8(std::clamp(int(std::lround(v * 127.0)), 0, 127)), 0, 2);
 				}
 			}
 		}
 	}
+
+	// ここまでがパラメータから作ったメッセージ。プログラムチェンジを、同じブロックのバンクセレクトの後ろへ
+	// （REAPER はプログラムチェンジだけブロックの頭で渡してくる。プルリクエスト #143）
+	smu2000::vst3::order_program_changes(m_msgs, m_msgs.size());
 
 	if (IEventList *events = data.inputEvents) {
 		const int32 n = events->getEventCount();
@@ -1200,7 +1206,7 @@ tresult PLUGIN_API mu_plugin::process(ProcessData &data)
 				if (m_msgs.size() < m_msgs.capacity())
 					m_msgs.push_back({ off, int32(m_msgs.size()), uint8(port), 0, { 0, 0, 0 },
 					                   e.data.bytes, e.data.size,
-					                   uint8(smu2000::vst3::is_reset_sysex(e.data.bytes, e.data.size) ? 0 : 1) });
+					                   uint8(smu2000::vst3::is_reset_sysex(e.data.bytes, e.data.size) ? smu2000::vst3::RANK_RESET : smu2000::vst3::RANK_OTHER) });
 				else
 					m_dropped++;
 				break;
@@ -1211,7 +1217,8 @@ tresult PLUGIN_API mu_plugin::process(ProcessData &data)
 		}
 	}
 
-	// 時刻順。同じ時刻ならリセットを先に（is_reset_sysex。パラメータから作った音色の指定が
+	// 時刻順。同じ時刻なら rank の順（リセット、バンクセレクト、プログラムチェンジ、そのほか。pc_order.h）。
+	// リセットを先にするのは（is_reset_sysex。パラメータから作った音色の指定が
 	// SysEx のリセットより先に並ぶので、そのままだとリセットが音色を消す。issue #51）
 	std::sort(m_msgs.begin(), m_msgs.end(), [](const msg &a, const msg &b) {
 		if (a.off != b.off)

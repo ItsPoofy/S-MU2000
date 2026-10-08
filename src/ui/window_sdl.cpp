@@ -10,6 +10,7 @@
 // (ui/sdl_popup) over the live panel; the shared menu content comes from
 // ui::app::context_menu, dispatched by ui::app::menu_chosen.
 
+#include "compat/cli_text.h"
 #include "window_sdl.h"
 
 #include "app_linux.h"
@@ -100,7 +101,7 @@ SDL_GPUDevice *gpu_device()
 	*device_slot() = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV,
 	                                     /*debug_mode=*/false, /*name=*/nullptr);
 	if (!*device_slot())
-		std::fprintf(stderr, "GPU 装置を作れない: %s\n", SDL_GetError());
+		std::fprintf(stderr, CLI_T("Cannot create the GPU device: %s\n", "GPU 装置を作れない: %s\n"), SDL_GetError());
 	return *device_slot();
 }
 
@@ -146,13 +147,13 @@ int linux_app::run_list(const std::vector<sdl_popup::item> &items, int x, int y,
 int run_window(linux_app &gui, const char *title, int w, int h)
 {
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
-		std::fprintf(stderr, "SDL を始められない: %s\n", SDL_GetError());
+		std::fprintf(stderr, CLI_T("Cannot start SDL: %s\n", "SDL を始められない: %s\n"), SDL_GetError());
 		SDL_Quit();
 		return 1;
 	}
 	SDL_Window *win = SDL_CreateWindow(title, w, h, SDL_WINDOW_RESIZABLE);
 	if (!win) {
-		std::fprintf(stderr, "窓を出せない: %s\n", SDL_GetError());
+		std::fprintf(stderr, CLI_T("Cannot open the window: %s\n", "窓を出せない: %s\n"), SDL_GetError());
 		SDL_Quit();
 		return 1;
 	}
@@ -165,7 +166,7 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 
 	imshell::sdl_state im{};
 	if (!imshell::sdl_start(im, win)) {
-		std::fprintf(stderr, "ImGui 描画を始められない: %s\n", SDL_GetError());
+		std::fprintf(stderr, CLI_T("Cannot start ImGui rendering: %s\n", "ImGui 描画を始められない: %s\n"), SDL_GetError());
 		if (cur_hand) SDL_DestroyCursor(cur_hand);
 		if (cur_arrow) SDL_DestroyCursor(cur_arrow);
 		SDL_DestroyWindow(win);
@@ -265,6 +266,7 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 	// shutdown runs afterwards; on closed windows its calls do nothing.)
 	pc_shutdown_all(gui.list, gui.pc, gui.fx, gui.shapes, gui.master, gui.sampling, gui.br);
 	gui.player_win.shutdown(gui.br);
+	gui.board_win.shutdown(gui.br);
 	gui.list.close();
 	gui.pc.close();
 	gui.fx.close();
@@ -272,6 +274,7 @@ int run_window(linux_app &gui, const char *title, int w, int h)
 	gui.master.close();
 	gui.sampling.close();
 	gui.player_win.close();
+	gui.board_win.close();
 	g_linux = nullptr;
 
 	// sdl_stop() drops the panel's textures and takes the ImGui context down.

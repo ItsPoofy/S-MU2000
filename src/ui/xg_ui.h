@@ -99,10 +99,21 @@ void request_part(int part);            // part は 0-63
 bool take_part_request();               // 頼みがあれば true（1 回だけ）
 int  shape_window_part();               // パートの音色の窓で見ているパート（一覧で行を選んでも替わる）
 void set_shape_window_part(int part);
+// 音色の窓で、マルチパートのボードのチャンネル（口 E の 0-15）を見ているとき、そのチャンネル。見ていなければ -1。
+// 本体のパートを選ぶ（set_shape_window_part・request_part）と -1 に戻る
+int  shape_window_board();
+void set_shape_window_board(int channel);
+void request_board(int channel);        // 音色の窓を、そのチャンネルで開く頼み
 
 // ---- マスターの窓（マスターボリューム・移調・システムエフェクトの戻り・マスター EQ）を開く頼み。
 // 一覧のマスターの行（MASTER の名前、MASTER EQ の絵）のダブルクリックから
 void request_master();
+// プラグインボードの窓（gui だけが持つ）。持っているプログラムが set_board_window(true) にしておくと、マスターの窓は
+// ボードの欄を出さずに、その窓を開くボタンだけを出す。プラグインは窓を持たないので、今までどおりマスターの窓に欄が出る
+void set_board_window(bool on);
+bool board_window();
+void request_board_window();
+bool take_board_window_request();       // 頼みがあれば true（1 回だけ）
 bool take_master_request();             // 頼みがあれば true（1 回だけ）
 
 // ---- ドラムセットアップ（XG の 3n rr pp）。エディタのドラムの面と、音色の窓のドラムのタブが使う
@@ -145,7 +156,9 @@ struct out_hooks {
 };
 void set_out_hooks(out_hooks h);
 bool out_ready();
-void out_port_combo();                  // 送り先の品書き（と、送った結果のひとこと）
+// 送り先の品書き（と、送った結果のひとこと）。ctrl_click: その窓では Ctrl＋右クリックでしか送らないとき。
+// 名前を「Ctrl＋右クリックの送り先」にする（「送る」ボタンのある窓は、ただの「送り先」）
+void out_port_combo(bool ctrl_click = false);
 // 部品がカーソルの下にあるとき、送る中身を名乗る（1 コマごとに out_begin_frame で空に戻る）
 void out_begin_frame();
 void out_hover_param(const xg::param &p, int part);  // パートや共通のパラメータ 1 つ
@@ -286,6 +299,11 @@ bool audition_key(int part, int note);
 void toggle_audition_key(int part, int note);
 // 印の付いた鍵を若い順に集める。戻りは数（out には最大 max 個）
 int  audition_keys(int part, int *out, int max);
+// 印は、マルチパートのボードのチャンネル（口 E の 0-15）にも付けられる。part に XG_PARTS + チャンネルを渡す。
+// audition_board は、そのチャンネルの音色を替えたときの試聴（印の付いた鍵を 1 秒鳴らす。印が無ければ鳴らさない）。
+// audition_poll は、鳴らし始めと止めを進める（描くたびに呼ぶ）
+void audition_board(int channel, bridge &br);
+void audition_poll(bridge &br);
 
 // ---- 説明（ヘルプ）。見出しや名前にカーソルを当てると、何に効くのかを出す（日本語・英語）。
 // 邪魔な人もいるので、窓の上のチェックボックスで消せる。選んだ状態は

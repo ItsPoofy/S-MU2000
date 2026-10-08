@@ -44,6 +44,7 @@ enum bar_window {
 	BAR_MASTER = 4, // マスター
 	BAR_SAMPLING = 5, // サンプリング
 	BAR_PLAYER = 6, // MIDI プレイヤー（gui だけ。プラグインの帯には出さない）
+	BAR_BOARD = 7,  // プラグインボード（gui だけ）
 };
 
 // The strip every window shows, in the same order with the same ids.
@@ -57,8 +58,11 @@ inline std::vector<tool_item> window_bar_items(bool with_player = false)
 	         { UI_TEXT(bar_fx, "Effects"), BAR_FX },
 	         { UI_TEXT(bar_master, "Master"), BAR_MASTER },
 	         { UI_TEXT(bar_sampling, "Sampling"), BAR_SAMPLING } };
-	if (with_player)
+	// gui だけが持つ窓: プラグインボードと MIDI プレイヤー
+	if (with_player) {
+		items.push_back({ UI_TEXT(bar_board, "Boards"), BAR_BOARD });
 		items.push_back({ UI_TEXT(bar_player, "Player"), BAR_PLAYER });
+	}
 	return items;
 }
 

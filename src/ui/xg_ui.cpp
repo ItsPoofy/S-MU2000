@@ -327,19 +327,30 @@ void set_fx_window_slot(int slot) { g_fx_slot = std::clamp(slot, 1, 7); }
 
 namespace {
 int  g_shape_part = 0;
+int  g_shape_board = -1;
 bool g_part_request = false;
 }
 
-void request_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_part_request = true; }
+void request_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_shape_board = -1; g_part_request = true; }
+int  shape_window_board() { return g_shape_board; }
+void set_shape_window_board(int channel) { g_shape_board = channel < 0 ? -1 : std::min(channel, 15); }
+void request_board(int channel) { set_shape_window_board(channel); g_part_request = true; }
 bool take_part_request() { const bool r = g_part_request; g_part_request = false; return r; }
 int  shape_window_part() { return g_shape_part; }
-void set_shape_window_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); }
+void set_shape_window_part(int part) { g_shape_part = std::clamp(part, 0, XG_PARTS - 1); g_shape_board = -1; }
 
 namespace {
 bool g_master_request = false;
 }
 
 void request_master() { g_master_request = true; }
+namespace {
+bool g_board_window = false, g_board_window_request = false;
+}
+void set_board_window(bool on) { g_board_window = on; }
+bool board_window() { return g_board_window; }
+void request_board_window() { g_board_window_request = true; }
+bool take_board_window_request() { const bool r = g_board_window_request; g_board_window_request = false; return r; }
 bool take_master_request() { const bool r = g_master_request; g_master_request = false; return r; }
 
 // ---- ドラムセットアップ
@@ -590,7 +601,7 @@ void out_hover_group(const std::vector<const char *> &keys, int part)
 	g_hover.part = part;
 }
 
-void out_port_combo()
+void out_port_combo(bool ctrl_click)
 {
 	if (!out_ready())
 		return;
@@ -598,7 +609,9 @@ void out_port_combo()
 	const std::string cur = g_out.chosen ? g_out.chosen() : std::string();
 	const char *panel = UI_TEXT(ps_out_panel, "Panel ports");
 	ImGui::AlignTextToFramePadding();
-	ImGui::TextDisabled("%s", UI_TEXT(ps_out_label, "Send to"));
+	// 名前だけ「送り先」だと、つまみを動かした変更もここへ行くように読める（issue #149）。
+	// Ctrl＋右クリックでしか使わない窓では、そう書く
+	ImGui::TextDisabled("%s", ctrl_click ? UI_TEXT(ps_out_label_ctrl, "Ctrl+right-click sends to") : UI_TEXT(ps_out_label, "Send to"));
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(fs * 10.0f);
 	if (ImGui::BeginCombo("##sendout", cur.empty() ? panel : cur.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -618,7 +631,7 @@ void out_port_combo()
 		ImGui::EndCombo();
 	}
 	if (ImGui::IsItemHovered())
-		hint("%s", UI_TEXT(ps_out_hint, "Where Ctrl+right-click sends\nCtrl+right-click a value, fader or key to send just that parameter (not to the sound engine) so a sequencer can record it. A section heading sends the whole section, the MW wheel sends CC1, the bend wheel sends pitch bend, a voice or kit row sends bank select and program change; in the editor's drum page, a cell sends that item and a key or name sends the whole key. Panel ports: parts on A go to THRU A, on B to THRU B"));
+		hint("%s", UI_TEXT(ps_out_hint, "Where Ctrl+right-click sends. Ordinary edits (dragging a knob or slider) do not go here, they go to the built-in sound engine\nCtrl+right-click a value, fader or key to send just that parameter (not to the sound engine) so a sequencer can record it. A section heading sends the whole section, the MW wheel sends CC1, the bend wheel sends pitch bend, a voice or kit row sends bank select and program change; in the editor's drum page, a cell sends that item and a key or name sends the whole key. Panel ports: parts on A go to THRU A, on B to THRU B"));
 	if (!g_out_note.empty() && ImGui::GetTime() - g_out_note_at < 4.0) {
 		ImGui::SameLine();
 		ImGui::TextDisabled("%s", g_out_note.c_str());
@@ -1023,7 +1036,9 @@ audition g_audition;
 
 // **試聴の鍵の印**。パートごとに持ち、**覚えない**（開き直すと空）。
 // 空のパートは音色を替えても鳴らさない ＝ 鳴らすかどうかを自分で決められる
-bool g_audition_keys[XG_PARTS][128] = {};
+// 本体の 64 パートの後ろに、マルチパートのボードの 16 チャンネル（口 E）
+constexpr int AUDITION_PARTS = XG_PARTS + 16;
+bool g_audition_keys[AUDITION_PARTS][128] = {};
 
 // 一度に鳴らす数の上限。印を付けすぎても発音数を食いつぶさないように
 constexpr int AUDITION_MAX = 8;
@@ -1152,6 +1167,29 @@ const std::vector<bank_choice> &bank_choices(const xg::voice_rom &vr, int mode, 
 void audition_stop(bridge &br)
 {
 	audition_off(br);
+}
+
+// ボードのチャンネルの試聴。口 E（5 つ目の口）のそのチャンネルで鳴らす
+void audition_board(int channel, bridge &br)
+{
+	audition_off(br);
+	if (channel < 0 || channel > 15)
+		return;
+	int keys[AUDITION_MAX];
+	const int n = audition_keys(XG_PARTS + channel, keys, AUDITION_MAX);
+	if (n <= 0)
+		return;
+	audition &a = g_audition;
+	a.slot = XG_PARTS + channel;
+	a.notes.assign(keys, keys + n);
+	const double t = now_seconds();
+	a.on_at = t + 0.06;
+	a.off_at = a.on_at + 1.0;
+}
+
+void audition_poll(bridge &br)
+{
+	audition_tick(br);
 }
 
 void program_menu(int part, xg::model &m, const xg_snapshot *ram, bridge &br)
@@ -1935,21 +1973,21 @@ void set_shapes_zoom(float zoom)
 // 試聴の鍵の印。**覚えない**ので ensure_loaded も save_settings も要らない
 bool audition_key(int part, int note)
 {
-	if (part < 0 || part >= XG_PARTS || note < 0 || note > 127)
+	if (part < 0 || part >= AUDITION_PARTS || note < 0 || note > 127)
 		return false;
 	return g_audition_keys[part][note];
 }
 
 void toggle_audition_key(int part, int note)
 {
-	if (part < 0 || part >= XG_PARTS || note < 0 || note > 127)
+	if (part < 0 || part >= AUDITION_PARTS || note < 0 || note > 127)
 		return;
 	g_audition_keys[part][note] = !g_audition_keys[part][note];
 }
 
 int audition_keys(int part, int *out, int max)
 {
-	if (part < 0 || part >= XG_PARTS || !out || max <= 0)
+	if (part < 0 || part >= AUDITION_PARTS || !out || max <= 0)
 		return 0;
 	int n = 0;
 	for (int k = 0; k < 128 && n < max; k++)

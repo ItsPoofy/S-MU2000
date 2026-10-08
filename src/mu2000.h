@@ -324,6 +324,13 @@ public:
 	// オリジナルのボードの中身と、そのファイルの場所（設定に覚えるため。空でもよい）。音を作る糸から呼ぶこと
 	void set_user_board(std::shared_ptr<const smu2000::vboard::user_board> board, const std::string &path);
 	const std::string &user_board_path() const { return m_vb_user_path; }
+	// FM ボードの音色の組（src/vboard_fm.h の fm_bank。nullptr なら初期の 32 個）と、そのファイルの場所。音を作る糸から呼ぶこと
+	void set_fm_bank(std::shared_ptr<const smu2000::vboard::fm_bank> bank, const std::string &path)
+	{
+		m_vb_fm.set_bank(std::move(bank));
+		m_vb_fm_path = path;
+	}
+	const std::string &fm_bank_path() const { return m_vb_fm_path; }
 	std::shared_ptr<const smu2000::vboard::user_board> user_board() const { return m_vb_user_board; }
 	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
 	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
@@ -1155,6 +1162,7 @@ private:
 	// オリジナルのボード。16 パートのときの音源（1 パートのときの音源は差込口ごとに持つ）と、中身
 	smu2000::vboard::user_synth m_vb_user16;
 	smu2000::vboard::fm_synth m_vb_fm;         // VBOARD_FM16 の音源
+	std::string m_vb_fm_path;                  // その音色の組のファイル（設定に覚えるため）
 	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
 	std::string m_vb_user_path;
 	vb_parse m_vb16_parse;
