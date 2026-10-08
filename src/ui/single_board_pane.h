@@ -2,7 +2,7 @@
 //
 // 1 パートの架空のボード（FC ボード・オリジナルのボード。src/vboard.h、src/vboard_user.h）が借りているパートを、
 // 音色の窓で見ているときの面。左の音色選びと、右の編集の面を、本体のもの（内蔵の音色の分類・VIB・FILTER・EG）から
-// ボードのものに差し替える。
+// ボードのものに差し替える。FC ボードの右の面は音色エディタ（fc_voice_editor.h）、オリジナルのボードは名前と包絡線。
 //
 // 実機のプラグインボードと同じで、そのパートのバンクがボードのバンク（MSB 90・91・92、LSB 0）のときだけ
 // ボードが鳴り、ほかのバンクなら内蔵の音色が鳴る。だから差し替えの合図は「いまのバンク」:
@@ -16,6 +16,7 @@
 #pragma once
 
 #include "bridge.h"
+#include "fc_voice_editor.h"
 #include "texts.h"
 #include "user_boards.h"
 #include "xg_ui.h"
@@ -88,7 +89,8 @@ public:
 			if (b && prog >= 0 && prog < user_boards::board::PROGRAMS && b->program[size_t(prog)])
 				name = b->program[size_t(prog)]->name;
 		} else {
-			name = smu2000::vboard::fc_program_name(prog);
+			const std::shared_ptr<const fc_banks::bank> b = fc_banks::current();
+			name = b ? b->prog[size_t(prog & 127)].name : smu2000::vboard::fc_program_name(prog);
 		}
 		while (!name.empty() && name.back() == ' ')
 			name.pop_back();
@@ -145,18 +147,23 @@ public:
 		ImGui::EndChild();
 	}
 
+	// FC ボードの音色エディタだけ（16 パートの FC ボードのチャンネルを出しているとき。音色の組は 1 パートのものと同じ）
+	void edit_fc_voice(int prog, bridge &br) { m_fc.draw(prog, br); }
+
 	// 右の面: ボードの音色の中身
 	void edit(int slot, int kind, int part, int prog, bridge &br)
 	{
 		(void)part;
 		const float fs = ImGui::GetFontSize();
-		char title[80];
-		std::snprintf(title, sizeof(title), "PLG-%d  %s    %03d  %s", slot + 1, board_name(kind).c_str(), prog + 1, program_name(kind, prog).c_str());
-		ImGui::SeparatorText(title);
-		if (kind == mu2000::VBOARD_USER)
+		if (kind == mu2000::VBOARD_USER) {
+			char title[80];
+			std::snprintf(title, sizeof(title), "PLG-%d  %s    %03d  %s", slot + 1, board_name(kind).c_str(), prog + 1, program_name(kind, prog).c_str());
+			ImGui::SeparatorText(title);
 			edit_user(prog, br, fs);
-		else
-			edit_fc(prog, fs);
+		} else {
+			(void)slot;
+			m_fc.draw(prog, br);        // 番号と名前はエディタの 1 行目に出る
+		}
 		ImGui::Spacing();
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 		ImGui::TextWrapped("%s", UI_TEXT(sb_note, "The board makes this part's sound. The row above still works on it: volume, expression, pan and the reverb and chorus sends. The MU's own filter, EG, vibrato and part EQ belong to the built-in voices and do not reach the board, so they are not shown here."));
@@ -170,9 +177,11 @@ private:
 	std::shared_ptr<info> m_info = std::make_shared<info>();
 	int m_back[PARTS] = {};            // ボードへ切り替える前の内蔵の音色（MSB << 14 | LSB << 7 | プログラム）
 	char m_name[9] = "";               // オリジナルのボードの名前の欄
+	fc_voice_editor m_fc;              // FC ボードの音色エディタ
 	int m_name_for = -1;
 
-	static int programs(int kind) { return kind == mu2000::VBOARD_USER ? user_boards::board::PROGRAMS : 16; }
+	// FC ボードは、初期の音色なら 16 個（17 以降はそのくり返し）、音色の組を開いていれば 128 個
+	static int programs(int kind) { return kind == mu2000::VBOARD_USER ? user_boards::board::PROGRAMS : fc_banks::current() ? 128 : 16; }
 	static bool has_program(int prog)
 	{
 		const std::shared_ptr<const user_boards::board> b = user_boards::current();
@@ -203,96 +212,6 @@ private:
 	}
 	static ImU32 line_color() { return IM_COL32(90, 170, 255, 255); }
 	static ImU32 axis_color() { return IM_COL32(255, 255, 255, 40); }
-
-	// ---- FC ボード: 音は決まっている。波の形と音量の動きを絵にする
-	void edit_fc(int prog, float fs)
-	{
-		const int timbre = prog & 7;
-		const bool decays = (prog & 8) != 0;
-		const char *const about[8] = {
-			UI_TEXT(sb_fc_t0, "Square wave, 1/2 duty: the hollow, round lead."),
-			UI_TEXT(sb_fc_t1, "Square wave, 1/4 duty: brighter and thinner."),
-			UI_TEXT(sb_fc_t2, "Square wave, 1/8 duty: the thinnest, nasal one."),
-			UI_TEXT(sb_fc_t3, "Triangle wave in 16 steps. As on the real chip it has no volume: it sounds or it does not."),
-			UI_TEXT(sb_fc_t4, "Noise with a long period: hiss, snares and explosions. The key sets how fast it runs."),
-			UI_TEXT(sb_fc_t5, "Noise with a short period: metallic, buzzing."),
-			UI_TEXT(sb_fc_t6, "Square wave whose duty changes every 1/30 second (1/8, 1/4, 1/2, 1/4)."),
-			UI_TEXT(sb_fc_t7, "Square wave alternating with the octave above every 1/60 second: the fast arpeggio."),
-		};
-		ImGui::TextDisabled("%s", UI_TEXT(sb_wave, "Wave"));
-		picture("fcwave", fs * 7.0f, [&](ImDrawList *dl, ImVec2 a, ImVec2 b) {
-			const float w = b.x - a.x, h = b.y - a.y, mid = a.y + h * 0.5f, amp = h * 0.36f;
-			dl->AddLine(ImVec2(a.x, mid), ImVec2(b.x, mid), axis_color());
-			const int n = std::max(16, int(w));
-			ImVec2 prev;
-			u32 lfsr = 1;
-			for (int i = 0; i <= n; i++) {
-				const double t = double(i) / n;        // 絵の左端から右端
-				double y;
-				if (timbre == 4 || timbre == 5) {
-					// 音源と同じ 15 ビットの帰還シフトレジスタ。96 歩ぶん
-					static int at = -1;
-					const int step = int(t * 96.0);
-					if (i == 0)
-						at = -1;
-					for (; at < step; at++) {
-						const u32 tap = timbre == 5 ? 6 : 1;
-						const u32 fb = (lfsr ^ (lfsr >> tap)) & 1;
-						lfsr = (lfsr >> 1) | (fb << 14);
-					}
-					y = (lfsr & 1) ? 1.0 : -1.0;
-				} else {
-					// 4 周期。6 と 7 は周期ごとに形が替わるところを見せる
-					const double cyc = t * 4.0;
-					const int k = std::min(3, int(cyc));
-					double ph = cyc - std::floor(cyc);
-					if (timbre == 3) {
-						const int s = int(ph * 32.0) & 31;
-						y = (s < 16 ? s : 31 - s) / 7.5 - 1.0;
-					} else {
-						static constexpr double DUTY[4] = { 0.5, 0.25, 0.125, 0.25 }, SWEEP[4] = { 0.125, 0.25, 0.5, 0.25 };
-						double duty = timbre == 6 ? SWEEP[k] : timbre == 7 ? 0.5 : DUTY[timbre & 3];
-						if (timbre == 7 && (k & 1))
-							ph = std::fmod(ph * 2.0, 1.0);        // 1 オクターブ上
-						y = ph < duty ? 1.0 : -1.0;
-					}
-				}
-				const ImVec2 p(a.x + float(t) * w, mid - float(y) * amp);
-				if (i) {
-					dl->AddLine(prev, ImVec2(p.x, prev.y), line_color(), 1.5f);
-					dl->AddLine(ImVec2(p.x, prev.y), p, line_color(), 1.5f);
-				}
-				prev = p;
-			}
-		});
-		ImGui::TextWrapped("%s", about[timbre]);
-		ImGui::Spacing();
-		ImGui::TextDisabled("%s", UI_TEXT(sb_volume, "Volume (16 steps, one key held for 1 second, then released)"));
-		picture("fcvol", fs * 5.0f, [&](ImDrawList *dl, ImVec2 a, ImVec2 b) {
-			// 60 分の 1 秒ごとの段。1 秒押して離す。減衰する鳴り方は 4 コマごとに 1 段、離すと 1 コマに 2 段
-			const float w = b.x - a.x, h = b.y - a.y, pad = h * 0.12f;
-			const int frames = 75;
-			int vol = 15;
-			ImVec2 prev(a.x, b.y - pad - (h - pad * 2) * (timbre == 3 ? 1.0f : vol / 15.0f));
-			for (int f = 1; f <= frames && vol >= 0; f++) {
-				if (f > 60)
-					vol = std::max(0, vol - 2);
-				else if (decays && !(f & 3))
-					vol = std::max(0, vol - 1);
-				const float level = timbre == 3 ? (vol > 0 ? 1.0f : 0.0f) : vol / 15.0f;
-				const ImVec2 p(a.x + w * f / frames, b.y - pad - (h - pad * 2) * level);
-				dl->AddLine(prev, ImVec2(p.x, prev.y), line_color(), 1.5f);
-				dl->AddLine(ImVec2(p.x, prev.y), p, line_color(), 1.5f);
-				prev = p;
-			}
-			const float off_x = a.x + w * 60.0f / frames;
-			dl->AddLine(ImVec2(off_x, a.y), ImVec2(off_x, b.y), axis_color());
-		});
-		ImGui::TextWrapped("%s", decays ? UI_TEXT(sb_fc_decay, "Programs 9-16 fade while the key is held, one step every 1/15 second.")
-		                               : UI_TEXT(sb_fc_hold, "Programs 1-8 hold their volume while the key is held. Programs 9-16 are the same sounds, fading."));
-		ImGui::Spacing();
-		ImGui::TextWrapped("%s", UI_TEXT(sb_fc_fixed, "The FC board's sounds are fixed, there is nothing to edit. Velocity sets the volume, pitch bend moves it up to 2 semitones, and the modulation wheel adds vibrato. 8 notes at once."));
-	}
 
 	// ---- オリジナルのボード: 名前と包絡線はここで変えられる（波形はサンプリングの窓の「波形を作る」で入れる）
 	void edit_user(int prog, bridge &br, float fs)

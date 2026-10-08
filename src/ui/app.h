@@ -59,6 +59,7 @@
 #include "ui/status.h"
 #include "ui/toolbar.h"
 #include "ui/user_boards.h"
+#include "ui/fc_banks.h"
 #include "ui/fm_banks.h"
 
 #include "nvram.h"
@@ -479,6 +480,8 @@ public:
 		r.board_file = user_boards::current_path();
 		fm_banks::save(br);
 		r.board_fm = fm_banks::current_path();
+		fc_banks::save(br);
+		r.board_fc = fc_banks::current_path();
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1156,6 +1159,13 @@ public:
 					eng->mu.set_user_board(b, r.board_file);
 				else
 					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
+			}
+			if (eng && !r.board_fc.empty()) {
+				std::string err;
+				if (const auto b = fc_banks::adopt(r.board_fc, err))
+					eng->mu.set_fc_bank(b, r.board_fc);
+				else
+					std::fprintf(stderr, CLI_T("FC voice set: %s (%s)\n", "FC ボードの音色の組: %s（%s）\n"), err.c_str(), r.board_fc.c_str());
 			}
 			if (eng && !r.board_fm.empty()) {
 				std::string err;
