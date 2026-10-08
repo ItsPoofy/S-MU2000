@@ -648,7 +648,7 @@ public:
 					if (!keep)
 						menu_error(err);
 				} else {
-					std::printf("A/D INPUT: %s（%s）\n",
+					std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"),
 					            ain->device_name().c_str(),
 					            ain->format_line().c_str());
 					std::fflush(stdout);
@@ -1296,7 +1296,7 @@ public:
 		const int dev = find_device(names, ain_name);
 		std::string aerr;
 		if (dev >= 0 && ain->start(names[size_t(dev)], aerr))
-			std::printf("A/D INPUT: %s（%s）\n", ain->device_name().c_str(),
+			std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"), ain->device_name().c_str(),
 			            ain->format_line().c_str());
 		else
 			std::printf(CLI_T("A/D INPUT: none (%s)\n", "A/D INPUT: なし（%s）\n"),

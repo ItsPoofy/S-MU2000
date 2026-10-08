@@ -82,7 +82,8 @@ public:
 
 	void print_audio_details() override
 	{
-		std::printf("独り占め: %s\n", out->exclusive() ? "取れた" : "取れなかった");
+		std::printf(CLI_T("Exclusive use: %s\n", "独り占め: %s\n"),
+		            out->exclusive() ? CLI_T("taken", "取れた") : CLI_T("not taken", "取れなかった"));
 	}
 
 	// ---- the window-system shell (ui::app::run drives these)
@@ -103,17 +104,18 @@ public:
 	}
 	void say_audio_opened(bool exclusive) override
 	{
-		std::printf("音声の出口: %s\n", out->device_name().c_str());
+		std::printf(CLI_T("Audio output: %s\n", "音声の出口: %s\n"), out->device_name().c_str());
 		// Hog mode is a request, not a guarantee: something else may hold it
 		if (exclusive)
-			std::printf("独り占め: %s\n", out->exclusive() ? "取れた" : "取れなかった");
+			std::printf(CLI_T("Exclusive use: %s\n", "独り占め: %s\n"),
+			            out->exclusive() ? CLI_T("taken", "取れた") : CLI_T("not taken", "取れなかった"));
 	}
 	void say_audio_running() override
 	{
-		std::printf("鳴らしている（待ち時間 %.1f ms、%s）\n",
+		std::printf(CLI_T("Playing (latency %.1f ms, %s)\n", "鳴らしている（待ち時間 %.1f ms、%s）\n"),
 		            1000.0 * out->buffer_frames() / AUDIO_RATE,
-		            out->mmcss() ? "CoreAudio の実時間スレッド"
-		                         : "実時間スレッドを取れていない（途切れやすい）");
+		            out->mmcss() ? CLI_T("CoreAudio real-time thread", "CoreAudio の実時間スレッド")
+		                         : CLI_T("no real-time thread (may drop out)", "実時間スレッドを取れていない（途切れやすい）"));
 	}
 	// starved() counts what Windows calls late()
 	u64 audio_drops() override { return out->starved(); }
