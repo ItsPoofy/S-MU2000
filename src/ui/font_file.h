@@ -323,17 +323,48 @@ inline void cjk_offers(bool bold, std::vector<face_offer> &out)
 // move. One deliberate fork, documented here, not drift: the panel cannot use
 // files at all (its bold must pair with its regular), the editors never needed
 // anything else.
+// The font directory of the Windows that is running. Not "C:\\Windows\\Fonts":
+// Windows can live on any drive, and on a dual-boot machine C: may hold another
+// Windows whose files this one cannot read (reported on Windows 8.1 running from
+// E: with Windows 10 on C: -- the file "existed" and then would not open).
+inline std::string windows_font_dir()
+{
+	char dir[MAX_PATH] = {};
+	const UINT n = GetWindowsDirectoryA(dir, sizeof(dir));
+	if (n == 0 || n >= sizeof(dir))
+		return {};
+	return std::string(dir) + "\\Fonts\\";
+}
+
+// Can the file actually be opened and read? Existing is not enough (see above),
+// and a file handed to ImGui that then fails to load is an assertion there.
+inline bool font_file_readable(const std::string &path)
+{
+	const HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+	                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE)
+		return false;
+	char head[4];
+	DWORD got = 0;
+	const bool ok = ReadFile(h, head, sizeof(head), &got, nullptr) && got == sizeof(head);
+	CloseHandle(h);
+	return ok;
+}
+
 inline ImFont *add_cjk_editor_font(ImFontAtlas *atlas, float px = 16.0f)
 {
-	static const char *const FILES[] = {
-		"C:\\Windows\\Fonts\\YuGothM.ttc",
-		"C:\\Windows\\Fonts\\meiryo.ttc",
-		"C:\\Windows\\Fonts\\msgothic.ttc",
-	};
-	for (const char *path : FILES) {
-		if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+	static const char *const FILES[] = { "YuGothM.ttc", "meiryo.ttc", "msgothic.ttc" };
+	// A font that will not load must never take the program down: ImGui's default
+	// is to treat it as a programming error and assert. Ask it not to, and fall
+	// through to the next file, then to the built-in font.
+	ImFontConfig cfg;
+	cfg.Flags |= ImFontFlags_NoLoadError;
+	const std::string dir = windows_font_dir();
+	for (const char *name : FILES) {
+		const std::string path = dir + name;
+		if (dir.empty() || !font_file_readable(path))
 			continue;
-		if (ImFont *font = atlas->AddFontFromFileTTF(path, px))
+		if (ImFont *font = atlas->AddFontFromFileTTF(path.c_str(), px, &cfg))
 			return font;
 	}
 	return atlas->AddFontDefault();
