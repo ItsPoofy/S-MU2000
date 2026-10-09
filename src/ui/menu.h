@@ -97,7 +97,7 @@ enum : int {
 	ID_NATIVE_FX = 5215,     // lightweight mode (C++ effects)
 	ID_SETTINGS = 5220,
 	ID_NATIVE_ENGINE = 5216, // firmware を走らせない口（聞き比べ用）
-	ID_PC_EDITOR = 5201,
+	ID_PC_EDITOR = 5203,
 	ID_OVERVIEW = 5202,
 	ID_OUTPUT_DIGITAL = 5300, ID_OUTPUT_ANALOG = 5301,
 	ID_AUDIO_DEFAULT = 5500, ID_AUDIO_BASE = 5501,
@@ -120,6 +120,9 @@ static_assert([] {
 	                        ID_NATIVE_ENGINE, ID_SETTINGS,
 	                        ID_PORTS34_FOLD, ID_PORTS34_DROP, ID_THIN_BENDS, ID_PC_EDITOR, ID_OVERVIEW,
 	                        ID_OUTPUT_DIGITAL, ID_OUTPUT_ANALOG, ID_AUDIO_DEFAULT, ID_INE_NONE };
+	for (size_t i = 0; i < std::size(singles); i++)
+		for (size_t j = 0; j < i; j++)
+			if (singles[i] == singles[j]) return false;
 	for (int base : bases) {
 		for (int id : singles)
 			if (id >= base && id < base + 256)
@@ -129,7 +132,7 @@ static_assert([] {
 				return false;
 	}
 	return true;
-}(), "a menu id falls inside another menu's ID_BASE..ID_BASE+255 range");
+}(), "menu ids overlap or fall inside another menu's ID_BASE..ID_BASE+255 range");
 
 // The names shown in the menu and in the startup report, A B C D.
 // (The gui.ini keys stay per front end with the settings code.)
