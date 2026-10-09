@@ -340,6 +340,16 @@ struct ui_texts {
 	const char *fce_vib_delay;
 	const char *fce_vib_delay_tip;
 	const char *fce_note;
+	const char *fce_cc_fmt;
+	const char *fce_cc_tip;
+	const char *fce_cc_drop;
+	const char *fce_cc_drop_tip;
+	const char *fce_cc_assign;
+	const char *fce_cc_assign_tip;
+	const char *fce_cc_duty_fmt;
+	const char *fce_cc_arp_fmt;
+	const char *fce_cc_defaults;
+	const char *fce_cc_assign_note;
 	const char *fme_default_set;
 	const char *fme_set_tip;
 	const char *fme_new_set;

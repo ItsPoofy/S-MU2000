@@ -37,15 +37,26 @@ namespace ui {
 class single_board_pane
 {
 public:
-	// 1 コマに 1 度。差込口（PLG-1〜6）の様子を音声の糸に置いてもらう（答えは次のコマから読める）
-	void poll(bridge &br)
+	// 1 コマに 1 度。差込口（PLG-1〜6）の様子を音声の糸に置いてもらう（答えは次のコマから読める）。
+	// FC ボードは、いま鳴らす音色（コントロールチェンジで触ってある値を重ねたもの）も。channel16 は、16 パートの
+	// FC ボードのチャンネルを出しているときのその番号（0-15。出していなければ負）
+	void poll(bridge &br, int channel16 = -1)
 	{
-		br.post([info = m_info](mu2000 &mu) {
+		br.post([info = m_info, channel16](mu2000 &mu) {
 			slot now[mu2000::PLG_SLOTS];
-			for (int i = 0; i < mu2000::PLG_SLOTS; i++)
+			mu2000::fc_live live[mu2000::PLG_SLOTS], live16;
+			for (int i = 0; i < mu2000::PLG_SLOTS; i++) {
 				now[i] = { mu.virtual_board_kind(i), mu.virtual_board_part(i), mu.virtual_board_assigned(i) };
+				if (now[i].kind == mu2000::VBOARD_FC)
+					live[i] = mu.fc_board_live(i);
+			}
+			if (channel16 >= 0)
+				live16 = mu.fc_board_live(-1, channel16);
 			std::lock_guard<std::mutex> g(info->lock);
 			std::copy(std::begin(now), std::end(now), std::begin(info->s));
+			std::copy(std::begin(live), std::end(live), std::begin(info->live));
+			info->live16 = live16;
+			info->live16_channel = channel16;
 			return std::string();
 		});
 	}
@@ -148,7 +159,16 @@ public:
 	}
 
 	// FC ボードの音色エディタだけ（16 パートの FC ボードのチャンネルを出しているとき。音色の組は 16 パートのボードのもの）
-	void edit_fc_voice(int prog, bridge &br) { m_fc.draw(prog, br, fc_banks::MULTI); }
+	void edit_fc_voice(int prog, bridge &br, int channel)
+	{
+		mu2000::fc_live live;
+		{
+			std::lock_guard<std::mutex> g(m_info->lock);
+			if (m_info->live16_channel == channel)
+				live = m_info->live16;
+		}
+		m_fc.draw(prog, br, fc_banks::MULTI, &live, channel);
+	}
 
 	// 右の面: ボードの音色の中身
 	void edit(int slot, int kind, int part, int prog, bridge &br)
@@ -161,7 +181,13 @@ public:
 			ImGui::SeparatorText(title);
 			edit_user(prog, br, fs);
 		} else {
-			m_fc.draw(prog, br, slot);  // 番号と名前はエディタの 1 行目に出る。音色の組はこの差込口のボードのもの
+			// 番号と名前はエディタの 1 行目に出る。音色の組はこの差込口のボードのもの
+			mu2000::fc_live live;
+			{
+				std::lock_guard<std::mutex> g(m_info->lock);
+				live = m_info->live[std::clamp(slot, 0, mu2000::PLG_SLOTS - 1)];
+			}
+			m_fc.draw(prog, br, slot, &live);
 		}
 		ImGui::Spacing();
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -172,7 +198,12 @@ public:
 private:
 	enum { PARTS = 64 };
 	struct slot { int kind = 0, part = 0; bool on = false; };
-	struct info { std::mutex lock; slot s[mu2000::PLG_SLOTS]; };
+	struct info {
+		std::mutex lock;
+		slot s[mu2000::PLG_SLOTS];
+		mu2000::fc_live live[mu2000::PLG_SLOTS], live16;       // FC ボードがいま鳴らす音色（差込口ごと、16 パートのボードの 1 チャンネル）
+		int live16_channel = -1;
+	};
 	std::shared_ptr<info> m_info = std::make_shared<info>();
 	int m_back[PARTS] = {};            // ボードへ切り替える前の内蔵の音色（MSB << 14 | LSB << 7 | プログラム）
 	char m_name[9] = "";               // オリジナルのボードの名前の欄
