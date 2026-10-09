@@ -20,6 +20,12 @@
 	"menu_audio_title": "音声の出力デバイス",
 	"menu_audio_default": "システムの既定",
 	"menu_no_audio": "（再生デバイスが無い）",
+	"menu_bt_title": "Bluetooth とネットワーク MIDI",
+	"menu_bt_connect": "Bluetooth MIDI に接続...",
+	"menu_bt_advertise": "このデバイスを公開...",
+	"menu_net_midi": "ネットワーク MIDI",
+	"menu_roms_title": "ROM ファイル",
+	"menu_roms_install": "ROM ファイルを入れる...",
 	"menu_out_mu": "MIDI OUT（MU2000 が送り出すもの）",
 	"menu_thru_a": "MIDI THRU A（A で受けたものを外へ）",
 	"menu_thru_b": "MIDI THRU B（B で受けたものを外へ）",
@@ -78,6 +84,7 @@
 	"dlg_fresh_card": "新しい SmartMedia を差しました。\n本体の UTIL → CARD → Format と同じ書式化を済ませてあるので、すぐに保存できます。",
 	"dlg_roms_needed": "S-MU2000 を動かすには、自分の MU2000 から吸い出した ROM が要ります。\n吸い出し方: https://github.com/tarboh/S-MU2000#roms\n\n用意できたら、mu2000_flash.bin と dump フォルダが入っているフォルダを選んでください。場所は覚えるので、次からは gui もプラグインも ROM を見つけます。",
 	"dlg_roms_bad_fmt": "%s には ROM が揃っていません（足りないもの: %s）。\nmu2000_flash.bin と dump フォルダが入っているフォルダを選んでください。",
+	"dlg_roms_installed": "ROM ファイルを入れました。",
 	"dlg_roms_pick": "ROM のフォルダを選ぶ...",
 	"dlg_roms_quit": "終わる",
 	"dlg_roms_ok_cancel": "OK: フォルダを選ぶ。キャンセル: 終わる。",
@@ -90,6 +97,7 @@
 	"note_export_fail": "書き出せない",
 	"note_imported": "読み込んだ",
 	"note_import_fail": "読めなかった",
+	"note_kept_fmt": "%s に入れた（Files の「On My iPhone > S-MU2000」で見える・消せる）",
 
 	// %zu
 	"note_sysex_busy_fmt": "読み込み中（SysEx %zu 通）",

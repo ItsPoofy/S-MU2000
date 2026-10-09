@@ -36,6 +36,17 @@
 #include <d3d11.h>
 #include <windows.h>
 #elif defined(__APPLE__)
+// The Metal definitions, but ONLY for Objective-C++: this header is also read by
+// plain C++ translation units (ui/app.h -> ui/shot.h reaches it from gui_mac.cpp),
+// and Metal.h pulls in Foundation, which is not C++-clean - including it from a
+// .cpp fails in NSObjCRuntime.h with "expected unqualified-id" and broke the mac
+// build. The __OBJC__ section further down only forward-declares CAMetalLayer for
+// C++, which is all plain C++ ever needs from here; the metal_* helpers that use
+// the real types live inside #ifdef __OBJC__ themselves.
+#ifdef __OBJC__
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#endif
 #include "backends/imgui_impl_metal.h"
 #else
 #include <fontconfig/fontconfig.h>
@@ -43,6 +54,7 @@
 
 #ifdef __OBJC__
 @class NSView;
+@class UIView;
 @class CAMetalLayer;
 @protocol CAMetalDrawable;
 @protocol MTLCommandQueue;
@@ -213,7 +225,45 @@ inline void dx11_paint(dx11_state &st, int w, int h,
 
 // ---- Metal family: main view, plug-in view (.mm only) ----------------------
 //
-// The hosted layer (not +layerClass: AppKit's backing layer does not always
+// Only metal_attach and metal_sync mention a platform view class. metal_paint,
+// metal_stop, new_context and panel_fonts below take a layer or nothing at all,
+// and are shared as they stand: they speak CAMetalLayer/MTL and no AppKit.
+
+#if TARGET_OS_IPHONE
+
+// iOS: the layer comes from +layerClass rather than being set afterwards.
+// UIView honours the override (it has to - that is the documented way to get a
+// Metal-backed view), so there is no setLayer/wantsLayer dance here.
+inline CAMetalLayer *metal_attach(UIView *view, id<MTLDevice> __strong &dev,
+                                  id<MTLCommandQueue> __strong &queue)
+{
+	dev = MTLCreateSystemDefaultDevice();
+	if (!dev)
+		return nil;
+	queue = [dev newCommandQueue];
+	CAMetalLayer *layer = (CAMetalLayer *)view.layer;
+	if (![layer isKindOfClass:CAMetalLayer.class])
+		return nil;
+	layer.device = dev;
+	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+	layer.framebufferOnly = YES;
+	return layer;
+}
+
+// UIKit has no window.backingScaleFactor, and a view's own contentScaleFactor
+// is the same number: the backing store multiplier for this screen.
+inline void metal_sync(CAMetalLayer *layer, UIView *view)
+{
+	if (!layer)
+		return;
+	const CGRect b = [view bounds];
+	const CGFloat s = [view contentScaleFactor];
+	layer.drawableSize = CGSizeMake(b.size.width * s, b.size.height * s);
+}
+
+#else // TARGET_OS_IPHONE
+
+// macOS: the hosted layer (not +layerClass: AppKit's backing layer does not always
 // honour the override) with its device and queue. Returns the layer, or nil.
 inline CAMetalLayer *metal_attach(NSView *view, id<MTLDevice> __strong &dev,
                                   id<MTLCommandQueue> __strong &queue)
@@ -239,6 +289,8 @@ inline void metal_sync(CAMetalLayer *layer, NSView *view)
 	const CGFloat s = [view.window backingScaleFactor];
 	layer.drawableSize = CGSizeMake(b.size.width * s, b.size.height * s);
 }
+
+#endif // TARGET_OS_IPHONE
 
 // One frame at the view's size: the caller's paint into the background
 // list, then submit + present. Quietly skips when no drawable is ready.

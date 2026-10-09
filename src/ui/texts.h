@@ -85,6 +85,16 @@ struct ui_texts {
 	const char *menu_audio_title;
 	const char *menu_audio_default;
 	const char *menu_no_audio;
+	// iOS-only menu rows (Bluetooth/network setup, ROM import). Localized like
+	// every other row even though no desktop front end offers them, so their text
+	// is in locale/<code>/menus.json like the rest - the comment here becomes the
+	// note a translator reads.
+	const char *menu_bt_title;
+	const char *menu_bt_connect;
+	const char *menu_bt_advertise;
+	const char *menu_net_midi;
+	const char *menu_roms_title;
+	const char *menu_roms_install;
 	const char *audio_switch_failed_fmt; // %s: device and backend error
 	const char *menu_out_mu;
 	const char *menu_thru_a;
@@ -156,6 +166,7 @@ struct ui_texts {
 	const char *dlg_roms_pick;
 	const char *dlg_roms_quit;
 	const char *dlg_roms_ok_cancel;
+	const char *dlg_roms_installed;
 	const char *dlg_cancel;
 	// .syx file notes, shown in the master editor (produced by the
 	// pc_window backends and master_editor.cpp).
@@ -163,6 +174,10 @@ struct ui_texts {
 	const char *note_export_fail;
 	const char *note_imported;
 	const char *note_import_fail;
+	// iOS only: a picked file cannot be kept where it is (the grant dies with
+	// the process), so a copy lands in the app's own Documents folder, which
+	// Files shows as "On My iPhone > S-MU2000". %s is the folder name
+	const char *note_kept_fmt;
 	const char *note_sysex_busy_fmt; // %zu
 	const char *note_sysex_idle;
 	// XG editor shared (xg_ui.cpp): part parameter groups, the voice
@@ -347,6 +362,16 @@ struct ui_texts {
 	const char *fce_vib_delay;
 	const char *fce_vib_delay_tip;
 	const char *fce_note;
+	const char *fce_cc_fmt;
+	const char *fce_cc_tip;
+	const char *fce_cc_drop;
+	const char *fce_cc_drop_tip;
+	const char *fce_cc_assign;
+	const char *fce_cc_assign_tip;
+	const char *fce_cc_duty_fmt;
+	const char *fce_cc_arp_fmt;
+	const char *fce_cc_defaults;
+	const char *fce_cc_assign_note;
 	const char *fme_default_set;
 	const char *fme_set_tip;
 	const char *fme_new_set;

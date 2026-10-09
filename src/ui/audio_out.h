@@ -116,6 +116,19 @@ public:
 	void stop();
 
 	// Progress. Written on the audio thread, safe to read from anywhere.
+	//
+	// Two counts, and they are not in the same unit. produced() is in 44100 Hz
+	// machine frames, so dividing it by AUDIO_RATE gives seconds - which is what
+	// live.cpp does, for its progress line and for the CPU-per-second in the
+	// closing summary. buffer_frames() is the device's own buffer in the device's
+	// own frames: the desktop back ends open the device at 44100, so the two
+	// numbers are the same there, while the Apple back ends run against whatever
+	// the device runs at (48000 on every iPhone) and 480 frames there is 10 ms,
+	// not 10.9. So buffer_frames() is for reporting a frame count, as the iOS log
+	// line does, and there is deliberately nothing to convert it with:
+	// device_rate() below is the WASAPI back end's own, and the Apple back ends
+	// keep the device rate to themselves. Arithmetic on produced() is safe;
+	// arithmetic on buffer_frames() is not.
 	u32 buffer_frames() const;
 	bool running() const;
 	u64 produced() const;

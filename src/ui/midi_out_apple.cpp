@@ -1,8 +1,9 @@
 // license:BSD-3-Clause
 //
-// CoreMIDI output for macOS. Same interface as midi_out.cpp (WinMM), and the
-// same split: the audio thread only drops bytes into a ring, and a second
-// thread does the actual sending.
+// CoreMIDI output, for macOS and iOS alike - CoreMIDI.h is complete on both, so
+// this file compiles for either unchanged. Same interface as midi_out.cpp
+// (WinMM), and the same split: the audio thread only drops bytes into a ring,
+// and a second thread does the actual sending.
 //
 // That split matters more here than on Windows. The audio thread has to hand a
 // byte over without ever blocking, and CoreMIDI's send path can take a lock, so

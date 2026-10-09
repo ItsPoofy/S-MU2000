@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  iOS entitlements for the AUv3 extension: deliberately EMPTY.
+
+	  Two keys used to live here and both were wrong:
+	  - com.apple.security.app-sandbox is a macOS entitlement, copied over with
+	    the file. Meaningless on iOS, and a device install may reject it.
+	  - com.apple.security.cs.allow-jit does nothing on iOS (no JIT write
+	    protection API, interpreter compiled in instead - see
+	    src/compat/exec_mem.h and the SMU2000_SH2_JIT switch).
+
+	  Deliberately no application-groups either. Working without a paid account
+	  means free provisioning, which does not support App Groups, so the
+	  extension cannot reach the app's files through a shared container. The
+	  ROMs are therefore baked into the extension bundle instead
+	  (make ios-auv3 IOS_ROMS=roms), which the engine finds beside the binary
+	  (candidate 3b in src/vst3/engine.cpp).
+
+	  "import ROMs" from inside the app can come later; it would write into the
+	  bundle-adjacent directory or, once there is a paid account, into a group
+	  container.
+
+	  If background audio is ever needed (playing while another app is front),
+	  that is UIBackgroundModes=audio in the *app's* Info.plist, not an
+	  entitlement here.
+	-->
+</dict>
+</plist>
