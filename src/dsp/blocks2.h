@@ -1,5 +1,9 @@
 // license:BSD-3-Clause
 //
+// More effect blocks, the ones with a fixed shape: ring modulator, slice,
+// isolator, resonant low-pass, centre cancel, enhancer, pitch change, talking
+// modulator. Same interface as blocks.h. (English overview: src/dsp/README.md.)
+//
 // C++ で書いたエフェクトの続き（軽量モード。doc/native-dsp.md）。
 // blocks.h が系統ごとの作りなのに対して、こちらは**種類ごとに形が決まっているもの**を置く。
 //
