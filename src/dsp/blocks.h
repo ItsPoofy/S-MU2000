@@ -1,5 +1,12 @@
 // license:BSD-3-Clause
 //
+// The effect blocks, one class per family: early reflections and gated reverb,
+// delays, chorus/flanger/phaser, rotary speaker/tremolo/auto-pan, distortion and
+// amp, EQ, auto-wah, compressor/gate, lo-fi, and the five-band master EQ. Each
+// has a `params` struct in plain units, set_rate(), set_params(), reset() and
+// process() for one stereo sample. They approximate the XG effect families; they
+// are not the MU2000's own algorithms. (English overview: src/dsp/README.md.)
+//
 // C++ で書いたエフェクトの中身（軽量モード。doc/native-dsp.md）。
 // XG の種類ごとに、掛かり方を似せた作りにしてある。**実機（MEG）と同じ音にはならない。**
 //

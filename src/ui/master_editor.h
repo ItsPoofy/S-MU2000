@@ -25,7 +25,7 @@
 
 namespace ui {
 
-// 架空のプラグインボード（src/vboard.h）の欄。差込口 3 つぶんの「挿すボードと、挿すパート」と、
+// 架空のプラグインボード（src/vboard.h）の欄。差込口（PLG-1〜3 と、増設の PLG-4〜6）ごとの「挿すボードと、挿すパート」と、
 // マルチパートのボードの 16 チャンネルの表。gui ではプラグインボードの窓（board_editor）が、
 // プラグインではマスターの窓が持つ
 class board_panes
@@ -47,13 +47,14 @@ public:
 	void board_parts_pane(xg::model &m, bridge &br);
 	struct board_parts_info { std::mutex lock; mu2000::board_part part[16]; bool valid = false; };
 	std::shared_ptr<board_parts_info> m_board_parts = std::make_shared<board_parts_info>();
-	// 差込口（PLG-1〜3）ごとの控え
-	int m_board_kind[mu2000::PLG_SLOTS] = { 0, 0, 0 }, m_board_part[mu2000::PLG_SLOTS] = { 1, 2, 3 };
+	// 差込口（PLG-1〜6。4 から先は増設の差込口）ごとの控え
+	int m_board_kind[mu2000::PLG_SLOTS] = {}, m_board_part[mu2000::PLG_SLOTS] = { 1, 2, 3, 4, 5, 6 };
 	// 音源の側のいまの様子（音声の糸が置く）。下 8 ビットがパート（1-64、0 は MU のメニューで off）、bit8 が「MU がボードを見つけている」。
 	// MU のメニュー（UTIL → PLG）でパートを変えられるので、ときどき聞いて欄を合わせる
 	std::shared_ptr<std::atomic<int>> m_board_seen[mu2000::PLG_SLOTS] = {
+		std::make_shared<std::atomic<int>>(-1), std::make_shared<std::atomic<int>>(-1), std::make_shared<std::atomic<int>>(-1),
 		std::make_shared<std::atomic<int>>(-1), std::make_shared<std::atomic<int>>(-1), std::make_shared<std::atomic<int>>(-1) };
-	double m_board_asked[mu2000::PLG_SLOTS] = { 0, 0, 0 }, m_board_touched[mu2000::PLG_SLOTS] = { -10, -10, -10 };
+	double m_board_asked[mu2000::PLG_SLOTS] = {}, m_board_touched[mu2000::PLG_SLOTS] = { -10, -10, -10, -10, -10, -10 };
 	// DLS のボードが読んでいるファイルの様子（音声の糸が置く）
 	struct board_dls_info { std::mutex lock; std::string path, error; int instruments = 0, waves = 0; };
 	std::shared_ptr<board_dls_info> m_board_dls = std::make_shared<board_dls_info>();
@@ -63,10 +64,10 @@ public:
 	std::vector<std::string> m_ub_list;
 	double m_ub_listed = -1;
 	std::string m_ub_note;
-	bool m_board_booting[mu2000::PLG_SLOTS] = { false, false, false };   // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
+	bool m_board_booting[mu2000::PLG_SLOTS] = {};   // 挿して本体を起動し直している（終わったらボードのバンクを選ぶ）
 };
 
-// プラグインボードの窓（gui だけ）。上に差込口 3 つ、下にマルチパートのボードの 16 チャンネル。
+// プラグインボードの窓（gui だけ）。上に差込口（PLG-1〜6）、下にマルチパートのボードの 16 チャンネル。
 // マスターの窓の左上に詰め込んでいたものを、広げられる窓に出したもの
 class board_editor : public imgui_view
 {

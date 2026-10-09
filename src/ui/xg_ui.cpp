@@ -1512,16 +1512,15 @@ void drum_pane(int part, xg::model &m, bridge &br)
 
 // ---- 説明（ヘルプ）と言語
 //
-// 文は「キー → 言語ごとの文」の表で持つ。言語を足すときは ui/lang.h の
-// LANG_CODES に 1 つ足し、HELP の各行に文を 1 つ足す（足りない言語は
-// 日本語で出る）。今の言語は ui::get_lang() が持ち、--lang・editor.ini・
+// 文は「キー → 言語ごとの文」の表で持つ。ここの文は日本語と英語の 2 つ（locale/ にはまだ出していない）。
+// 3 つ目より先の言語では英語で出る。今の言語は ui::get_lang() が持ち、--lang・editor.ini・
 // ロケールの順で決まる（ui/lang.h）。このファイルの古い g_lang は無い。
 
 namespace {
 
 // 言語の並びと数は ui/lang.h が持つ（editor.ini には code で残す）。
-// HELP の text[] は同じ並び・同じ数で持ち、足りない言語は日本語で出す。
-static_assert(ui::NLANG == 2, "HELP rows below carry one text per language");
+// HELP の text[] は同じ並びで持つ（頭の 2 つが日本語と英語）。文が無い言語は英語で出す。
+static_assert(ui::NLANG >= 2 && int(ui::lang::ja) == 0 && int(ui::lang::en) == 1, "HELP rows below are { Japanese, English }");
 struct help_text { const char *name; const char *text[ui::NLANG]; };
 
 // 見出し（一覧の列）とパラメータのキー。初めて触る人に向けて、何が変わるかを書く
@@ -1905,7 +1904,7 @@ const char *find_help(const char *name)
 	const int lang = std::clamp(int(ui::get_lang()), 0, ui::NLANG - 1);
 	for (const help_text &h : HELP)
 		if (!std::strcmp(h.name, name))
-			return h.text[lang] ? h.text[lang] : h.text[0];
+			return h.text[lang] ? h.text[lang] : h.text[int(ui::lang::en)] ? h.text[int(ui::lang::en)] : h.text[0];
 	return source_help(name);
 }
 

@@ -9,15 +9,16 @@
 // then lang= in editor.ini, then the locale (Japanese iff LC_ALL /
 // LC_MESSAGES / LANG / LANGUAGE says ja, English otherwise).
 //
-// One language per file: texts_ja.h, texts_en.h, ... Each file defines one
-// function returning ui_texts with one designated .field per member, in
-// struct order. To add a string, add the member here and one .field line
-// per language file; to add a language, copy texts_en.h to texts_<code>.h,
-// register the code in ui/lang.h and dispatch it in texts() below.
+// The texts themselves are in locale/<code>/*.json (one folder per language);
+// tools/locale_tool.py generates one table per language from them
+// (texts_<code>.h, each a function returning ui_texts with one designated
+// .field per member, in struct order). To add a string, add the member here,
+// its line in locale/en and locale/ja, and run `python tools/locale_tool.py gen`.
+// To add a language, see locale/README.md: no source file is edited.
 //
-// tools/check_texts.py checks all of this: every language file must define
-// exactly the struct's field set (missing/extra fail), and every *_fmt
-// must carry the same printf sequences in every language.
+// tools/check_texts.py checks all of this: every table must define exactly
+// the struct's field set, every *_fmt must carry the same printf sequences in
+// every language, and the generated files must be what locale/ produces.
 //
 // Header-only on purpose: no build file on any platform needs a new source.
 
@@ -27,6 +28,13 @@
 #pragma once
 
 #include "ui/lang.h"
+#include "ui/locale_file.h"
+
+#include <cstdio>
+#include <deque>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace ui {
 
@@ -454,6 +462,9 @@ struct ui_texts {
 	const char *me_board_unknown;
 	const char *me_board_off;
 	const char *me_board_known;
+	const char *me_board_extra_head;
+	const char *me_board_extra_note;
+	const char *me_board_extra_tip;
 	// Overview list (overview.cpp). Column headers that double as help
 	// keys keep their Japanese key (see headers_with_help call sites).
 	const char *ov_bighint;          // may start with \n
@@ -1121,17 +1132,28 @@ struct ui_texts {
 	const char *settings_limiter;
 };
 
-// Each language file defines one of these (never included directly).
-// Adding a language: append X(xx, "...") to UI_LANG_LIST in ui/lang.h,
-// add texts_xx.h defining xx_texts(), include it here. The switch below
-// derives from the same list, so a missing table is a compile error and
-// tools/check_texts.py verifies the rest.
-#include "ui/texts_ja.h"
-#include "ui/texts_en.h"
+// Each language has one table function, <code>_texts(), in ui/texts_<code>.h.
+// Those files are generated from locale/<code>/*.json by tools/locale_tool.py
+// (do not edit them; tools/check_texts.py fails when they and locale/ disagree).
+#include "ui/texts_tables.inc"
 
-inline const ui_texts &texts()
+namespace texts_detail {
+
+// Every member of ui_texts by name (generated from the struct above), so that a
+// translation file can address a text by its key.
+struct field {
+	const char *name;
+	const char *ui_texts::*member;
+};
+inline constexpr field FIELDS[] = {
+#define X(f) { #f, &ui_texts::f },
+#include "ui/texts_fields.inc"
+#undef X
+};
+
+inline const ui_texts &built_in(lang l)
 {
-	switch (get_lang()) {
+	switch (l) {
 #define X(code, name) \
 	case lang::code:  \
 		return code##_texts();
@@ -1141,6 +1163,81 @@ inline const ui_texts &texts()
 		break;
 	}
 	return en_texts(); // unreachable, and the English fallback
+}
+
+// The tables the program shows: the built-in ones, with the texts of any
+// translation files found in the settings folder laid over them.
+//
+//   <settings folder>/locale/<code>/*.json   (on Windows: %LOCALAPPDATA%/S-MU2000/locale/en/)
+//
+// Same files as locale/<code>/ in the repository. This is how a translation is
+// tried without building: copy a language's folder there, change the texts,
+// start the program again. Only keys that exist are taken, and a text whose
+// printf conversions differ from the built-in one is refused (it would crash
+// where it is formatted); both are said on stderr. Read once, at the first use.
+struct tables {
+	ui_texts t[NLANG];
+	std::deque<std::string> keep;         // the overriding texts (the tables point into these)
+	tables()
+	{
+		for (int i = 0; i < NLANG; i++)
+			t[i] = built_in(lang(i));
+		const std::string base = smu2000::config_dir();
+		if (base.empty())
+			return;
+		for (int i = 0; i < NLANG; i++) {
+			const std::string dir = smu2000::join(smu2000::join(base, "locale"), LANG_CODES[i]);
+			if (!smu2000::is_dir(dir))
+				continue;
+			int taken = 0;
+			for (const smu2000::dir_entry &e : smu2000::list_dir(dir)) {
+				if (e.name.size() < 6 || e.name.compare(e.name.size() - 5, 5, ".json") != 0)
+					continue;
+				std::string text;
+				std::vector<std::pair<std::string, std::string>> pairs;
+				int line = 0;
+				if (!locale_file::read(smu2000::join(dir, e.name), text)) {
+					std::fprintf(stderr, "locale/%s/%s: cannot read\n", LANG_CODES[i], e.name.c_str());
+					continue;
+				}
+				if (!locale_file::parse(text, pairs, line))
+					std::fprintf(stderr, "locale/%s/%s: line %d: not understood (the texts above it are used)\n",
+					             LANG_CODES[i], e.name.c_str(), line);
+				for (auto &kv : pairs) {
+					const field *f = nullptr;
+					for (const field &x : FIELDS)
+						if (kv.first == x.name) {
+							f = &x;
+							break;
+						}
+					if (!f) {
+						std::fprintf(stderr, "locale/%s/%s: \"%s\" is not a text of this version\n",
+						             LANG_CODES[i], e.name.c_str(), kv.first.c_str());
+						continue;
+					}
+					if (locale_file::printf_shape(kv.second.c_str()) != locale_file::printf_shape(t[i].*(f->member))) {
+						std::fprintf(stderr, "locale/%s/%s: \"%s\" must keep the same %%d / %%s as the original; not used\n",
+						             LANG_CODES[i], e.name.c_str(), kv.first.c_str());
+						continue;
+					}
+					keep.push_back(std::move(kv.second));
+					t[i].*(f->member) = keep.back().c_str();
+					taken++;
+				}
+			}
+			if (taken)
+				std::fprintf(stderr, "locale/%s: %d text(s) taken from %s\n", LANG_CODES[i], taken, dir.c_str());
+		}
+	}
+};
+
+} // namespace texts_detail
+
+inline const ui_texts &texts()
+{
+	static const texts_detail::tables all;
+	const int i = int(get_lang());
+	return all.t[i >= 0 && i < NLANG ? i : int(lang::en)];
 }
 
 // Reading a call site: UI_TEXT(id, "default") is texts().id, with the
