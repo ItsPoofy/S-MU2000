@@ -1,0 +1,130 @@
+{
+	// The help checkbox above the editor windows (xg_ui.cpp). The language
+	// itself is global (--lang, editor.ini, locale), so there is no
+	// language combo here.
+	"xgui_help_show": "説明を出す",
+	"xgui_help_tip": "見出しや名前にカーソルを当てたとき、何に効くのかを出す",
+
+	// Insertion editor (fx_editor.cpp).
+	"fxe_eq_tip": "点をつまんで、横で周波数、縦でゲイン。M の点ではホイールで幅",
+	"fxe_no_desc": "（まだ説明が無い）",
+	"fxe_hover_knob": "つまみにカーソルを載せると、ここに何に効くのかが出る",
+
+	// XG editor shared (xg_ui.cpp): part parameter groups, the voice
+	// picker and the effect category names. Category labels are matched
+	// by their Japanese name (never blank on unknown ones).
+	"xgui_group_voice": "音色",
+	"xgui_group_vol": "音量と送り",
+	"xgui_group_rcv": "受信と発音",
+	"xgui_group_filter": "フィルタと EG",
+	"xgui_group_peg": "ピッチ EG",
+	"xgui_group_porta": "ポルタメント",
+	"xgui_group_vib": "ビブラート",
+	"xgui_group_eq": "パートの EQ",
+	"xgui_group_mod": "モジュレーション",
+	"xgui_group_bend": "ピッチベンド",
+	"xgui_bend_now_fmt": "いま %+d（%+.2f 半音）",
+	"xgui_group_cat": "チャンネルアフタータッチ",
+	"xgui_group_pat": "ポリアフタータッチ",
+
+	// %s: A1..
+	"xgui_part_fmt": "パート %s",
+
+	// %s + MSB %d
+	"xgui_kit_title_fmt": "%s（MSB %d）",
+	"xgui_kit_drum": "ドラムキット",
+	"xgui_kit_sfx": "効果音キット",
+	"xgui_no_rom_names": "ROM から音色の名前を読めないので、GM の名前で出している",
+
+	// %d
+	"xgui_bank_diff_fmt": "%3d のバンク違い",
+	"xgui_no_bank_kit": "キットにはバンク違いが無い",
+	"xgui_drum_pick_kit": "キットを選ぶと、ここに鍵ごとの楽器名が並ぶ",
+	"xgui_no_bank_norom": "ROM から音色を読めないので、バンク違いを出せない",
+	"xgui_no_bank": "この音色にはバンク違いが無い",
+	"xgui_other": "その他",
+	"fxcat_reverb": "リバーブ",
+	"fxcat_early": "初期反射・ゲート",
+	"fxcat_delay": "ディレイ・エコー",
+	"fxcat_karaoke": "カラオケ",
+	"fxcat_chorus": "コーラス・セレステ",
+	"fxcat_flange": "フランジャー・フェイザー",
+	"fxcat_rotary": "回転・トレモロ・パン",
+	"fxcat_dist": "歪み・アンプ",
+	"fxcat_eq": "EQ・ワウ・フィルタ",
+	"fxcat_comp": "コンプ・ゲート",
+	"fxcat_combo": "組み合わせ",
+	"fxcat_lofi": "ローファイ・テクノ",
+	"fxcat_pitch": "ピッチ・その他",
+	"fxcat_other": "その他",
+
+	// Effect words shared by the overview, the insertion editor and the
+	// master editor (same meaning everywhere).
+	"fx_kind": "種類",
+	"fx_part": "掛けるパート",
+	"fx_connect": "接続",
+	"sys_reverb": "リバーブ",
+	"sys_chorus": "コーラス",
+	"sys_variation": "バリエーション",
+
+	// PC editor (pc_editor.cpp).
+	// %s %s + how to turn
+	"ed_slider_tip_fmt": "%s  %s\nドラッグ・ホイール（Ctrl で 10）・ダブルクリックで打つ",
+	"ed_col_part": "パート",
+	"ed_col_rcv": "受信",
+	"ed_col_voice": "音色（右クリックで選ぶ）",
+	"ed_col_vol": "音量",
+	"ed_tab_mixer": "ミキサー",
+	"ed_tab_part": "パート",
+	"ed_tab_drum": "ドラム",
+	"ed_tab_sysex": "SysEx の読み解き",
+	"sxd_hint": "1 行に 1 通ずつ MIDI を貼り付ける（「F0 43 10 4C …」「f0h 43h …」、Domino の Ex: の行など）。右にその行の意味が出る。右の値（パート・値・チャンネルなど）をドラッグすると行が書き換わる。エフェクトのパラメータは、今の音源のエフェクトの種類で読む",
+	"sxd_clear": "消す",
+	"sxd_send_all_out": "全部を送り先へ",
+	"sxd_send_all_in": "全部を音源へ",
+	"sxd_sent_fmt": "%d 通送った",
+	"sxd_send_out": "送",
+	"sxd_send_out_tip": "この行を送り先へ送る",
+	"sxd_send_in": "音",
+	"sxd_send_in_tip": "この行を音源へ入れる",
+	"sxd_sent_line": "送った: 行 ",
+	"sxd_played_line": "音源へ入れた: 行 ",
+	"drum_used_by": "使っているパート:",
+	"drum_none": "なし",
+	"drum_reset": "この組を初期値に戻す",
+	"drum_names_from_fmt": "楽器名は %s のキット（%s）のもの",
+	"drum_names_hint": "楽器名は GM の打楽器の並びの目安。実際の音はキットで違う",
+	"drum_plain_note": "パートモード DRUM（番号なし）のパートは、どの組の設定も受けない",
+	"drum_dblclick_hint": "鍵か名前をダブルクリックすると、音色の窓のドラムのタブに絵つきで開く",
+	"drum_no_user_hint": "この組を使うパートが無いので、音色の窓には出せない（パートのモードをこの DRUMS にする）",
+	"ed_knobs_on": "▲ 数だけにする",
+	"ed_knobs_off": "▼ つまみを出す",
+
+	// Insertion editor (fx_editor.cpp); kind/part covered by fx_kind/fx_part.
+	// %s %s + how to turn
+	"fxe_slider_tip_fmt": "%s  %s\n上下にドラッグ（Shift で細かく）・ホイール・ダブルクリックで数を打つ",
+	"fxe_noeffect": "NO EFFECT（種類を選ぶと、ここにつまみが並ぶ）",
+	"fxe_thru": "THRU（パラメータは無い）",
+	"fxe_no_table": "この種類のパラメータの表はまだ無い",
+
+	// "%s %s (%d-%d)"
+	"cap_range_fmt": "%s %s（%d-%d）",
+
+	// "%s (%d-%d)"
+	"cap_range1_fmt": "%s（%d-%d）",
+
+	// "%s (%d)"
+	"cap_count_fmt": "%s（%d）",
+
+	// "%3d  %s (%d/%d)"
+	"cap_bank_fmt": "%3d  %s（%d/%d）",
+
+	// "(pp pp)"
+	"cap_pgm_fmt": "（%02X pp %02X）",
+
+	// "(pp pp pp)"
+	"cap_pgm3_fmt": "（%02X %02X %02X）",
+
+	// "%s (INSERTION -> %s)"
+	"cap_insertion_fmt": "%s（INSERTION → %s）"
+}

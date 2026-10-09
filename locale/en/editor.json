@@ -1,0 +1,130 @@
+{
+	// The help checkbox above the editor windows (xg_ui.cpp). The language
+	// itself is global (--lang, editor.ini, locale), so there is no
+	// language combo here.
+	"xgui_help_show": "Show help",
+	"xgui_help_tip": "Explain what each heading or name does when you hover over it",
+
+	// Insertion editor (fx_editor.cpp).
+	"fxe_eq_tip": "Drag a point: sideways for frequency, up/down for gain. Wheel on M for width.",
+	"fxe_no_desc": "(no description yet)",
+	"fxe_hover_knob": "Hover over a knob to see what it does.",
+
+	// XG editor shared (xg_ui.cpp): part parameter groups, the voice
+	// picker and the effect category names. Category labels are matched
+	// by their Japanese name (never blank on unknown ones).
+	"xgui_group_voice": "Voice",
+	"xgui_group_vol": "Volume and sends",
+	"xgui_group_rcv": "Receive and play",
+	"xgui_group_filter": "Filter and EG",
+	"xgui_group_peg": "Pitch EG",
+	"xgui_group_porta": "Portamento",
+	"xgui_group_vib": "Vibrato",
+	"xgui_group_eq": "Part EQ",
+	"xgui_group_mod": "Modulation",
+	"xgui_group_bend": "Pitch bend",
+	"xgui_bend_now_fmt": "Now %+d (%+.2f semitones)",
+	"xgui_group_cat": "Channel aftertouch",
+	"xgui_group_pat": "Polyphonic aftertouch",
+
+	// %s: A1..
+	"xgui_part_fmt": "Part %s",
+
+	// %s + MSB %d
+	"xgui_kit_title_fmt": "%s (MSB %d)",
+	"xgui_kit_drum": "Drum kit",
+	"xgui_kit_sfx": "SFX kit",
+	"xgui_no_rom_names": "Cannot read voice names from the ROM, showing GM names.",
+
+	// %d
+	"xgui_bank_diff_fmt": "Bank variations of %3d",
+	"xgui_no_bank_kit": "Kits have no bank variations.",
+	"xgui_drum_pick_kit": "Choose a kit on the left to list the instrument of each key here",
+	"xgui_no_bank_norom": "Cannot read voices from the ROM, so no bank variations.",
+	"xgui_no_bank": "This voice has no bank variations.",
+	"xgui_other": "Other",
+	"fxcat_reverb": "Reverb",
+	"fxcat_early": "Early reflections and gate",
+	"fxcat_delay": "Delay and echo",
+	"fxcat_karaoke": "Karaoke",
+	"fxcat_chorus": "Chorus and celeste",
+	"fxcat_flange": "Flanger and phaser",
+	"fxcat_rotary": "Rotary, tremolo and pan",
+	"fxcat_dist": "Distortion and amp",
+	"fxcat_eq": "EQ, wah and filter",
+	"fxcat_comp": "Comp and gate",
+	"fxcat_combo": "Combinations",
+	"fxcat_lofi": "Lo-fi and techno",
+	"fxcat_pitch": "Pitch and others",
+	"fxcat_other": "Other",
+
+	// Effect words shared by the overview, the insertion editor and the
+	// master editor (same meaning everywhere).
+	"fx_kind": "Type",
+	"fx_part": "Part",
+	"fx_connect": "Connection",
+	"sys_reverb": "Reverb",
+	"sys_chorus": "Chorus",
+	"sys_variation": "Variation",
+
+	// PC editor (pc_editor.cpp).
+	// %s %s + how to turn
+	"ed_slider_tip_fmt": "%s  %s\nDrag, wheel (Ctrl for 10), or double-click to type a value",
+	"ed_col_part": "Part",
+	"ed_col_rcv": "Ch",
+	"ed_col_voice": "Voice (right-click)",
+	"ed_col_vol": "Vol",
+	"ed_tab_mixer": "Mixer",
+	"ed_tab_part": "Part",
+	"ed_tab_drum": "Drum",
+	"ed_tab_sysex": "SysEx",
+	"sxd_hint": "Paste MIDI one message per line (\"F0 43 10 4C ...\", \"f0h 43h ...\", Domino's Ex: lines). The meaning of each line shows on its right; drag its values (part, value, channel...) to rewrite the line. Effect parameters are read with the effect types set now",
+	"sxd_clear": "Clear",
+	"sxd_send_all_out": "Send all to the port",
+	"sxd_send_all_in": "Play all into the sound engine",
+	"sxd_sent_fmt": "Sent %d",
+	"sxd_send_out": "Out",
+	"sxd_send_out_tip": "Send this line to the send-to port",
+	"sxd_send_in": "In",
+	"sxd_send_in_tip": "Play this line into the sound engine",
+	"sxd_sent_line": "Sent line ",
+	"sxd_played_line": "Played line ",
+	"drum_used_by": "Used by:",
+	"drum_none": "none",
+	"drum_reset": "Reset this setup",
+	"drum_names_from_fmt": "Instrument names are from %s's kit (%s)",
+	"drum_names_hint": "Names follow the GM percussion map as a guide; the actual sound depends on the kit",
+	"drum_plain_note": "Parts in mode DRUM (no number) ignore every drum setup",
+	"drum_dblclick_hint": "Double-click a key or name to open it with graphs in the Voices window",
+	"drum_no_user_hint": "No part uses this setup, so the Voices window cannot show it (set a part's mode to this DRUMS)",
+	"ed_knobs_on": "▲ Numbers only",
+	"ed_knobs_off": "▼ Show knobs",
+
+	// Insertion editor (fx_editor.cpp); kind/part covered by fx_kind/fx_part.
+	// %s %s + how to turn
+	"fxe_slider_tip_fmt": "%s  %s\nDrag up/down (Shift for fine), wheel, or double-click to type a value",
+	"fxe_noeffect": "NO EFFECT (pick a type to list its knobs here)",
+	"fxe_thru": "THRU (no parameters)",
+	"fxe_no_table": "No parameter table for this type yet",
+
+	// "%s %s (%d-%d)"
+	"cap_range_fmt": "%s %s (%d-%d)",
+
+	// "%s (%d-%d)"
+	"cap_range1_fmt": "%s (%d-%d)",
+
+	// "%s (%d)"
+	"cap_count_fmt": "%s (%d)",
+
+	// "%3d  %s (%d/%d)"
+	"cap_bank_fmt": "%3d  %s (%d/%d)",
+
+	// "(pp pp)"
+	"cap_pgm_fmt": "(%02X pp %02X)",
+
+	// "(pp pp pp)"
+	"cap_pgm3_fmt": "(%02X %02X %02X)",
+
+	// "%s (INSERTION -> %s)"
+	"cap_insertion_fmt": "%s (INSERTION -> %s)"
+}

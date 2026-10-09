@@ -1,0 +1,74 @@
+{
+	// Bottom strip tabs (panel.cpp)
+	"tab_panel": "パネル",
+	"tab_editor": "エディタ",
+	"tab_effects": "エフェクト",
+
+	// Front page hint (panel.cpp)
+	"hint_front": "大きなダイヤルはホイールで回す ／ ボタンはクリック ／ キー: A=PLAY E=EDIT U=UTIL F=EFFECT [ ]=PART",
+
+	// Editor page (editor.cpp)
+	// may contain \n
+	"editor_hint": "つまみは上下にドラッグ、またはホイール。\n送っているのは XG のパラメータチェンジ。\n値は MU2000 に問い合わせて読み返している。",
+	"editor_xg_reset": "XG リセット",
+	"editor_all_off": "オールノートオフ",
+
+	// Effects page (effects.cpp)
+	"effects_title": "エフェクト（送っているのは XG のパラメータチェンジ）",
+	"effects_values_note": "値は MU2000 に問い合わせて読み返している。パネルや曲で変えたものもここに出る。",
+
+	// may contain \n
+	"effects_insertion_note": "インサーションは掛けたいパートを選ぶと働く。バリエーションは\nCONNECT を INSERTION にするとインサーションとして使える。",
+
+	// panel.txt parse errors (layout.cpp; printf format taking %d and %s)
+	"layout_line_error": "%d 行目: %s\n",
+
+	// Engine boot log (engine.h, bootcache.h; shown on the terminal).
+	// The *_fmt entries are printf formats taking the shown arguments.
+	// %s: a ROM file problem
+	"engine_warn_fmt": "警告: %s\n",
+
+	// %s: settings file in use
+	"engine_nvram_fmt": "設定: %s\n",
+
+	// %s: snapshot path
+	"engine_boot_cached_fmt": "起動: 前の写しから（%s）\n",
+
+	// %s: snapshot path
+	"engine_boot_saved_fmt": "起動の写しを残した: %s\n",
+
+	// shown in the window's message area
+	"engine_boot_failed": "起動しなかった",
+
+	// shown in the window's message area
+	"engine_resetting": "工場出荷状態に戻している...",
+	"engine_restarting": "起動し直している...",
+	"engine_reset_done": "工場出荷状態に戻した\n",
+
+	// %s
+	"bootcache_read_error_fmt": "起動の写しを読めない: %s\n",
+
+	// %s: device and backend error
+	"audio_switch_failed_fmt": "音声の出力を切り替えられない:\n%s",
+
+	// Status line (status.h, app.h; printf format taking %d, %.0f, %.1f
+	// and three %s). status_none fills IN/OUT with no port, status_booting
+	// shows while the engine is not up yet.
+	"status_format": "発音 %d/128  CPU %.0f%%  最悪 %.1f ms  %s   IN: %s   OUT: %s   （MIDI IN A のジャックか右クリックで口を選ぶ）",
+	"status_none": "なし",
+	"status_booting": "起動中...",
+
+	// Status middle per backend (app_win.h, app_mac.h, app_linux.h): what
+	// each audio backend measures. Shown inside status_format's %s.
+	// %.0f ms of wait, drop count
+	"status_middle_win_fmt": "待ち %.0f ms  遅れ %llu",
+
+	// drop count
+	"status_middle_mac_fmt": "遅れ %llu",
+
+	// drop count
+	"status_middle_linux_fmt": "枯渇 %llu",
+
+	// Command-line help (tool_args.h; may contain \n, no printf verbs).
+	"help_usage": "使い方: gui <rom ディレクトリ> [--midi 番号] [--midi-b 番号] [--midi-c 番号] [--midi-d 番号] [--midi-e 番号] [--midiout 番号] [--midiout-b 番号] [--midiout-mu 番号] [--latency ミリ秒] [--exclusive] [--layout panel.txt] [--play 曲.mid] [--lcd] [--fast-midi] [--host-midi]\n        [--factory]   覚えている設定を捨てて工場出荷状態で起動する\n        [--editor]    PC エディタも開く（窓では F2 か右クリック）\n        [--list-window] 一覧の窓も開く（窓では F3 か右クリック）\n        [--fx-window] インサーションの設定の窓も開く（一覧でインサーションの欄をダブルクリック）\n        [--shapes-window] パートの音色の窓も開く（一覧で VIB などの絵をダブルクリック）\n        [--master-window] マスターの窓も開く（一覧でマスターの行をダブルクリック）\n        [--sampling-window] サンプリングの窓も開く\n        [--player-window] MIDI プレイヤーの窓も開く\n        [--board-window] プラグインボードの窓も開く\n        [--lang ja|en] 言葉（無ければ editor.ini の lang=、さらに無ければロケール: 日本語なら日本語、ほかは英語）\n        [--help]      この説明を出す\n        gui --dump-layout panel.txt   いまの配置を書き出す\n        gui --list\n        gui [<rom ディレクトリ> --boot] --shot 絵.png [--size 1000x400]\n"
+}
