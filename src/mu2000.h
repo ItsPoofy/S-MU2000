@@ -1150,6 +1150,15 @@ private:
 			else
 				fc.midi(status, d0, d1);
 		}
+		// firmware が知らせてきた（ワーク RAM に書いた）プログラム。MIDI のプログラムチェンジは vb_tap がもう渡してあるので、
+		// FC ボードは番号が変わったときだけ受ける（同じ番号で受け直すと、コントロールチェンジで触った音色の値が消える）
+		void program(u8 p)
+		{
+			if (kind == VBOARD_USER)
+				user.midi(0xc0, p, 0);
+			else
+				fc.set_program(p);
+		}
 		void reset_voices()
 		{
 			fc.reset();

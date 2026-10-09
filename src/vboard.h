@@ -31,6 +31,12 @@
 //     ・自動のビブラート（深さと、掛かり始めるまでのコマ数）
 //   組を渡さなければ（set_bank(nullptr)）初期の音色で、プログラム 17 以降は 1〜16 のくり返し（今までと同じ鳴り方）。
 //   ファイル（.smufc）は下の write_fc_bank / read_fc_bank の形
+//
+//   音色の値は、コントロールチェンジでも動かせる（シーケンサーから曲の途中で音を作り変える）。番号は下の FC_PARAM_CC:
+//     CC20-31 が波・デューティ・音量・ビブラート、CC102-109 がアルペジオと鳴り始めのずれ。値はエディタの数字そのまま
+//     （半音のずれだけ 64 が 0）。範囲の外は端に寄せる
+//   動くのは**そのボード（16 パートのボードならそのチャンネル）がいま選んでいるプログラムの音だけ**で、音色の組も
+//   ファイルも書き換えない。触っていない値は組の音色のまま。プログラムチェンジを受けると、触った値は全部捨てて組の音色に戻る
 
 #ifndef S_MU2000_VBOARD_H
 #define S_MU2000_VBOARD_H
@@ -132,6 +138,56 @@ inline void fc_clamp(fc_voice &v)
 	v.sweep_frames = u8(std::min<int>(v.sweep_frames, 60));
 	v.vib_depth = u8(std::min<int>(v.vib_depth, 100));
 	v.vib_delay = u8(std::min<int>(v.vib_delay, 120));
+}
+
+// ---- コントロールチェンジで触る値。並びは fc_voice の欄で、番号（FC_PARAM_CC）は XG が使っていない所
+//   値は欄の数字そのまま。符号のある欄（アルペジオのずれ・鳴り始めのずれ）は 64 を 0 として送る
+
+enum fc_param {
+	FC_P_WAVE, FC_P_DUTY_LEN, FC_P_DUTY_FRAMES, FC_P_DUTY1, FC_P_DUTY2, FC_P_DUTY3, FC_P_DUTY4,
+	FC_P_DECAY, FC_P_FLOOR, FC_P_RELEASE, FC_P_VIB_DEPTH, FC_P_VIB_DELAY,
+	FC_P_ARP_LEN, FC_P_ARP_FRAMES, FC_P_ARP1, FC_P_ARP2, FC_P_ARP3, FC_P_ARP4, FC_P_SWEEP, FC_P_SWEEP_FRAMES,
+	FC_PARAMS
+};
+
+inline const u8 FC_PARAM_CC[FC_PARAMS] = {
+	20, 21, 22, 23, 24, 25, 26,
+	27, 28, 29, 30, 31,
+	102, 103, 104, 105, 106, 107, 108, 109,
+};
+
+// その番号のコントロールチェンジが触る値（無ければ -1）
+inline int fc_param_of_cc(u8 cc)
+{
+	return cc >= 20 && cc <= 31 ? cc - 20 : cc >= 102 && cc <= 109 ? FC_P_ARP_LEN + (cc - 102) : -1;
+}
+
+// コントロールチェンジの値（0-127）を音色の欄に入れる。範囲の外は fc_clamp が端に寄せる
+inline void fc_set_param(fc_voice &v, int param, int value)
+{
+	const u8 x = u8(value & 127);
+	switch (param) {
+	case FC_P_WAVE:         v.wave = x; break;
+	case FC_P_DUTY_LEN:     v.duty_len = x; break;
+	case FC_P_DUTY_FRAMES:  v.duty_frames = x; break;
+	case FC_P_DUTY1: case FC_P_DUTY2: case FC_P_DUTY3: case FC_P_DUTY4:
+		v.duty[param - FC_P_DUTY1] = u8(std::min<int>(x, 3));
+		break;
+	case FC_P_DECAY:        v.decay = x; break;
+	case FC_P_FLOOR:        v.floor = x; break;
+	case FC_P_RELEASE:      v.release = x; break;
+	case FC_P_VIB_DEPTH:    v.vib_depth = x; break;
+	case FC_P_VIB_DELAY:    v.vib_delay = x; break;
+	case FC_P_ARP_LEN:      v.arp_len = x; break;
+	case FC_P_ARP_FRAMES:   v.arp_frames = x; break;
+	case FC_P_ARP1: case FC_P_ARP2: case FC_P_ARP3: case FC_P_ARP4:
+		v.arp[param - FC_P_ARP1] = s8(int(x) - 64);
+		break;
+	case FC_P_SWEEP:        v.sweep = s8(int(x) - 64); break;
+	case FC_P_SWEEP_FRAMES: v.sweep_frames = x; break;
+	default: break;
+	}
+	fc_clamp(v);
 }
 
 // ---- ファイル
@@ -253,12 +309,32 @@ public:
 	// そのプログラムの音色（組が無ければ初期の音色）
 	const fc_voice &voice_of(int program) const { return (m_bank ? *m_bank : initial()).prog[size_t(program & 127)]; }
 	const char *name(int program) const { return voice_of(program).name; }
+	// いま選んでいるプログラムの、いま鳴る音色（組の音色に、コントロールチェンジで触った値を重ねたもの）
+	fc_voice current() const
+	{
+		fc_voice v = voice_of(m_program);
+		for (int i = 0; i < FC_PARAMS; i++)
+			if (m_cc_mask & (1u << i))
+				fc_set_param(v, i, m_cc[i]);
+		return v;
+	}
+	// コントロールチェンジで触ってある値（bit = fc_param）。0 なら組の音色のまま
+	u32 edited() const { return m_cc_mask; }
+	void clear_edits() { m_cc_mask = 0; }
+	// MIDI を通らずにプログラムが変わった（パネルで変えたのを本体が知らせてきた）。同じ番号なら何もしない
+	// （MIDI のプログラムチェンジを本体が後から知らせ直してくるので、その間に届いた値を捨てないように）
+	void set_program(u8 program)
+	{
+		if ((program & 127) != m_program)
+			midi(0xc0, program, 0);
+	}
 
 	void reset()
 	{
 		for (voice &v : m_v)
 			v = voice();
 		m_program = 0;
+		m_cc_mask = 0;
 		m_bend = 0.0;
 		m_mod = 0.0;
 		m_frame = 0.0;
@@ -289,15 +365,21 @@ public:
 			else if (d0 == 120)
 				for (voice &v : m_v)
 					v.on = false;
-			else if (d0 == 123)
+			else if (d0 == 123) {
 				for (voice &v : m_v)
 					if (v.on && !v.released) {
 						v.released = true;
 						v.frames = 0;
 					}
+			} else if (const int param = fc_param_of_cc(d0); param >= 0) {
+				m_cc[param] = d1 & 127;
+				m_cc_mask |= 1u << param;
+			}
 			break;
 		case 0xc0:
+			// 触った値は捨てる（曲の頭のプログラムチェンジで、いつも組の音色から始まる）
 			m_program = d0 & 127;
+			m_cc_mask = 0;
 			break;
 		case 0xe0:
 			m_bend = (((d1 << 7) | d0) - 8192) / 8192.0 * 2.0;      // 半音
@@ -330,11 +412,15 @@ public:
 		if (m_lfo >= 1.0)
 			m_lfo -= 1.0;
 		const double wobble = std::sin(m_lfo * 6.283185307179586);
+		// コントロールチェンジで触ってあれば、いまのプログラムで鳴っている声はその音色で（ほかのプログラムの声は組のまま）
+		fc_voice touched;
+		if (m_cc_mask)
+			touched = current();
 		double sum = 0.0;
 		for (voice &v : m_v) {
 			if (!v.on)
 				continue;
-			const fc_voice &fv = voice_of(v.program);
+			const fc_voice &fv = m_cc_mask && v.program == m_program ? touched : voice_of(v.program);
 			if (tick)
 				step_frame(v, fv);
 			if (!v.on)
@@ -448,6 +534,8 @@ private:
 	std::shared_ptr<const fc_bank> m_bank;
 	std::array<voice, VOICES> m_v{};
 	u8 m_program = 0;
+	u8 m_cc[FC_PARAMS] = {};        // コントロールチェンジで届いた値（m_cc_mask の bit が立っている欄だけ）
+	u32 m_cc_mask = 0;
 	double m_bend = 0.0, m_mod = 0.0, m_frame = 0.0, m_lfo = 0.0;
 	u32 m_age = 0;
 };
