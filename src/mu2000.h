@@ -332,9 +332,9 @@ public:
 	}
 	const std::string &fm_bank_path() const { return m_vb_fm_path; }
 	// FC ボードの音色の組（src/vboard.h の fc_bank。nullptr なら初期の 16 個）と、そのファイルの場所。
-	// **ボード 1 枚ごとに別の組**: target 0-2 は差込口 PLG-1・2・3 の 1 パートの FC ボード、FC_BANK_MULTI は 16 パートの FC ボード
+	// **ボード 1 枚ごとに別の組**: target は差込口（0 から。PLG-1〜6）の 1 パートの FC ボード、FC_BANK_MULTI は 16 パートの FC ボード
 	// （16 チャンネルとも同じ組）。音を作る糸から呼ぶこと
-	enum { FC_BANK_MULTI = 3, FC_BANKS = 4 };       // 差込口の数（PLG_SLOTS）+ 1
+	enum { FC_BANK_MULTI = 6, FC_BANKS = 7 };       // 差込口の数（PLG_SLOTS）+ 1
 	void set_fc_bank(std::shared_ptr<const smu2000::vboard::fc_bank> bank, const std::string &path, int target)
 	{
 		if (target < 0 || target >= FC_BANKS)
@@ -391,7 +391,12 @@ public:
 	// **差込口は 3 つ**（実機の PLG-1〜3。slot は 0-2）。1 パートのボードは 3 枚まで挿せて、それぞれ別のパートを借りる。
 	// ボードのバンクは差込口ごとに違う（MSB 90・91・92、LSB 0。board_bank_msb）。マルチパートのボードは口 E を
 	// 1 つしか持てないので 1 枚だけ（別の差込口に挿すと、前のものは外れる）
-	enum { PLG_SLOTS = 3 };
+	// 差込口は 6 つ。**PLG-1〜3（0-2）は実機と同じ、本体（firmware）が知っている差込口**。PLG-4〜6（3-5）は**増設の差込口**で、
+	// エミュレーターだけが知っている: firmware が聞いてくるのは 3 つまでで、増やせない（doc/plg-protocol.md の「4 枚目より先を挿す道」）。
+	// 増設の差込口のボードも同じように鳴る（割り当てたパートでボードのバンクを選んでいる間。MSB 93・94・95 は、firmware が
+	// Silence として内蔵の音を出さない範囲）。本体の液晶に音色名は出ず、UTIL → PLG にも並ばない。1 パートのボードだけ挿せる
+	enum { PLG_FW_SLOTS = 3, PLG_SLOTS = 6 };
+	static bool board_slot_extra(int slot) { return slot >= PLG_FW_SLOTS; }
 	static_assert(int(FC_BANK_MULTI) == int(PLG_SLOTS), "one FC voice set per slot, then the 16-part board");
 	enum { VBOARD_BANK_MSB = 90, VBOARD_BANK_LSB = 0 };       // 実在のボードが使っていない番号（差込口 1。2・3 は 91・92）
 	static int board_bank_msb(int slot) { return VBOARD_BANK_MSB + std::clamp(slot, 0, PLG_SLOTS - 1); }
@@ -1132,6 +1137,9 @@ private:
 		std::vector<u8> sx[MIDI_PORTS];    // MIDI で来た SysEx（パートの割り当てだけ読む）
 		bool single() const { return kind == VBOARD_FC || kind == VBOARD_USER; }
 		u8 bank_msb() const { return u8(VBOARD_BANK_MSB + index); }
+		bool extra() const { return index >= PLG_FW_SLOTS; }       // 増設の差込口（firmware は知らない）
+		u8 ram_seen[3] = { 0xff, 0xff, 0xff };                    // ワーク RAM のバンク・プログラムの控え（firmware が知らないボードが、パネルでの変更を追う）
+		int poll = 0;
 		// PartAssign の番地（4C 70 <ここ> 00）。差込口 1 は 00、2・3 は 41・42（ボードごとに違う番地にする）
 		u8 assign_mid() const { return index ? u8(0x40 + index) : u8(0x00); }
 		bool active() const { return single() && on && bank[0] == bank_msb() && bank[1] == VBOARD_BANK_LSB; }
@@ -1141,6 +1149,15 @@ private:
 				user.midi(status & 0xf0, d0, d1);
 			else
 				fc.midi(status, d0, d1);
+		}
+		// firmware が知らせてきた（ワーク RAM に書いた）プログラム。MIDI のプログラムチェンジは vb_tap がもう渡してあるので、
+		// FC ボードは番号が変わったときだけ受ける（同じ番号で受け直すと、コントロールチェンジで触った音色の値が消える）
+		void program(u8 p)
+		{
+			if (kind == VBOARD_USER)
+				user.midi(0xc0, p, 0);
+			else
+				fc.set_program(p);
 		}
 		void reset_voices()
 		{
@@ -1191,6 +1208,7 @@ private:
 	void vb16_gain(vb_chan &c);
 	bool vb16_mix(float bus[][2]);
 	void vb_bank_from_ram(vb_slot &s);
+	void vb_follow_ram(vb_slot &s);
 	void vb_set_bank(vb_slot &s, u8 msb, u8 lsb);
 	void plg_tx_byte(int chan, u8 targets, u8 byte);
 	void vb_from_firmware(vb_slot &s, const std::vector<u8> &m);

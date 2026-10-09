@@ -118,7 +118,7 @@ static_assert([] {
 	                        ID_AIN_NONE, ID_CARD_NEW16, ID_CARD_NEW32, ID_CARD_NEW64,
 	                        ID_CARD_NEW128, ID_CARD_OPEN, ID_CARD_EJECT,
 	                        ID_PLAY_FILE, ID_STOP_FILE, ID_FACTORY, ID_RESTART, ID_NATIVE_FX,
-	                        ID_NATIVE_ENGINE,
+	                        ID_NATIVE_ENGINE, ID_SETTINGS,
 	                        ID_PORTS34_FOLD, ID_PORTS34_DROP, ID_THIN_BENDS, ID_PC_EDITOR, ID_OVERVIEW,
 	                        ID_OUTPUT_DIGITAL, ID_OUTPUT_ANALOG, ID_OUTPUT_LIMITER, ID_RESET_GM, ID_RESET_GS, ID_RESET_XG, ID_MIDI_PANIC, ID_RATE_AUTO, ID_AUDIO_DEFAULT, ID_INE_NONE };
 	for (int base : bases) {
@@ -226,7 +226,7 @@ inline std::string basename(const std::string &path)
 
 } // namespace menu_detail
 
-// The quick menu toggles the same routes as the settings matrix.
+// One input/output picker for the quick MIDI menu.
 inline menu_group menu_port_group(const char *title, const std::vector<std::string> &names,
                                   int now, int id_none, int id_base)
 {
