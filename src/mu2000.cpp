@@ -3404,7 +3404,7 @@ void mu2000::vb_follow_ram(vb_slot &s)
 	if (now[0] != s.ram_seen[0] || now[1] != s.ram_seen[1])
 		vb_set_bank(s, now[0], now[1]);
 	if (now[2] != s.ram_seen[2] && now[2] < 128)
-		s.midi(0xc0, now[2], 0);
+		s.program(now[2]);
 	std::copy(now, now + 3, s.ram_seen);
 }
 
@@ -3516,7 +3516,7 @@ void mu2000::vb_from_firmware(vb_slot &s, const std::vector<u8> &m)
 	else if (m[4] == 0x08 && m[5] == s.part && s.part < 16 && m[6] == 0x02)
 		vb_set_bank(s, s.bank[0], m[7]);
 	else if (m[4] == 0x08 && m[5] == s.part && s.part < 16 && m[6] == 0x03)
-		s.midi(0xc0, m[7], 0);
+		s.program(m[7]);
 	// XG System On。firmware は起動の終わりにこれをボードへ送るが、パートの音色は電源を切る前のものを
 	// 持ち越していて、それをボードへは知らせてこない（起動し直した直後、液晶はボードの音色なのに
 	// ボードが鳴らなかった）。少し待ってから、firmware が持っているバンクに合わせる
@@ -3545,8 +3545,10 @@ void mu2000::vb_tap(vb_slot &s, u8 byte, int port)
 			if (xg && sx[4] == 0x70 && sx[5] == s.assign_mid() && sx[6] == 0x00)
 				vb_assign(s, sx[7]);
 			else if ((xg && sx[4] == 0x00 && sx[5] == 0x00 && sx[6] == 0x7e) ||
-			         (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01))
+			         (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01)) {
 				vb_set_bank(s, 0, 0);
+				s.fc.clear_edits();
+			}
 			sx.clear();
 		} else if ((byte & 0x80) || sx.size() >= 8) {
 			sx.clear();

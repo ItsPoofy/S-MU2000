@@ -17,6 +17,10 @@ Domino のトラックの音色欄から FC ボードのプログラムを選べ
   FC BOARD PLG-1 (MSB 90) 〜 PLG-6 (MSB 95)   1 パートの FC ボード。差込口ごとにバンクが違う
   FC BOARD 16 parts (port E)                   16 パートの FC ボード。バンクは送らない（プログラムチェンジだけ）
 
+コントロールチェンジの欄には、フォルダー「FC board voice edit」が入る。FC ボードの音色の値（波・デューティ・音量の
+下がり方・ビブラート・アルペジオ・鳴り始めのずれ）を曲の中から動かす 20 個（CC20〜31・CC102〜109。doc/vboard.md）。
+--into のときも、元の定義のコントロールチェンジの並びの最後に足す。
+
 音色の名前は、初期の 16 個（doc/vboard.md）。自分で作った音色の組（.smufc）を使っているボードは、
 その名前で 128 個並べられる:
 
@@ -122,15 +126,90 @@ CONTROLS = """\t<ControlChangeMacroList>
 \t\t\t\t<Data>@CC 123 0</Data>
 \t\t\t</CCM>
 \t\t</Folder>
-\t</ControlChangeMacroList>
 """.replace("\n", "\r\n")
+CONTROLS_END = "\t</ControlChangeMacroList>\r\n"
+
+# 音色の値を動かすコントロールチェンジ（src/vboard.h の FC_PARAM_CC と同じ並び。値はエディタの数字そのまま）。
+# (CC, 名前, 最小, 最大, 64 を 0 として送るか, 値の名前)
+WAVES = ["Square", "Triangle", "Noise", "Metal noise"]
+DUTIES = ["1/8", "1/4", "1/2", "3/4"]
+VOICE_CC = [
+    (20, "Wave", 0, 3, False, WAVES),
+    (21, "Duty steps", 1, 4, False, None),
+    (22, "Duty frames per step", 1, 30, False, None),
+    (23, "Duty 1", 0, 3, False, DUTIES),
+    (24, "Duty 2", 0, 3, False, DUTIES),
+    (25, "Duty 3", 0, 3, False, DUTIES),
+    (26, "Duty 4", 0, 3, False, DUTIES),
+    (27, "Fade while held (frames per step, 0=hold)", 0, 60, False, None),
+    (28, "Fade stops at step", 0, 15, False, None),
+    (29, "Fade after release (steps per frame)", 1, 15, False, None),
+    (30, "Vibrato depth (cents)", 0, 100, False, None),
+    (31, "Vibrato starts after (frames)", 0, 120, False, None),
+    (102, "Arpeggio steps", 1, 4, False, None),
+    (103, "Arpeggio frames per step", 1, 30, False, None),
+    (104, "Arpeggio 1 (semitones)", -24, 24, True, None),
+    (105, "Arpeggio 2 (semitones)", -24, 24, True, None),
+    (106, "Arpeggio 3 (semitones)", -24, 24, True, None),
+    (107, "Arpeggio 4 (semitones)", -24, 24, True, None),
+    (108, "Starts off pitch by (semitones)", -48, 48, True, None),
+    (109, "Reaches pitch in (frames, 0=off)", 0, 60, False, None),
+]
+VOICE_FOLDER = "FC board voice edit"
+CCM_ID_MAX = 1299               # Domino の ControlChangeMacro の ID は 0〜1299
+
+
+def used_ids(text):
+    """定義の中の <CCM ID="n"> の番号。"""
+    ids, at = set(), 0
+    while True:
+        at = text.find("<CCM ", at)
+        if at < 0:
+            return ids
+        end = text.find(">", at)
+        q = text.find('ID="', at, end)
+        if q >= 0:
+            num = text[q + 4:text.find('"', q + 4)]
+            if num.isdigit():
+                ids.add(int(num))
+        at += 5
+
+
+def voice_folder(used):
+    """音色の値のフォルダー。used は、もう使われている ID。空いていれば CC の番号を ID にし、ふさがっていれば上から探す。"""
+    used = set(used)
+    out = ['\t\t<Folder Name="%s">' % VOICE_FOLDER]
+    spare = CCM_ID_MAX
+    for cc, name, lo, hi, signed, labels in VOICE_CC:
+        ident = cc
+        if ident in used:
+            while spare in used:
+                spare -= 1
+            if spare < 0:
+                raise ValueError("コントロールチェンジの ID が空いていない")
+            ident = spare
+        used.add(ident)
+        out.append('\t\t\t<CCM ID="%d" Name="%s (CC%d)" Sync="Last">' % (ident, esc(name), cc))
+        value = '\t\t\t\t<Value Min="%d" Max="%d"%s' % (lo, hi, ' Offset="64"' if signed else '')
+        if labels:
+            out.append(value + '>')
+            for i, label in enumerate(labels):
+                out.append('\t\t\t\t\t<Entry Label="%s" Value="%d" />' % (esc(label), i))
+            out.append('\t\t\t\t</Value>')
+        else:
+            out.append(value + ' />')
+        out.append('\t\t\t\t<Data>@CC %d #VL</Data>' % cc)
+        out.append('\t\t\t</CCM>')
+    out.append('\t\t</Folder>')
+    return "\r\n".join(out) + "\r\n"
 
 
 def standalone(sets):
     return ('<?xml version="1.0" encoding="Shift_JIS"?>\r\n\r\n'
             '<ModuleData Name="S-MU2000 FC board" Folder="YAMAHA" Priority="1" FileCreator="S-MU2000 tools/domino/fcdef.py" '
             'FileVersion="1.00" WebSite="https://github.com/tarboh/S-MU2000">\r\n'
-            '\t<InstrumentList>\r\n' + maps(sets) + '\t</InstrumentList>\r\n' + CONTROLS + '</ModuleData>\r\n')
+            '\t<InstrumentList>\r\n' + maps(sets) + '\t</InstrumentList>\r\n' +
+            CONTROLS + voice_folder(used_ids(CONTROLS)) + CONTROLS_END + '</ModuleData>\r\n')
 
 
 def merged(path, sets, name):
@@ -143,6 +222,17 @@ def merged(path, sets, name):
         raise ValueError("%s: もう FC ボードの並びが入っている（元の定義ファイルを渡すこと）" % path)
     line = text.rfind("\n", 0, end) + 1          # </InstrumentList> の行の頭に入れる
     text = text[:line] + maps(sets) + text[line:]
+    # 音色の値を動かすコントロールチェンジ。元の定義の並びの最後に足す（並びが無ければ作る）
+    end = text.rfind("</ControlChangeMacroList>")
+    if end >= 0:
+        line = text.rfind("\n", 0, end) + 1
+        text = text[:line] + voice_folder(used_ids(text)) + text[line:]
+    else:
+        end = text.rfind("</ModuleData>")
+        if end < 0:
+            raise ValueError("%s: </ModuleData> が無い" % path)
+        line = text.rfind("\n", 0, end) + 1
+        text = text[:line] + "\t<ControlChangeMacroList>\r\n" + voice_folder(set()) + CONTROLS_END + text[line:]
     # 元の定義と並べて選べるよう、定義の名前を変える
     at = text.find("<ModuleData ")
     q0 = text.find('Name="', at) + 6

@@ -1909,6 +1909,18 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				m.mu.set_part_mute(u64(1) << 2);              // 内蔵のパート 3 の音は消して、ボードが鳴っていないことだけを見る
 				const shot other = play(300, 100, 2);
 				m.mu.set_part_mute(0);
+				// コントロールチェンジで音色を触る（CC23 = 0 でデューティ 1/8。1/2 には無い 2 倍音が出る）。プログラムチェンジのすぐ後に
+				// 送っても、firmware が後からワーク RAM に書くプログラムで消えない（番号を変えて、書き直させる。17 番は 1 番と同じ矩形波 1/2）。
+				// プログラムチェンジを送り直すと組の音色に戻る
+				send({ 0xc0, 16, 0xb0, 23, 0 });
+				const shot cc_thin = play(300, 100);
+				send({ 0xc0, 0 });
+				const shot cc_back = play(300, 100);
+				const double cc_thin2 = tone(part_of(cc_thin.mono, on, len), 880) / tone(part_of(cc_thin.mono, on, len), 440),
+				             cc_back2 = tone(part_of(cc_back.mono, on, len), 880) / tone(part_of(cc_back.mono, on, len), 440);
+				check(cc_thin2 > 0.5 && cc_back2 < 0.05,
+				      "架空のボード（FC ボード）の音色が、パートに届いたコントロールチェンジで変わり、プログラムチェンジで戻る",
+				      "2 倍音 CC23 = 0 のあと " + std::to_string(cc_thin2) + " 倍、プログラムチェンジのあと " + std::to_string(cc_back2) + " 倍");
 				// 同じパートでふつうのバンクに戻すと、ボードは挿したままでも内蔵の音に戻る
 				send({ 0xb0, 0, 0, 0xb0, 32, 0, 0xc0, 0 });
 				const shot inner = play(300, 100);
@@ -2038,6 +2050,60 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      std::to_string(sw_first) + "（440Hz " + std::to_string(sw_first_lo) + "）あと 440Hz " + std::to_string(sw_late) +
 				      "、押したまま 2 倍音 " + std::to_string(live_before) + " → " + std::to_string(live_after) + " 倍、読み戻し " +
 				      (file_same ? "同じ" : "違う") + "、欠けたファイルは" + (file_cut ? "断る" : "通る") + "、外れた値は" + (file_clamped ? "直す" : "そのまま"));
+
+				// コントロールチェンジで音色を触る（FC_PARAM_CC）。初期の音色のプログラム 1 に CC を送った音は、組の音色を同じ値に
+				// 書き換えた音と 1 ビットも違わない。鳴っている音にも効く。範囲の外は端に寄る。プログラムチェンジで全部戻り、
+				// 本体からの知らせ（set_program）は番号が同じなら戻さない。組は書き換わらない
+				const auto play_cc = [&](std::initializer_list<int> cc, int held) {
+					vb::fc_board b;
+					b.midi(0xc0, 0, 0);
+					for (auto i = cc.begin(); i != cc.end(); i += 2)
+						b.midi(0xb0, u8(i[0]), u8(i[1]));
+					b.midi(0x90, 69, 100);
+					return render(b, held);
+				};
+				const bool cc_duty = play_cc({ 23, 0 }, 22050) == thin;
+				const bool cc_arp = play_cc({ 102, 2, 103, 30, 105, 64 + 12 }, 44100) == arp;
+				const bool cc_floor = play_cc({ 27, 1, 28, 5 }, 44100) == floored;
+				const bool cc_sweep = play_cc({ 108, 64 + 12, 109, 30 }, 44100) == swept;
+				bool cc_table = vb::fc_param_of_cc(1) < 0 && vb::fc_param_of_cc(7) < 0 && vb::fc_param_of_cc(32) < 0 && vb::fc_param_of_cc(110) < 0;
+				for (int i = 0; i < vb::FC_PARAMS; i++)
+					cc_table = cc_table && vb::fc_param_of_cc(vb::FC_PARAM_CC[i]) == i;
+				vb::fc_board cb;
+				cb.set_bank(bank);
+				cb.midi(0xc0, 1, 0);
+				const int wild_cc[][2] = { { 20, 127 }, { 21, 127 }, { 22, 0 }, { 26, 127 }, { 29, 0 }, { 30, 127 }, { 104, 0 }, { 107, 127 }, { 108, 0 }, { 109, 127 } };
+				for (const auto &w : wild_cc)
+					cb.midi(0xb0, u8(w[0]), u8(w[1]));
+				const vb::fc_voice cv = cb.current();
+				const bool cc_clamped = cv.wave == vb::fc_voice::METAL && cv.duty_len == 4 && cv.duty_frames == 1 && cv.duty[3] == 3 && cv.release == 1 &&
+				                        cv.vib_depth == 100 && cv.arp[0] == -24 && cv.arp[3] == 24 && cv.sweep == -48 && cv.sweep_frames == 60 &&
+				                        cv.arp_len == 2 && cv.arp[1] == 12;          // 触っていない欄は組の音色のまま
+				const bool cc_bank_kept = bank->prog[1].wave == vb::fc_voice::SQUARE && bank->prog[1].sweep == 0;
+				cb.set_program(1);
+				const bool cc_kept = cb.edited() != 0;
+				cb.set_program(2);
+				const bool cc_dropped = cb.edited() == 0 && cb.program() == 2;
+				cb.midi(0xb0, 23, 1);
+				cb.midi(0xc0, 2, 0);
+				const bool cc_pc = cb.edited() == 0;
+				vb::fc_board held;
+				held.midi(0xc0, 0, 0);
+				held.midi(0x90, 69, 100);
+				const std::vector<double> h1 = render(held, 11025);
+				held.midi(0xb0, 23, 0);
+				const std::vector<double> h2 = render(held, 11025);
+				held.midi(0xc0, 0, 0);
+				const std::vector<double> h3 = render(held, 11025);
+				const auto second = [&](const std::vector<double> &x) { return tone(slice(x, 2205, 8820), 880) / tone(slice(x, 2205, 8820), 440); };
+				check(cc_duty && cc_arp && cc_floor && cc_sweep && cc_table && cc_clamped && cc_bank_kept && cc_kept && cc_dropped && cc_pc &&
+				      second(h1) < 0.02 && second(h2) > 0.5 && second(h3) < 0.02,
+				      "FC ボードの音色をコントロールチェンジで触る: 組を書き換えたのと同じ音、鳴っている音にも効き、プログラムチェンジで戻る",
+				      std::string("デューティ") + (cc_duty ? "同じ" : "違う") + "、アルペジオ" + (cc_arp ? "同じ" : "違う") + "、止まる段" + (cc_floor ? "同じ" : "違う") +
+				      "、ずれ" + (cc_sweep ? "同じ" : "違う") + "、番号の表は" + (cc_table ? "合う" : "合わない") + "、外れた値は" + (cc_clamped ? "端に寄る" : "寄らない") +
+				      "、組は" + (cc_bank_kept ? "そのまま" : "書き換わった") + "、同じ番号の知らせで" + (cc_kept ? "残る" : "消える") + "、違う番号の知らせで" +
+				      (cc_dropped ? "戻る" : "残る") + "、プログラムチェンジで" + (cc_pc ? "戻る" : "残る") + "、押したまま 2 倍音 " + std::to_string(second(h1)) +
+				      " → " + std::to_string(second(h2)) + " → " + std::to_string(second(h3)) + " 倍");
 			}
 
 			// 架空のボードを挿したまま起動すると、firmware の「Checking PLG」に答える（doc/plg-protocol.md）。
