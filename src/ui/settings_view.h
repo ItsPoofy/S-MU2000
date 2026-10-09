@@ -173,6 +173,9 @@ private:
 		const bool latency_active = ImGui::IsItemActive();
 		const bool latency_done = ImGui::IsItemDeactivatedAfterEdit();
 		ImGui::EndDisabled();
+#if defined(__APPLE__)
+		ImGui::BeginDisabled(!custom_audio_format(m_draft.preferences.stream));
+#endif
 		const char *qualities[] = {UI_TEXT(settings_sinc, "Sinc (high quality)"), "Linear", UI_TEXT(settings_nearest, "Nearest (lo-fi)")};
 		if (combo(UI_TEXT(settings_resampler, "Resampler"), qualities[int(m_draft.preferences.stream.quality)])) {
 			for (int i = 0; i < 3; i++)
@@ -180,6 +183,9 @@ private:
 					m_draft.preferences.stream.quality = resampler_quality(i);
 			ImGui::EndCombo();
 		}
+#if defined(__APPLE__)
+		ImGui::EndDisabled();
+#endif
 		ImGui::EndDisabled();
 		if ((m_draft != before && !latency_active) || latency_done) m_actions.audio(m_draft);
 		if (m_state.busy) ImGui::TextUnformatted(UI_TEXT(settings_opening, "Opening audio device..."));
