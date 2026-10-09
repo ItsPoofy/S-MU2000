@@ -39,14 +39,13 @@ inline constexpr const char *SET_THIN_BENDS = "thin_bends";   // 再生でピッ
 inline constexpr const char *SET_OUTPUT = "output";
 inline constexpr const char *SET_BOARD = "board";             // 架空のプラグインボード（fc。無ければ空）
 inline constexpr const char *SET_BOARD_PART = "board_part";   // そのパート（1-64）
-inline constexpr const char *SET_BOARD2 = "board2";           // 差込口 2・3（PLG-2・PLG-3）。書き方は board と同じ
-inline constexpr const char *SET_BOARD2_PART = "board2_part";
-inline constexpr const char *SET_BOARD3 = "board3";
-inline constexpr const char *SET_BOARD3_PART = "board3_part";
+// 差込口 2〜6（PLG-2〜PLG-6。4 から先は増設の差込口）。書き方は board と同じ
+inline constexpr const char *const SET_BOARD_MORE[5] = { "board2", "board3", "board4", "board5", "board6" };
+inline constexpr const char *const SET_BOARD_MORE_PART[5] = { "board2_part", "board3_part", "board4_part", "board5_part", "board6_part" };
 inline constexpr const char *SET_BOARD_DLS = "board_dls";     // DLS のボードが読むファイル（道。UTF-8）
 inline constexpr const char *SET_BOARD_FILE = "board_file";   // オリジナルのボードのファイル（道。src/ui/user_boards.h）
 // FC ボードの音色の組のファイル（道。src/ui/fc_banks.h。無ければ初期の音色）。ボードごと: PLG-1・2・3 の 1 パートのボード、16 パートのボード
-inline constexpr const char *const SET_BOARD_FC[4] = { "board_fc", "board_fc2", "board_fc3", "board_fc16" };
+inline constexpr const char *const SET_BOARD_FC[7] = { "board_fc", "board_fc2", "board_fc3", "board_fc4", "board_fc5", "board_fc6", "board_fc16" };
 inline constexpr const char *SET_BOARD_FM = "board_fm";       // FM ボードの音色の組のファイル（道。src/ui/fm_banks.h。無ければ初期の音色）
 inline constexpr const char *SET_VOLUME = "volume";
 inline constexpr const char *SET_EDIT_OUT = "edit_out";   // 音色の窓の送り先（空はパネルの設定）
@@ -119,12 +118,12 @@ struct remembered {
 	std::string edit_out; // edit_out= (the voice window's send-to port; empty = the panel's ports)
 	int board = 0;        // board=fc / fc16 (the imaginary plug-in board, mu2000::VBOARD_FC / VBOARD_FC16; 0 = none)
 	int board_part = 1;   // board_part= (1-64)
-	int board_more[2] = { 0, 0 };          // board2= / board3= (slots PLG-2 and PLG-3)
-	int board_more_part[2] = { 2, 3 };     // board2_part= / board3_part=
+	int board_more[5] = { 0, 0, 0, 0, 0 };          // board2= ... board6= (slots PLG-2 to PLG-6; 4 and up are the extra slots)
+	int board_more_part[5] = { 2, 3, 4, 5, 6 };     // board2_part= ... board6_part=
 	std::string board_dls; // board_dls= (the DLS file of the DLS board)
 	std::string board_file; // board_file= (the user's own board, board=user / user16)
 	std::string board_fm;   // board_fm= (the FM board's voice set; empty = the built-in voices)
-	std::string board_fc[4]; // board_fc= board_fc2= board_fc3= board_fc16= (each FC board's voice set; empty = the built-in voices)
+	std::string board_fc[7]; // board_fc= board_fc2= ... board_fc6= board_fc16= (each FC board's voice set; empty = the built-in voices)
 };
 
 // Struct to file rows, in file order
@@ -173,14 +172,14 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_EDIT_OUT, r.edit_out);
 	static const char *const BOARD_KINDS[7] = { "", "fc", "fc16", "dls", "user", "user16", "fm16" };
 	kv.emplace_back(SET_BOARD, BOARD_KINDS[r.board >= 0 && r.board < 7 ? r.board : 0]);
-	kv.emplace_back(SET_BOARD2, BOARD_KINDS[r.board_more[0] >= 0 && r.board_more[0] < 7 ? r.board_more[0] : 0]);
-	kv.emplace_back(SET_BOARD2_PART, std::to_string(r.board_more_part[0]));
-	kv.emplace_back(SET_BOARD3, BOARD_KINDS[r.board_more[1] >= 0 && r.board_more[1] < 7 ? r.board_more[1] : 0]);
-	kv.emplace_back(SET_BOARD3_PART, std::to_string(r.board_more_part[1]));
+	for (int i = 0; i < 5; i++) {
+		kv.emplace_back(SET_BOARD_MORE[i], BOARD_KINDS[r.board_more[i] >= 0 && r.board_more[i] < 7 ? r.board_more[i] : 0]);
+		kv.emplace_back(SET_BOARD_MORE_PART[i], std::to_string(r.board_more_part[i]));
+	}
 	kv.emplace_back(SET_BOARD_DLS, r.board_dls);
 	kv.emplace_back(SET_BOARD_FILE, r.board_file);
 	kv.emplace_back(SET_BOARD_FM, r.board_fm);
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 7; i++)
 		kv.emplace_back(SET_BOARD_FC[i], r.board_fc[i]);
 	kv.emplace_back(SET_BOARD_PART, std::to_string(r.board_part));
 	return kv;
@@ -251,17 +250,17 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 	if (const std::string *v = find_setting(kv, SET_EDIT_OUT)) r.edit_out = *v;
 	const auto board_kind = [](const std::string &v) { return v == "fc" ? 1 : v == "fc16" ? 2 : v == "dls" ? 3 : v == "user" ? 4 : v == "user16" ? 5 : v == "fm16" ? 6 : 0; };
 	if (const std::string *v = find_setting(kv, SET_BOARD))   r.board = board_kind(*v);
-	if (const std::string *v = find_setting(kv, SET_BOARD2))  r.board_more[0] = board_kind(*v);
-	if (const std::string *v = find_setting(kv, SET_BOARD3))  r.board_more[1] = board_kind(*v);
-	for (int i = 0; i < 2; i++)
-		if (const std::string *v = find_setting(kv, i ? SET_BOARD3_PART : SET_BOARD2_PART)) {
+	for (int i = 0; i < 5; i++) {
+		if (const std::string *v = find_setting(kv, SET_BOARD_MORE[i])) r.board_more[i] = board_kind(*v);
+		if (const std::string *v = find_setting(kv, SET_BOARD_MORE_PART[i])) {
 			const int n = std::atoi(v->c_str());
 			r.board_more_part[i] = n >= 1 && n <= 64 ? n : i + 2;
 		}
+	}
 	if (const std::string *v = find_setting(kv, SET_BOARD_DLS)) r.board_dls = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_FILE)) r.board_file = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_FM)) r.board_fm = *v;
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 7; i++)
 		if (const std::string *v = find_setting(kv, SET_BOARD_FC[i])) r.board_fc[i] = *v;
 	if (const std::string *v = find_setting(kv, SET_BOARD_PART)) {
 		const int n = std::atoi(v->c_str());

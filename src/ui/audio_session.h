@@ -10,18 +10,18 @@ namespace ui {
 class audio_session {
 public:
 	bool busy() const { return m_job.busy(); }
-	void begin(engine &eng, audio_out &out, audio_output_config wanted, audio_output_config previous)
+	void begin(engine &eng, audio_out &out, audio_output_config wanted, audio_output_config previous, bool restore = true)
 	{
 		m_engine = &eng;
 		eng.state.store(0);
-		m_job.start([&eng, &out, wanted = std::move(wanted), previous = std::move(previous)] {
+		m_job.start([&eng, &out, wanted = std::move(wanted), previous = std::move(previous), restore] {
 			while (eng.in_fill.load()) smu2000::sleep_ms(1);
 #if defined(__APPLE__)
 			const bool threaded = eng.mu.threading_requested();
 			eng.mu.set_threaded(false);
 			eng.mu.set_realtime_workgroup(nullptr);
 #endif
-			const auto result = switch_audio_output(out, [&eng](s16 *dst, u32 n) { eng.fill(dst, n); }, wanted, previous);
+			const auto result = switch_audio_output(out, [&eng](s16 *dst, u32 n) { eng.fill(dst, n); }, wanted, previous, restore);
 #if defined(__APPLE__)
 			if (result.selected || result.restored) eng.mu.set_realtime_workgroup(out.realtime_workgroup());
 			eng.mu.set_threaded(threaded);
@@ -43,7 +43,7 @@ private:
 	audio_output_switch_result finish()
 	{
 		auto result = m_job.join();
-		m_engine->state.store(result.selected || result.restored ? 1 : 0);
+		m_engine->state.store(result.selected || result.restored ? 1 : 2);
 		return result;
 	}
 	engine *m_engine = nullptr;

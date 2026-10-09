@@ -367,6 +367,12 @@ The Windows exes are statically linked so they **don't depend on MSYS2 DLLs**
 The SH2 and MEG JITs cover both x86-64 and arm64. `midisend` and `rec` (tools for comparing
 against the hardware) are Windows-only. For the macOS build, see [doc/porting-macos.md](doc/porting-macos.md).
 
+## Translations
+
+The window, menu and tooltip texts are plain files under [`locale/`](locale/), one folder per language
+(English and Japanese so far). Adding or improving a language needs no programming, and you can try your
+texts in the program without building it: see [locale/README.md](locale/README.md).
+
 ## Origins and license
 
 The core chip implementations are **taken from MAME**. MAME as a whole is GPL, but every

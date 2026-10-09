@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 #include "ui/midi_router.h"
+#include "ui/audio_device_watch.h"
 #include "ui/settings.h"
 #include <deque>
 #include <iostream>
@@ -86,6 +87,25 @@ static void migration()
 	require(output::sent == sent, "Closing migrated routes sent unsolicited MIDI");
 	output::sent.clear(); input::opens.clear(); output::opens.clear();
 }
+static void recovery()
+{
+ input::names = {}; output::names = {"Unavailable"}; output::fail = "Unavailable";
+ auto r = std::make_unique<router>();
+ ui::midi_routing routes{{}, {{"Unavailable", 1}}};
+ ui::audio_device_watch inputs, outputs;
+ int attempts = 0; std::string error;
+ const auto refresh = [&] {
+  const bool changed = inputs.changed(input::names, {}) | outputs.changed(output::names, {});
+  if (changed && r->needs_refresh(routes, input::names, output::names)) {
+   attempts++; r->apply(routes, true, error);
+  }
+ };
+ for (int i = 0; i < 100; i++) refresh();
+ require(attempts == 1 && !error.empty(), "Unavailable MIDI device retried without a list change");
+ output::fail.clear(); output::names.push_back("New device"); refresh();
+ require(attempts == 2 && output::active.contains("Unavailable"), "Changed device list did not allow MIDI recovery");
+ r->close(); output::opens.clear();
+}
 static void run()
 {
 	input::names = {"Keyboard", "Pads", "Third"}; output::names = {"Synth", "Recorder", "Bad"};
@@ -159,6 +179,6 @@ static void run()
 }
 int main()
 {
-	try { migration(); run(); std::cout << "MIDI fan-in/out, framing, rollback, hotplug and endpoint lifetime: PASS\n"; }
+	try { migration(); recovery(); run(); std::cout << "MIDI fan-in/out, framing, rollback, hotplug and endpoint lifetime: PASS\n"; }
 	catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }
