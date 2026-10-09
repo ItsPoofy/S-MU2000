@@ -1,7 +1,7 @@
 // license:BSD-3-Clause
 //
 // ALSA sequencer output for Linux. Same interface as midi_out.cpp (WinMM) and
-// midi_out_mac.cpp (CoreMIDI): the synth's THRU path.
+// midi_out_apple.cpp (CoreMIDI): the synth's THRU path.
 //
 // The audio thread must never wait (doc/design.md), so it only drops bytes
 // into a lock-free ring; a sender thread assembles messages and hands them to

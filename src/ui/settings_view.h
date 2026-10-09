@@ -8,6 +8,9 @@
 #include "imgui.h"
 #include <array>
 #include <functional>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 namespace ui {
 enum class settings_page { general, audio, midi, emulation };
@@ -121,7 +124,7 @@ private:
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
 		device_combo(UI_TEXT(menu_audio_title, "Audio output device"), m_state.outputs, m_draft.device,
 		             UI_TEXT(menu_audio_default, "System default"));
-#if !defined(__linux__)
+#if !defined(__linux__) && (!defined(__APPLE__) || TARGET_OS_OSX)
 		if (ImGui::Checkbox(UI_TEXT(settings_exclusive, "Exclusive access"), &m_draft.preferences.exclusive))
 			m_draft.preferences.stream.sample_rate = 0;
 #endif
@@ -147,7 +150,7 @@ private:
 			int &other = side ? m_draft.preferences.stream.left : m_draft.preferences.stream.right;
 			const auto &names = m_state.stream.channels;
 			const char *preview = names.size() == 1 ? names[0].c_str() : channel >= 0 && size_t(channel) < names.size() ? names[size_t(channel)].c_str() : "-";
-			ImGui::BeginDisabled(names.size() == 1);
+			ImGui::BeginDisabled(names.size() < 2);
 			if (combo(side ? UI_TEXT(settings_right, "Right output channel") : UI_TEXT(settings_left, "Left output channel"), preview)) {
 				for (size_t c = 0; c < names.size(); c++)
 					if (ImGui::Selectable(names[c].c_str(), channel == int(c))) {
@@ -161,6 +164,7 @@ private:
 		ImGui::EndDisabled();
 		char buffer_label[64];
 		std::snprintf(buffer_label, sizeof(buffer_label), "%d", m_draft.preferences.stream.buffer_frames);
+		ImGui::BeginDisabled(!m_state.stream.manual_buffer);
 		if (combo(UI_TEXT(settings_buffer, "Requested buffer/period (frames)"),
 		                     m_draft.preferences.stream.buffer_frames ? buffer_label : UI_TEXT(settings_auto, "Automatic"))) {
 			if (ImGui::Selectable(UI_TEXT(settings_auto, "Automatic"), !m_draft.preferences.stream.buffer_frames))
@@ -173,13 +177,14 @@ private:
 			}
 			ImGui::EndCombo();
 		}
+		ImGui::EndDisabled();
 		ImGui::BeginDisabled(m_draft.preferences.stream.buffer_frames != 0);
 		ImGui::TextUnformatted(UI_TEXT(settings_latency, "Automatic buffer target (ms)"));
 		ImGui::SliderInt("##latency", &m_draft.preferences.latency_ms, 5, 200);
 		const bool latency_active = ImGui::IsItemActive();
 		const bool latency_done = ImGui::IsItemDeactivatedAfterEdit();
 		ImGui::EndDisabled();
-#if defined(__APPLE__)
+#if defined(__APPLE__) && TARGET_OS_OSX
 		ImGui::BeginDisabled(!custom_audio_format(m_draft.preferences.stream));
 #endif
 		const char *qualities[] = {UI_TEXT(settings_sinc, "Sinc (high quality)"), "Linear", UI_TEXT(settings_nearest, "Nearest (lo-fi)")};
@@ -189,7 +194,7 @@ private:
 					m_draft.preferences.stream.quality = resampler_quality(i);
 			ImGui::EndCombo();
 		}
-#if defined(__APPLE__)
+#if defined(__APPLE__) && TARGET_OS_OSX
 		ImGui::EndDisabled();
 #endif
 		ImGui::EndDisabled();

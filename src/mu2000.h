@@ -348,6 +348,17 @@ public:
 		m_vb_fc_path[target] = path;
 	}
 	const std::string &fc_bank_path(int target) const { return m_vb_fc_path[std::clamp(target, 0, FC_BANKS - 1)]; }
+	// FC ボードの音色の値を動かすコントロールチェンジの番号（src/vboard.h の fc_cc_map）。FC ボード全部に共通。
+	// 音を作る糸から呼ぶこと
+	void set_fc_cc_map(const smu2000::vboard::fc_cc_map &map)
+	{
+		m_vb_fc_cc = map;
+		for (vb_slot &s : m_vbs)
+			s.fc.set_cc_map(map);
+		for (vb_chan &c : m_vb16)
+			c.fc.set_cc_map(map);
+	}
+	const smu2000::vboard::fc_cc_map &fc_cc() const { return m_vb_fc_cc; }
 	std::shared_ptr<const smu2000::vboard::user_board> user_board() const { return m_vb_user_board; }
 	// DLS のファイルを読んで、DLS のボードに持たせる（道は UTF-8）。読めなければ false で err に理由、前のものはそのまま。
 	// 音を作る糸から呼ぶこと（鳴っている音は止まる）
@@ -407,6 +418,28 @@ public:
 	bool virtual_board_assigned(int slot = 0) const { return vbs(slot).on; }     // false: firmware の PartAssign が off
 	bool virtual_board_known(int slot = 0) const { return vbs(slot).known; }     // firmware がボードを見つけている
 	bool virtual_board_any() const { return m_vb_any; }         // どれかの差込口に挿さっている
+	// FC ボードがいま鳴らす音色（画面のエディタ用）。コントロールチェンジで触ってある値（edited の bit = fc_param）を
+	// 組の音色に重ねたもの。slot は差込口（0-5）、負なら 16 パートのボードのチャンネル（0-15）。音を作る糸から呼ぶこと
+	struct fc_live {
+		u32 edited = 0;
+		u8 program = 0;
+		smu2000::vboard::fc_voice voice;
+	};
+	fc_live fc_board_live(int slot, int channel = 0) const
+	{
+		const smu2000::vboard::fc_board &b = slot < 0 ? m_vb16[size_t(channel & 15)].fc : vbs(slot).fc;
+		fc_live o;
+		o.edited = b.edited();
+		o.program = b.program();
+		if (o.edited)
+			o.voice = b.current();
+		return o;
+	}
+	// コントロールチェンジで触ってある値を捨てる（mask の欄だけ。画面のつまみで同じ欄を動かしたとき）
+	void fc_board_clear_edits(int slot, int channel, u32 mask)
+	{
+		(slot < 0 ? m_vb16[size_t(channel & 15)].fc : m_vbs[size_t(std::clamp(slot, 0, PLG_SLOTS - 1))].fc).clear_edits(mask);
+	}
 
 	// A/D INPUT に入れる音。次の run_sample の 1 サンプルぶんで、16bit の目盛り（±32768 が全振幅）。
 	// 左が AD1、右が AD2。A/D パート（スレーブの MELI 6/7）と、サンプリングの録音（REC の InputSrc で選ぶ）、
@@ -1200,6 +1233,7 @@ private:
 	std::string m_vb_fm_path;                  // その音色の組のファイル（設定に覚えるため）
 	std::shared_ptr<const smu2000::vboard::fc_bank> m_vb_fc_bank[FC_BANKS];   // FC ボードの音色の組（ボードごと。無ければ初期の音色）
 	std::string m_vb_fc_path[FC_BANKS];
+	smu2000::vboard::fc_cc_map m_vb_fc_cc;
 	std::shared_ptr<const smu2000::vboard::user_board> m_vb_user_board;
 	std::string m_vb_user_path;
 	vb_parse m_vb16_parse;

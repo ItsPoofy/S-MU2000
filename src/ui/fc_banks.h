@@ -126,6 +126,36 @@ inline std::shared_ptr<const bank> adopt(int target, const std::string &path, st
 	return b;
 }
 
+// ---- 音色の値を動かすコントロールチェンジの番号（src/vboard.h の fc_cc_map）。FC ボード全部に共通で、設定に覚える（board_fc_cc=）
+
+inline smu2000::vboard::fc_cc_map &cc_map()
+{
+	static smu2000::vboard::fc_cc_map m;
+	return m;
+}
+// 画面の控えを決める（起動のとき。音源へは呼ぶ側が渡す）
+inline void adopt_cc(const smu2000::vboard::fc_cc_map &m) { cc_map() = m; }
+inline void cc_to_engine(bridge &br)
+{
+	br.post([m = cc_map()](mu2000 &mu) {
+		mu.set_fc_cc_map(m);
+		return std::string();
+	});
+}
+// 欄に番号を付ける（0 = 外す）。使えない番号なら何もしない
+inline bool assign_cc(bridge &br, int param, int number)
+{
+	if (!cc_map().assign(param, number))
+		return false;
+	cc_to_engine(br);
+	return true;
+}
+inline void reset_cc(bridge &br)
+{
+	cc_map() = smu2000::vboard::fc_cc_map();
+	cc_to_engine(br);
+}
+
 inline void to_engine(bridge &br, int target, std::shared_ptr<const bank> b, const std::string &path)
 {
 	br.post([target, b, path](mu2000 &mu) {
