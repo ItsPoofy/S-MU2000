@@ -194,12 +194,12 @@ void release_hog(AudioDeviceID dev)
 }
 
 // A 44 byte canonical WAV header, 16bit 2ch. The same shape live's --wav writes
-void write_wav_header(std::FILE *f, u32 frames)
+void write_wav_header(std::FILE *f, u32 frames, u32 rate, u32 channels)
 {
-	const u32 data = frames * 4;
+	const u32 data = frames * channels * 2;
 	const u32 riff = 36 + data;
-	const u16 ch = 2, bits = 16, align = 4;
-	const u32 rate = AUDIO_RATE, bytes = rate * align;
+	const u16 ch = u16(channels), bits = 16, align = u16(channels * 2);
+	const u32 bytes = rate * align;
 	std::fwrite("RIFF", 1, 4, f);
 	std::fwrite(&riff, 4, 1, f);
 	std::fwrite("WAVEfmt ", 1, 8, f);
@@ -219,7 +219,7 @@ void write_wav_header(std::FILE *f, u32 frames)
 // Best effort: ask the device for a buffer matching the requested latency.
 // CoreAudio only accepts a value inside the device's range, and it may round, so
 // read back what we actually got. Returning 0 means "leave it at the default".
-u32 set_device_buffer_frames(AudioDeviceID dev, int latency_ms)
+u32 set_device_buffer_frames(AudioDeviceID dev, int latency_ms, u32 requested, u32 rate)
 {
 	AudioObjectPropertyAddress addr = {
 		kAudioDevicePropertyBufferFrameSize,
@@ -227,7 +227,11 @@ u32 set_device_buffer_frames(AudioDeviceID dev, int latency_ms)
 		kAudioObjectPropertyElementMain
 	};
 
-	UInt32 wanted = UInt32((u64(AUDIO_RATE) * u64(latency_ms > 0 ? latency_ms : 0)) / 1000);
+	if (!requested && latency_ms <= 0) {
+		UInt32 got = 0, size = sizeof(got);
+		return AudioObjectGetPropertyData(dev, &addr, 0, nullptr, &size, &got) == noErr ? got : 0;
+	}
+	UInt32 wanted = requested ? requested : UInt32((u64(rate) * u64(latency_ms > 0 ? latency_ms : 0)) / 1000);
 	if (wanted < 32)
 		wanted = 32;
 
@@ -242,10 +246,9 @@ u32 set_device_buffer_frames(AudioDeviceID dev, int latency_ms)
 	addr.mSelector = kAudioDevicePropertyBufferFrameSize;
 	UInt32 got = wanted;
 	size = sizeof(got);
-	if (AudioObjectSetPropertyData(dev, &addr, 0, nullptr, size, &wanted) != noErr)
-		return 0;
+	const auto status = AudioObjectSetPropertyData(dev, &addr, 0, nullptr, size, &wanted);
 	if (AudioObjectGetPropertyData(dev, &addr, 0, nullptr, &size, &got) != noErr)
-		return wanted;
+		return status == noErr ? wanted : 0;
 	return got;
 }
 
@@ -255,6 +258,10 @@ struct audio_out::impl
 {
 	AudioUnit unit = nullptr;
 	fill_fn   fill;
+	audio_stream_renderer renderer;
+	audio_stream_options stream;
+	u32 rate = AUDIO_RATE, channels = 2;
+	bool software_conversion = false;
 	AudioDeviceID dev = kAudioObjectUnknown;
 	bool      hog_owned = false;   // we have the device to ourselves
 	bool      hog_took = false;    // and taking it is what got it, so we give it back
@@ -295,35 +302,38 @@ struct audio_out::impl
 		const u64 t0 = mach_absolute_time();
 
 		s16 *interleaved = nullptr;
-		if (io->mNumberBuffers == 1) {
-			// The normal path: one interleaved buffer, exactly what we asked for
-			interleaved = static_cast<s16 *>(io->mBuffers[0].mData);
-			if (interleaved)
-				fill(interleaved, frames);
-		} else {
-			// Split channels. Make one interleaved block, then fan it out
-			if (scratch.size() < size_t(frames) * 2)
-				scratch.resize(size_t(frames) * 2);
-			interleaved = scratch.data();
-			fill(interleaved, frames);
-			for (UInt32 b = 0; b < io->mNumberBuffers && b < 2; b++) {
+		if (size_t(frames) * channels > scratch.size()) {
+			for (UInt32 b = 0; b < io->mNumberBuffers; b++)
+				if (io->mBuffers[b].mData) std::memset(io->mBuffers[b].mData, 0, io->mBuffers[b].mDataByteSize);
+			starved.fetch_add(1);
+			return;
+		}
+		interleaved = io->mNumberBuffers == 1 ? static_cast<s16 *>(io->mBuffers[0].mData) : scratch.data();
+		if (!interleaved) return;
+		if (software_conversion)
+			renderer.render(interleaved, frames, channels, stream.left, stream.right, fill, audio_stream_renderer::pcm16);
+		else
+			fill(interleaved, frames); // original 44.1 kHz stereo; CoreAudio converts
+		if (io->mNumberBuffers > 1) {
+			unsigned ch = 0;
+			for (UInt32 b = 0; b < io->mNumberBuffers; b++) {
+				const unsigned count = io->mBuffers[b].mNumberChannels;
 				auto *dst = static_cast<s16 *>(io->mBuffers[b].mData);
-				if (!dst)
-					continue;
-				for (UInt32 i = 0; i < frames; i++)
-					dst[i] = scratch[size_t(i) * 2 + b];
+				if (dst) for (UInt32 i = 0; i < frames; i++)
+					for (unsigned c = 0; c < count; c++)
+						dst[size_t(i) * count + c] = ch + c < channels ? interleaved[size_t(i) * channels + ch + c] : 0;
+				ch += count;
 			}
 		}
-
 		// --dump-dev. Growing the buffer in the callback is allocation on the
 		// real-time thread, which is a compromise -- but it is a diagnosis aid,
 		// and live's own --wav already does the same thing for the same reason
 		if (cap && interleaved)
-			cap->insert(cap->end(), interleaved, interleaved + size_t(frames) * 2);
+			cap->insert(cap->end(), interleaved, interleaved + size_t(frames) * channels);
 
 		const u64 took = mach_absolute_time() - t0;
 		busy_ticks.fetch_add(took, std::memory_order_relaxed);
-		meter.add(double(took) / tps, double(frames) / AUDIO_RATE);
+		meter.add(double(took) / tps, double(frames) / rate);
 		u64 worst = worst_ticks.load(std::memory_order_relaxed);
 		while (took > worst &&
 		       !worst_ticks.compare_exchange_weak(worst, took, std::memory_order_relaxed)) {
@@ -334,7 +344,7 @@ struct audio_out::impl
 		// an underrun cannot be read off directly. Use the same proxy live was
 		// already tracking: a fill that took longer than the block it was making
 		// means the device would have run dry.
-		if (double(took) / tps > double(frames) / AUDIO_RATE)
+		if (double(took) / tps > double(frames) / rate)
 			starved.fetch_add(1, std::memory_order_relaxed);
 	}
 };
@@ -350,6 +360,8 @@ std::vector<std::string> audio_out::list()
 	return names;
 }
 
+std::string audio_out::default_device_name() { return name_of(default_output_device()); }
+
 audio_out::audio_out() = default;
 
 audio_out::~audio_out()
@@ -358,6 +370,7 @@ audio_out::~audio_out()
 }bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclusive,
                       const std::string &device, bool raw, bool exact)
 {
+	if (!valid_audio_request(m_stream)) { err = "Invalid audio stream settings"; return false; }
 	(void)raw;                    // nothing to bypass on this side (audio_out.h)
 	if (m_impl && m_impl->running.load())
 		return true;
@@ -413,17 +426,46 @@ audio_out::~audio_out()
 	                         kAudioUnitScope_Global, 0, &dev, sizeof(dev)) != noErr)
 		return dispose(CLI_T("Cannot select the audio output", "音声の出口を選べない"));
 
-	// Ask for the format we generate: 44100Hz, 16bit, stereo, interleaved. The
-	// unit converts to whatever the device actually wants
+	AudioStreamBasicDescription hardware{};
+	UInt32 hardware_size = sizeof(hardware);
+	if (AudioUnitGetProperty(up->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+	                         0, &hardware, &hardware_size) != noErr)
+		return dispose("Cannot read the device stream format");
+	m_info = {};
+	for (UInt32 c = 0; c < hardware.mChannelsPerFrame; c++)
+		m_info.channels.push_back("Output " + std::to_string(c + 1));
+	AudioObjectPropertyAddress rate_addr = { kAudioDevicePropertyAvailableNominalSampleRates,
+	    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+	UInt32 range_size = 0;
+	std::vector<AudioValueRange> ranges;
+	if (AudioObjectGetPropertyDataSize(dev, &rate_addr, 0, nullptr, &range_size) == noErr) {
+		ranges.resize(range_size / sizeof(AudioValueRange));
+		if (AudioObjectGetPropertyData(dev, &rate_addr, 0, nullptr, &range_size, ranges.data()) != noErr) ranges.clear();
+	}
+	for (int rate : { 8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000 })
+		for (const auto &range : ranges)
+			if (rate >= range.mMinimum && rate <= range.mMaximum) { m_info.rates.push_back(rate); break; }
+	if (m_info.rates.empty()) m_info.rates.push_back(int(hardware.mSampleRate));
+	if (!valid_audio_route(m_stream, hardware.mChannelsPerFrame)) return dispose("The selected output channels are unavailable");
+	up->software_conversion = custom_audio_format(m_stream);
+	up->rate = up->software_conversion ? (m_stream.sample_rate ? u32(m_stream.sample_rate) : u32(hardware.mSampleRate)) : AUDIO_RATE;
+	up->channels = up->software_conversion ? hardware.mChannelsPerFrame : 2;
+	up->stream = m_stream;
+	if (up->software_conversion) up->renderer.configure(int(up->rate), m_stream.quality);
+	m_info.rate = int(up->rate);
+	m_info.buffer_rate = int(hardware.mSampleRate);
+	m_capture_rate = up->rate;
+	m_capture_channels = up->channels;
+	// Auto/default routing keeps the original client format and conversion path.
 	AudioStreamBasicDescription fmt{};
-	fmt.mSampleRate       = AUDIO_RATE;
+	fmt.mSampleRate       = up->rate;
 	fmt.mFormatID         = kAudioFormatLinearPCM;
 	fmt.mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
 	fmt.mFramesPerPacket  = 1;
-	fmt.mChannelsPerFrame = 2;
+	fmt.mChannelsPerFrame = up->channels;
 	fmt.mBitsPerChannel   = 16;
-	fmt.mBytesPerFrame    = 4;
-	fmt.mBytesPerPacket   = 4;
+	fmt.mBytesPerFrame    = up->channels * 2;
+	fmt.mBytesPerPacket   = up->channels * 2;
 	if (AudioUnitSetProperty(up->unit, kAudioUnitProperty_StreamFormat,
 	                         kAudioUnitScope_Input, 0, &fmt, sizeof(fmt)) != noErr)
 		return dispose(CLI_T("Cannot set the audio format", "音声の形式を指定できない"));
@@ -435,18 +477,22 @@ audio_out::~audio_out()
 	                         kAudioUnitScope_Input, 0, &cb, sizeof(cb)) != noErr)
 		return dispose(CLI_T("Cannot install the audio callback", "音声の呼び出し口を繋げない"));
 
-	// Room for the largest slice we might be asked for in one go
-	constexpr u32 MAX_SLICE = 4096;
-	AudioUnitSetProperty(up->unit, kAudioUnitProperty_MaximumFramesPerSlice,
-	                     kAudioUnitScope_Global, 0, &MAX_SLICE, sizeof(MAX_SLICE));
-	up->scratch.resize(size_t(MAX_SLICE) * 2);
-
 	// The device buffer size drives the latency. Without this CoreAudio would use
 	// its default (often 512 frames, ~11.6ms)
-	u32 buf = set_device_buffer_frames(dev, latency_ms);
+	u32 buf = set_device_buffer_frames(dev, latency_ms, u32(m_stream.buffer_frames), u32(hardware.mSampleRate));
 	if (!buf)
 		buf = 512;
 	up->buffer_frames.store(buf);
+
+	// Client-rate conversion can enlarge a hardware slice. Allocate before IO.
+	UInt32 max_slice = std::max(4096u, UInt32(std::ceil(buf * double(up->rate) / hardware.mSampleRate)));
+	AudioUnitSetProperty(up->unit, kAudioUnitProperty_MaximumFramesPerSlice,
+	                     kAudioUnitScope_Global, 0, &max_slice, sizeof(max_slice));
+	UInt32 slice_size = sizeof(max_slice);
+	AudioUnitGetProperty(up->unit, kAudioUnitProperty_MaximumFramesPerSlice,
+	                     kAudioUnitScope_Global, 0, &max_slice, &slice_size);
+	up->scratch.resize(size_t(max_slice) * up->channels);
+
 
 	if (AudioUnitInitialize(up->unit) != noErr)
 		return dispose(CLI_T("Cannot initialise the audio output", "音声を初期化できない"));
@@ -462,6 +508,10 @@ audio_out::~audio_out()
 	// refusing to start
 	if (exclusive) {
 		up->hog_owned = take_hog(dev, up->hog_took);
+		if (!up->hog_owned && m_stream.strict) {
+			AudioOutputUnitStop(up->unit);
+			return dispose("The device refused exclusive access");
+		}
 		// Claiming it changes whether the device can be mixed, so the HAL tears
 		// the device's IO down and builds it again. Without this second Start the
 		// IO we began would stay stopped
@@ -532,9 +582,11 @@ void audio_out::set_capture(const std::string &path)
 	m_cap.clear();
 }
 
+bool audio_out::running() const { return m_impl && m_impl->running.load(); }
+
 u64 audio_out::capture_frames() const
 {
-	return u64(m_cap.size() / 2);
+	return u64(m_cap.size() / m_capture_channels);
 }
 
 bool audio_out::write_capture(std::string &err)
@@ -548,8 +600,8 @@ bool audio_out::write_capture(std::string &err)
 		err = CLI_T("Cannot write: ", "書けない: ") + m_cap_path;
 		return false;
 	}
-	const u32 frames = u32(m_cap.size() / 2);
-	write_wav_header(f, frames);
+	const u32 frames = u32(m_cap.size() / m_capture_channels);
+	write_wav_header(f, frames, m_capture_rate, m_capture_channels);
 	const std::size_t wrote = m_cap.empty()
 	    ? 0 : std::fwrite(m_cap.data(), sizeof(s16), m_cap.size(), f);
 	const bool ok = std::fclose(f) == 0 && wrote == m_cap.size();
@@ -570,7 +622,7 @@ double audio_out::cpu_percent() const
 	const u64 done = m_impl->produced.load();
 	if (!done)
 		return 0.0;
-	const double audio = double(done) / AUDIO_RATE;
+	const double audio = double(done) / m_impl->rate;
 	const double busy  = double(m_impl->busy_ticks.load()) / m_impl->tps;
 	return 100.0 * busy / audio;
 }

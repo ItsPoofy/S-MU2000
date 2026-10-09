@@ -46,6 +46,7 @@ public:
 	// which is the whole of what can be asked for.
 	struct request {
 		int       latency_ms = 0;
+		resampler_quality quality = resampler_quality::sinc;
 		std::string device;
 		bool      exact = false;     // a menu name must match a whole name
 		bool      exclusive = false; // no counterpart on iOS, see take_output
