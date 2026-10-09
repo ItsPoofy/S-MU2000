@@ -270,8 +270,11 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	snd_pcm_hw_params_alloca(&capabilities);
 	if (snd_pcm_hw_params_any(up->pcm, capabilities) >= 0) {
 		unsigned min_channels = 2;
+		unsigned max_channels = 2;
 		snd_pcm_hw_params_get_channels_min(capabilities, &min_channels);
+		snd_pcm_hw_params_get_channels_max(capabilities, &max_channels);
 		up->channels = std::max(up->channels, min_channels);
+		if (max_channels == 1 && valid_audio_route(m_stream, 1)) up->channels = 1;
 	}
 	if (snd_pcm_hw_params_any(up->pcm, hw) < 0 ||
 	    snd_pcm_hw_params_set_access(up->pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED) < 0 ||

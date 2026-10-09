@@ -1341,7 +1341,6 @@ $(BUILD)/settings_test$(EXE): tools/test_settings.cpp $(IMGUI_CORE) $(wildcard s
 .PHONY: check-settings
 check-settings: $(BUILD)/settings_test$(EXE)
 	$(WINE) $(BUILD)/settings_test$(EXE)
-	$(WINE)
 
 clean:
 	rm -rf $(BUILD)

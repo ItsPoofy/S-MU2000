@@ -68,6 +68,9 @@ static const char *const cjk_families[] = {
 // with no bold name resolves to its regular file, which the panel then draws at
 // the bold slots -- no worse than a machine without Japanese.
 
+inline constexpr ImWchar cjk_fullwidth_ranges[] = { 0xFF00, 0xFFEF, 0 };
+inline constexpr ImWchar cjk_english_ranges[] = { 0x20, 0xFF, 0xFF00, 0xFFEF, 0 };
+
 #if defined(_WIN32)
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -359,6 +362,7 @@ inline ImFont *add_cjk_editor_font(ImFontAtlas *atlas, float px = 16.0f)
 	// through to the next file, then to the built-in font.
 	ImFontConfig cfg;
 	cfg.Flags |= ImFontFlags_NoLoadError;
+	cfg.GlyphRanges = ui::show_english() ? cjk_english_ranges : atlas->GetGlyphRangesJapanese();
 	const std::string dir = windows_font_dir();
 	for (const char *name : FILES) {
 		const std::string path = dir + name;
@@ -731,6 +735,7 @@ inline ImFont *add_cjk_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = fa
 		ImFontConfig cfg;
 		cfg.FontDataOwnedByAtlas = false;
 		cfg.FontNo = face;             // which face of a TTC; 0 for a lone font
+		cfg.GlyphRanges = ui::show_english() ? cjk_english_ranges : atlas->GetGlyphRangesJapanese();
 		if (ImFont *font = atlas->AddFontFromMemoryTTF(
 		        const_cast<void *>(data), int(bytes), px, &cfg))
 			return font;
@@ -749,7 +754,6 @@ inline ImFont *add_cjk_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = fa
 // as nothing, and a Latin face leaves （） and the kanji as tofu.
 //
 // English needs fullwidth punctuation; Japanese is merged when selected.
-inline constexpr ImWchar cjk_fullwidth_ranges[] = { 0xFF00, 0xFFEF, 0 };
 inline ImFont *add_cjk_ui_font(ImFontAtlas *atlas, float px = 16.0f, bool bold = false)
 {
 	ImFont *primary = add_cjk_font(atlas, px, bold);
@@ -780,7 +784,7 @@ inline void ensure_cjk_ui_fonts(ImFontAtlas *atlas)
 	if (ui::show_english()) return;
 	std::vector<ImFontConfig> pending;
 	for (const auto &source : atlas->Sources) {
-		if (!source.MergeMode || source.GlyphRanges != cjk_fullwidth_ranges) continue;
+		if (source.GlyphRanges != cjk_fullwidth_ranges && source.GlyphRanges != cjk_english_ranges) continue;
 		bool merged = false;
 		for (const auto &other : atlas->Sources)
 			merged |= other.DstFont == source.DstFont && other.GlyphRanges == atlas->GetGlyphRangesJapanese();

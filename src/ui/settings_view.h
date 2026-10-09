@@ -27,6 +27,7 @@ struct settings_actions {
 	std::function<void(std::string)> input;
 	std::function<void(int)> command, language;
 	std::function<void(float)> volume;
+	std::function<void()> save_volume;
 	std::function<void(bool)> limiter;
 };
 
@@ -71,8 +72,12 @@ public:
 		ImGui::End();
 	}
 private:
-	// Return names, never enumerated device indices. A refreshed list cannot
-	// redirect a pending selection to a different endpoint.
+	static bool combo(const char *label, const char *preview)
+	{
+		ImGui::TextUnformatted(label);
+		return ImGui::BeginCombo((std::string("##") + label).c_str(), preview);
+	}
+	// Return names so a refreshed list cannot redirect a pending selection.
 	static bool device_combo(const char *label, const std::vector<std::string> &names,
 	                         std::string &value, const char *empty)
 	{
@@ -95,7 +100,7 @@ private:
 	void draw_general()
 	{
 		ImGui::SeparatorText(UI_TEXT(settings_general, "General"));
-		if (ImGui::BeginCombo(UI_TEXT(settings_language, "Language"), lang_name(get_lang()))) {
+		if (combo(UI_TEXT(settings_language, "Language"), lang_name(get_lang()))) {
 			for (int i = 0; i < NLANG; i++)
 				if (ImGui::Selectable(LANG_NAMES[i], int(get_lang()) == i)) m_actions.language(i);
 			ImGui::EndCombo();
@@ -105,6 +110,8 @@ private:
 	{
 		const audio_output_config before = m_draft;
 		ImGui::SeparatorText(UI_TEXT(settings_audio, "Audio"));
+		// Labels sit above their controls, so translations fit narrow windows too.
+		ImGui::PushItemWidth(-1);
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
 		device_combo(UI_TEXT(menu_audio_title, "Audio output device"), m_state.outputs, m_draft.device,
 		             UI_TEXT(menu_audio_default, "System default"));
@@ -118,7 +125,7 @@ private:
 		ImGui::BeginDisabled(!same_device);
 		char rate_label[64];
 		std::snprintf(rate_label, sizeof(rate_label), "%d Hz", m_draft.preferences.stream.sample_rate);
-		if (ImGui::BeginCombo(UI_TEXT(settings_rate, "Stream sample rate"),
+		if (combo(UI_TEXT(settings_rate, "Stream sample rate"),
 		                     m_draft.preferences.stream.sample_rate ? rate_label : UI_TEXT(settings_auto, "Automatic"))) {
 			if (ImGui::Selectable(UI_TEXT(settings_auto, "Automatic"), !m_draft.preferences.stream.sample_rate))
 				m_draft.preferences.stream.sample_rate = 0;
@@ -133,8 +140,9 @@ private:
 			int &channel = side ? m_draft.preferences.stream.right : m_draft.preferences.stream.left;
 			int &other = side ? m_draft.preferences.stream.left : m_draft.preferences.stream.right;
 			const auto &names = m_state.stream.channels;
-			const char *preview = channel >= 0 && size_t(channel) < names.size() ? names[size_t(channel)].c_str() : "-";
-			if (ImGui::BeginCombo(side ? UI_TEXT(settings_right, "Right output channel") : UI_TEXT(settings_left, "Left output channel"), preview)) {
+			const char *preview = names.size() == 1 ? names[0].c_str() : channel >= 0 && size_t(channel) < names.size() ? names[size_t(channel)].c_str() : "-";
+			ImGui::BeginDisabled(names.size() == 1);
+			if (combo(side ? UI_TEXT(settings_right, "Right output channel") : UI_TEXT(settings_left, "Left output channel"), preview)) {
 				for (size_t c = 0; c < names.size(); c++)
 					if (ImGui::Selectable(names[c].c_str(), channel == int(c))) {
 						if (other == int(c)) other = channel;
@@ -142,11 +150,12 @@ private:
 					}
 				ImGui::EndCombo();
 			}
+			ImGui::EndDisabled();
 		}
 		ImGui::EndDisabled();
 		char buffer_label[64];
 		std::snprintf(buffer_label, sizeof(buffer_label), "%d", m_draft.preferences.stream.buffer_frames);
-		if (ImGui::BeginCombo(UI_TEXT(settings_buffer, "Requested buffer/period (frames)"),
+		if (combo(UI_TEXT(settings_buffer, "Requested buffer/period (frames)"),
 		                     m_draft.preferences.stream.buffer_frames ? buffer_label : UI_TEXT(settings_auto, "Automatic"))) {
 			if (ImGui::Selectable(UI_TEXT(settings_auto, "Automatic"), !m_draft.preferences.stream.buffer_frames))
 				m_draft.preferences.stream.buffer_frames = 0;
@@ -159,12 +168,13 @@ private:
 			ImGui::EndCombo();
 		}
 		ImGui::BeginDisabled(m_draft.preferences.stream.buffer_frames != 0);
-		ImGui::SliderInt(UI_TEXT(settings_latency, "Automatic buffer target (ms)"), &m_draft.preferences.latency_ms, 5, 200);
+		ImGui::TextUnformatted(UI_TEXT(settings_latency, "Automatic buffer target (ms)"));
+		ImGui::SliderInt("##latency", &m_draft.preferences.latency_ms, 5, 200);
 		const bool latency_active = ImGui::IsItemActive();
 		const bool latency_done = ImGui::IsItemDeactivatedAfterEdit();
 		ImGui::EndDisabled();
 		const char *qualities[] = {UI_TEXT(settings_sinc, "Sinc (high quality)"), "Linear", UI_TEXT(settings_nearest, "Nearest (lo-fi)")};
-		if (ImGui::BeginCombo(UI_TEXT(settings_resampler, "Resampler"), qualities[int(m_draft.preferences.stream.quality)])) {
+		if (combo(UI_TEXT(settings_resampler, "Resampler"), qualities[int(m_draft.preferences.stream.quality)])) {
 			for (int i = 0; i < 3; i++)
 				if (ImGui::Selectable(qualities[i], int(m_draft.preferences.stream.quality) == i))
 					m_draft.preferences.stream.quality = resampler_quality(i);
@@ -180,13 +190,16 @@ private:
 		if (device_combo(UI_TEXT(menu_ain_title, "A/D INPUT (sound to sample)"), m_state.inputs, input, UI_TEXT(menu_unused, "Unused")))
 			m_actions.input(input);
 		float gain = m_state.gain;
-		if (ImGui::SliderFloat(UI_TEXT(settings_volume, "Output volume"), &gain, 0, 1, "%.2f")) m_actions.volume(gain);
+		ImGui::TextUnformatted(UI_TEXT(settings_volume, "Output volume"));
+		if (ImGui::SliderFloat("##volume", &gain, 0, 1, "%.2f")) m_actions.volume(gain);
+		if (ImGui::IsItemDeactivatedAfterEdit()) m_actions.save_volume();
 		bool analog = m_state.analog;
 		if (ImGui::Checkbox(UI_TEXT(settings_dc, "Analog output DC filtering"), &analog))
 			m_actions.command(analog ? ID_OUTPUT_ANALOG : ID_OUTPUT_DIGITAL);
 		bool limiter = m_state.limiter;
 		if (ImGui::Checkbox(UI_TEXT(settings_limiter, "Limit output peaks"), &limiter)) m_actions.limiter(limiter);
 		ImGui::EndDisabled();
+		ImGui::PopItemWidth();
 	}
 	void draw_emulation()
 	{
