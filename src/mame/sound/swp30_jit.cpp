@@ -20,6 +20,12 @@
 
 #include "swp30.h"
 
+// TARGET_OS_IPHONE decides the iOS exclusion below; see sh2_jit.cpp for why iOS
+// cannot JIT (MAP_JIT without pthread_jit_write_protect_np faults on first write).
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 // JIT を使うか:
 //   第一段階 = x86-64 と arm64（MinGW の __x86_64__ と MSVC の _M_X64 の両方。これで MSVC x64 も JIT を使う）
 //   第二段階 = x86-32 の移植（Phase 5）。SMU_JIT32_PORT_MEG をビルドで定義した時だけ JIT を有効にし、
@@ -27,7 +33,9 @@
 #if defined(_WIN32) && (defined(__i386__) || defined(_M_IX86)) && !defined(SMU_JIT32_NO_MEG)
 	#define SMU_JIT32_PORT_MEG        // win32 は既定で JIT 有効（最適化しない）。解除は SMU_JIT32_NO_MEG
 #endif
-#if defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64)
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define SMU2000_MEG_JIT 0
+#elif defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64)
 #define SMU2000_MEG_JIT 1
 #elif defined(_WIN32) && (defined(__i386__) || defined(_M_IX86)) && defined(SMU_JIT32_PORT_MEG)
 #define SMU2000_MEG_JIT 1
@@ -162,7 +170,11 @@ void emit_revram_decode(assembler &a)
 	a.xor32(RAX, RDX);
 }
 
-#elif defined(__aarch64__)
+// The x86 branch above is gated on SMU2000_MEG_JIT, and this one has to be too:
+// on iOS (__aarch64__ with the JIT forced off) a bare platform check compiles these
+// helpers while a64asm.h was never included, giving "unknown type name 'emitter'".
+// aarch64-without-JIT never existed before iOS, so nothing ever noticed.
+#elif SMU2000_MEG_JIT && defined(__aarch64__)
 
 using namespace a64;
 using meg_asm = emitter;

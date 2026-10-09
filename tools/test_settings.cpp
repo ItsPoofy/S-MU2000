@@ -81,6 +81,20 @@ static void persistence()
 	ui::apply_settings(ui::collect_settings(in), out);
 	require(out.audio == in.audio && out.audio_out == in.audio_out && out.limiter && out.native_fx == 2 && out.native_engine == 1, "Audio preferences round trip");
 	require(out.audio_routes.size() == 2 && out.audio_routes[0].device == in.audio_out && out.audio_routes[0].left == 4 && out.audio_routes[1].right == 0, "Per-device routing round trip");
+	in.board = 1; in.board_part = 17; in.board_more[0] = 2;
+	in.card = "prepared-card.img"; in.board_file = "voices.ini"; in.board_fc[0] = "fc.ini";
+	in.board_fc_cc = "custom mappings";
+	in.audio_in = "Microphone"; in.in[0] = "Keyboard"; in.edit_out = "Synth";
+	in.volume = 0.4f; in.analog = true; in.thin_bends = true; in.fold34 = false;
+	ui::apply_settings(ui::collect_settings(in), out);
+	ui::clear_processing_settings(out);
+	require(out.audio == ui::audio_preferences{} && out.audio_routes.empty() && !out.limiter && !out.native_fx && !out.native_engine,
+	        "--nomidi kept saved processing choices");
+	require(out.board == 1 && out.board_part == 17 && out.board_more[0] == 2 && out.card == in.card &&
+	        out.board_file == in.board_file && out.board_fc[0] == in.board_fc[0] && out.board_fc_cc == in.board_fc_cc &&
+	        out.audio_out == in.audio_out && out.audio_in == in.audio_in && out.in[0] == in.in[0] && out.edit_out == in.edit_out &&
+	        out.volume == in.volume && out.analog && out.thin_bends && !out.fold34,
+	        "--nomidi discarded existing profile settings");
 	ui::remembered invalid;
 	ui::apply_settings({{"audio_rate", "48000garbage"}, {"audio_buffer", "-1"}, {"audio_left", "3"}, {"audio_right", "3"}}, invalid);
 	require(ui::valid_audio_request(invalid.audio.stream) && invalid.audio.stream.sample_rate == 0 && invalid.audio.stream.left == 0, "Malformed settings validation");

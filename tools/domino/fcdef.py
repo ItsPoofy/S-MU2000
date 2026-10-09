@@ -18,7 +18,8 @@ Domino のトラックの音色欄から FC ボードのプログラムを選べ
   FC BOARD 16 parts (port E)                   16 パートの FC ボード。バンクは送らない（プログラムチェンジだけ）
 
 コントロールチェンジの欄には、フォルダー「FC board voice edit」が入る。FC ボードの音色の値（波・デューティ・音量の
-下がり方・ビブラート・アルペジオ・鳴り始めのずれ）を曲の中から動かす 20 個（CC20〜31・CC102〜109。doc/vboard.md）。
+下がり方・ビブラート・アルペジオ・鳴り始めのずれ）を曲の中から動かす 20 個（初期の番号は CC20〜31・CC102〜109。doc/vboard.md）。
+エディタの「CC の割り当て」で番号を付け替えてあれば、設定ファイルの board_fc_cc= を読んでその番号で作る（--cc でも渡せる）。
 --into のときも、元の定義のコントロールチェンジの並びの最後に足す。
 
 音色の名前は、初期の 16 個（doc/vboard.md）。自分で作った音色の組（.smufc）を使っているボードは、
@@ -159,6 +160,31 @@ VOICE_FOLDER = "FC board voice edit"
 CCM_ID_MAX = 1299               # Domino の ControlChangeMacro の ID は 0〜1299
 
 
+# 欄ごとのコントロールチェンジの番号（VOICE_CC の順）。エディタの「CC の割り当て」で付け替えていれば、その番号
+# （gui.ini の board_fc_cc= か --cc。形は src/vboard.h の fc_cc_text: 欄の順にコンマで、0 = 割り当てない）
+CC_NUMBERS = [row[0] for row in VOICE_CC]
+CC_BLOCKED = {0, 1, 6, 7, 10, 11, 32, 38, 64, 91, 93, 94, 96, 97, 98, 99, 100, 101}       # src/vboard.h の fc_cc_allowed
+
+
+def parse_cc(text):
+    """src/vboard.h の fc_cc_parse と同じ読み方。足りない欄は初期の番号、使えない番号や重なった番号は 0。"""
+    numbers = [row[0] for row in VOICE_CC]
+    if not text.strip():
+        return numbers
+    given = []
+    for part in text.split(",")[:len(numbers)]:
+        try:
+            given.append(int(part.strip()))
+        except ValueError:
+            given.append(0)
+    for i in range(len(given)):
+        numbers[i] = 0
+    for i, cc in enumerate(given):
+        if 0 < cc < 120 and cc not in CC_BLOCKED and cc not in numbers:
+            numbers[i] = cc
+    return numbers
+
+
 def used_ids(text):
     """定義の中の <CCM ID="n"> の番号。"""
     ids, at = set(), 0
@@ -180,7 +206,9 @@ def voice_folder(used):
     used = set(used)
     out = ['\t\t<Folder Name="%s">' % VOICE_FOLDER]
     spare = CCM_ID_MAX
-    for cc, name, lo, hi, signed, labels in VOICE_CC:
+    for (default, name, lo, hi, signed, labels), cc in zip(VOICE_CC, CC_NUMBERS):
+        if not cc:              # 割り当てていない欄
+            continue
         ident = cc
         if ident in used:
             while spare in used:
@@ -243,17 +271,18 @@ def merged(path, sets, name):
 
 
 def ini_sets(path):
+    """設定ファイルから、ボードごとの音色の組のファイルと、コントロールチェンジの番号（board_fc_cc=。無ければ None）。"""
     found = {}
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             kv = dict(l.rstrip("\r\n").split("=", 1) for l in f if "=" in l)
     except OSError:
-        return found
+        return found, None
     for slot, key in INI_KEYS.items():
         p = kv.get(key, "")
         if p and os.path.isfile(p):
             found[slot] = p
-    return found
+    return found, kv.get("board_fc_cc") or None
 
 
 def main():
@@ -264,12 +293,21 @@ def main():
     ap.add_argument("--set", action="append", default=[], metavar="N=FILE", help="voice set (.smufc) of slot N (1-6) or of the 16-part board (16)")
     ap.add_argument("--ini", help="gui.ini to read board_fc*= from")
     ap.add_argument("--no-ini", action="store_true", help="do not look for gui.ini")
+    ap.add_argument("--cc", metavar="N,N,...", help="control change numbers of the 20 voice parameters, in order (0 = none); default: board_fc_cc= of gui.ini, else 20-31,102-109")
     a = ap.parse_args()
 
+    global CC_NUMBERS
     paths = {}
+    cc_text = None
     if not a.no_ini:
         ini = a.ini or os.path.join(os.environ.get("LOCALAPPDATA", ""), "S-MU2000", "gui.ini")
-        paths.update(ini_sets(ini))
+        found, cc_text = ini_sets(ini)
+        paths.update(found)
+    if a.cc is not None:
+        cc_text = a.cc
+    if cc_text:
+        CC_NUMBERS = parse_cc(cc_text)
+        print("voice edit CC: %s" % ",".join(str(n) for n in CC_NUMBERS))
     for s in a.set:
         n, _, p = s.partition("=")
         if not n.isdigit() or int(n) not in INI_KEYS or not p:

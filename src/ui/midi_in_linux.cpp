@@ -1,7 +1,7 @@
 // license:BSD-3-Clause
 //
 // ALSA シーケンサの MIDI 入力（Linux。issue #25）。口の形は midi_in.cpp（WinMM）・
-// midi_in_mac.cpp（CoreMIDI）と同じ。
+// midi_in_apple.cpp（CoreMIDI）と同じ。
 //
 // ALSA は CoreMIDI と同じで、SysEx も含めて 1 つの出来事として渡してくる。
 // WinMM のように**入れ物をあらかじめ渡しておく**必要は無い。

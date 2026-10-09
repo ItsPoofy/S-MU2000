@@ -14,6 +14,13 @@
 
 #include <string>
 
+// This whole header is Windows-only: to_wide/to_utf8 call MultiByteToWideChar and
+// WideCharToMultiByte, and dlg_filter builds the UTF-16 form a Win32 file dialog
+// wants. On macOS the files that would include it (midi_in.cpp, midi_out.cpp,
+// pc_window.cpp) are themselves Windows-only, so the guard here costs them
+// nothing; a file shared with another platform gets the error instead. The guard
+// belongs here, where the dependency is, rather than in each caller.
+#ifdef _WIN32
 #include <windows.h>
 
 namespace ui {
@@ -67,5 +74,7 @@ inline std::wstring dlg_filter(const char *desc1, const char *pat1,
 }
 
 } // namespace ui
+
+#endif // _WIN32
 
 #endif // S_MU2000_UI_TEXT_H

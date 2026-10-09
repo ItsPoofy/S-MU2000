@@ -1455,7 +1455,7 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 	std::string voice = "--";
 	// 1 パートのボード（FC・オリジナル）がこのパートを借りていて、いまボードのバンクが選ばれているか。
 	// そのときは音色選びと編集の面を、ボードのものに差し替える（single_board_pane.h）
-	m_single.poll(br);
+	m_single.poll(br, bkind == mu2000::VBOARD_FC16 ? bch : -1);
 	int sb_kind = 0, raw_msb = 0;
 	const int sb_slot = bch >= 0 ? -1 : m_single.slot_of(part, sb_kind);
 	bool sb_playing = false;
@@ -1528,7 +1528,7 @@ void part_shapes::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 				m_fm_edit.draw(bp.program, br);
 			} else if (bkind == mu2000::VBOARD_FC16) {
 				// FC ボードの音色も（1 パートの FC ボードと同じ組）
-				m_single.edit_fc_voice(bp.program, br);
+				m_single.edit_fc_voice(bp.program, br, bch);
 			} else {
 				if (bkind == mu2000::VBOARD_FM16)
 					ImGui::TextWrapped("%s", UI_TEXT(fme_drum_note, "This channel plays the FM board's drums. The drum sounds are fixed; pick a melodic voice on the left to edit its sound here."));

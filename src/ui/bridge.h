@@ -377,19 +377,31 @@ public:
 		out = m_view;
 	}
 	// 録音デバイスの選択（gui の A/D INPUT。プラグインではホストのバスなので使わない）。
-	// 名前の一覧と今の名前は gui が置き、窓が選んだ番号（-1 = 無し）を gui が拾って開き直す
-	void set_ain_devices(std::vector<std::string> names, std::string current)
+	// 窓が選んだ番号（-1 = 無し）を gui が拾って開き直す。
+	//
+	// The list is a snapshot, the current selection is not. Counting devices is
+	// slow enough to want its own thread (app::list_ain_async), but there are two
+	// ways to choose one - this window's combo and the panel's own menu - so a
+	// stored value goes stale the moment the other one is used, and the window
+	// then shows "(none)" for a device that is open and feeding the machine. Only
+	// the names are stored; the current name is asked for.
+	void set_ain_devices(std::vector<std::string> names)
 	{
 		std::lock_guard<std::mutex> lock(m_ain_lock);
 		m_ain_names = std::move(names);
-		m_ain_current = std::move(current);
 		m_ain_known = true;
+	}
+	// From the gui: the name of the device that is open now, empty for none.
+	void set_ain_current_fn(std::function<std::string()> fn)
+	{
+		std::lock_guard<std::mutex> lock(m_ain_lock);
+		m_ain_current_fn = std::move(fn);
 	}
 	bool ain_devices(std::vector<std::string> &names, std::string &current) const
 	{
 		std::lock_guard<std::mutex> lock(m_ain_lock);
 		names = m_ain_names;
-		current = m_ain_current;
+		current = m_ain_current_fn ? m_ain_current_fn() : std::string();
 		return m_ain_known;
 	}
 	void request_ain(int dev) { m_ain_want.store(dev, std::memory_order_relaxed); }
@@ -467,7 +479,7 @@ private:
 	sampling_view m_view;
 	mutable std::mutex m_ain_lock;
 	std::vector<std::string> m_ain_names;
-	std::string m_ain_current;
+	std::function<std::string()> m_ain_current_fn;
 	bool m_ain_known = false;
 	std::atomic<int> m_ain_want{-2};
 	std::atomic<bool> m_ain_list_want{false};

@@ -32,9 +32,9 @@
 //   組を渡さなければ（set_bank(nullptr)）初期の音色で、プログラム 17 以降は 1〜16 のくり返し（今までと同じ鳴り方）。
 //   ファイル（.smufc）は下の write_fc_bank / read_fc_bank の形
 //
-//   音色の値は、コントロールチェンジでも動かせる（シーケンサーから曲の途中で音を作り変える）。番号は下の FC_PARAM_CC:
+//   音色の値は、コントロールチェンジでも動かせる（シーケンサーから曲の途中で音を作り変える）。初期の番号は下の FC_PARAM_CC:
 //     CC20-31 が波・デューティ・音量・ビブラート、CC102-109 がアルペジオと鳴り始めのずれ。値はエディタの数字そのまま
-//     （半音のずれだけ 64 が 0）。範囲の外は端に寄せる
+//     （半音のずれだけ 64 が 0）。範囲の外は端に寄せる。番号は付け替えられる（fc_cc_map。ボードが別の用に聞く番号は使えない）
 //   動くのは**そのボード（16 パートのボードならそのチャンネル）がいま選んでいるプログラムの音だけ**で、音色の組も
 //   ファイルも書き換えない。触っていない値は組の音色のまま。プログラムチェンジを受けると、触った値は全部捨てて組の音色に戻る
 
@@ -49,6 +49,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -190,6 +191,102 @@ inline void fc_set_param(fc_voice &v, int param, int value)
 	fc_clamp(v);
 }
 
+// ---- 番号の付け替え。欄ごとのコントロールチェンジの番号（0 = 割り当てない）
+//   使えない番号: ボードや本体のパートが別の用に聞くもの（バンク・モジュレーション・データエントリー・音量・パン・
+//   エクスプレッション・ホールド・エフェクトの送り・RPN / NRPN）と、120 以上（チャンネルモードメッセージ）
+
+inline bool fc_cc_allowed(int cc)
+{
+	switch (cc) {
+	case 0: case 1: case 6: case 7: case 10: case 11: case 32: case 38: case 64:
+	case 91: case 93: case 94: case 96: case 97: case 98: case 99: case 100: case 101:
+		return false;
+	default:
+		return cc > 0 && cc < 120;
+	}
+}
+
+struct fc_cc_map {
+	u8 cc[FC_PARAMS];
+	fc_cc_map() { std::copy(FC_PARAM_CC, FC_PARAM_CC + FC_PARAMS, cc); }
+	int param_of(u8 number) const
+	{
+		if (number)
+			for (int i = 0; i < FC_PARAMS; i++)
+				if (cc[i] == number)
+					return i;
+		return -1;
+	}
+	// 欄に番号を付ける（0 = 外す）。使えない番号は断る。ほかの欄がその番号を使っていたら、そちらを外す
+	bool assign(int param, int number)
+	{
+		if (param < 0 || param >= FC_PARAMS || (number && !fc_cc_allowed(number)))
+			return false;
+		if (number)
+			for (u8 &c : cc)
+				if (c == number)
+					c = 0;
+		cc[param] = u8(number);
+		return true;
+	}
+	bool operator==(const fc_cc_map &o) const { return std::equal(cc, cc + FC_PARAMS, o.cc); }
+};
+
+// 設定ファイルに書く形: 欄の順に、番号をコンマで並べる（"20,21,22,…"。0 = 割り当てない）
+inline std::string fc_cc_text(const fc_cc_map &m)
+{
+	std::string s;
+	for (int i = 0; i < FC_PARAMS; i++)
+		s += (i ? "," : "") + std::to_string(m.cc[i]);
+	return s;
+}
+
+// 読む。足りない欄は初期の番号、使えない番号や重なった番号は 0（割り当てない）
+inline fc_cc_map fc_cc_parse(const std::string &text)
+{
+	fc_cc_map m;
+	if (text.empty())
+		return m;
+	int given[FC_PARAMS];
+	int n = 0;
+	for (size_t at = 0; n < FC_PARAMS && at <= text.size();) {
+		const size_t end = std::min(text.find(',', at), text.size());
+		given[n++] = std::atoi(text.substr(at, end - at).c_str());
+		at = end + 1;
+	}
+	// 書いてある欄を先に空けてから入れる（初期の番号が残って、書いてある番号を押しのけないように）
+	for (int i = 0; i < n; i++)
+		m.cc[i] = 0;
+	for (int i = 0; i < n; i++)
+		if (given[i] > 0 && fc_cc_allowed(given[i]) && m.param_of(u8(given[i])) < 0)
+			m.cc[i] = u8(given[i]);
+	return m;
+}
+
+// 音色の欄を、コントロールチェンジで送る値にする（fc_set_param の逆）
+inline int fc_get_param(const fc_voice &v, int param)
+{
+	switch (param) {
+	case FC_P_WAVE:         return v.wave;
+	case FC_P_DUTY_LEN:     return v.duty_len;
+	case FC_P_DUTY_FRAMES:  return v.duty_frames;
+	case FC_P_DUTY1: case FC_P_DUTY2: case FC_P_DUTY3: case FC_P_DUTY4:
+		return v.duty[param - FC_P_DUTY1];
+	case FC_P_DECAY:        return v.decay;
+	case FC_P_FLOOR:        return v.floor;
+	case FC_P_RELEASE:      return v.release;
+	case FC_P_VIB_DEPTH:    return v.vib_depth;
+	case FC_P_VIB_DELAY:    return v.vib_delay;
+	case FC_P_ARP_LEN:      return v.arp_len;
+	case FC_P_ARP_FRAMES:   return v.arp_frames;
+	case FC_P_ARP1: case FC_P_ARP2: case FC_P_ARP3: case FC_P_ARP4:
+		return v.arp[param - FC_P_ARP1] + 64;
+	case FC_P_SWEEP:        return v.sweep + 64;
+	case FC_P_SWEEP_FRAMES: return v.sweep_frames;
+	default:                return 0;
+	}
+}
+
 // ---- ファイル
 //   "SMUFCBNK"  u32 版（1）  組の名前 16 バイト  音色 128 個
 //   音色 1 つ = 名前 8 バイト + 24 バイト:
@@ -309,6 +406,8 @@ public:
 	// そのプログラムの音色（組が無ければ初期の音色）
 	const fc_voice &voice_of(int program) const { return (m_bank ? *m_bank : initial()).prog[size_t(program & 127)]; }
 	const char *name(int program) const { return voice_of(program).name; }
+	// 音色の値を動かすコントロールチェンジの番号を付け替える。もう届いている値は、欄ごとに持っているのでそのまま
+	void set_cc_map(const fc_cc_map &map) { m_map = map; }
 	// いま選んでいるプログラムの、いま鳴る音色（組の音色に、コントロールチェンジで触った値を重ねたもの）
 	fc_voice current() const
 	{
@@ -320,7 +419,8 @@ public:
 	}
 	// コントロールチェンジで触ってある値（bit = fc_param）。0 なら組の音色のまま
 	u32 edited() const { return m_cc_mask; }
-	void clear_edits() { m_cc_mask = 0; }
+	// 触ってある値を捨てる（mask の bit の欄だけ。画面のつまみで同じ欄を動かしたとき）
+	void clear_edits(u32 mask = ~u32(0)) { m_cc_mask &= ~mask; }
 	// MIDI を通らずにプログラムが変わった（パネルで変えたのを本体が知らせてきた）。同じ番号なら何もしない
 	// （MIDI のプログラムチェンジを本体が後から知らせ直してくるので、その間に届いた値を捨てないように）
 	void set_program(u8 program)
@@ -371,7 +471,7 @@ public:
 						v.released = true;
 						v.frames = 0;
 					}
-			} else if (const int param = fc_param_of_cc(d0); param >= 0) {
+			} else if (const int param = m_map.param_of(d0); param >= 0) {
 				m_cc[param] = d1 & 127;
 				m_cc_mask |= 1u << param;
 			}
@@ -534,6 +634,7 @@ private:
 	std::shared_ptr<const fc_bank> m_bank;
 	std::array<voice, VOICES> m_v{};
 	u8 m_program = 0;
+	fc_cc_map m_map;                // 欄ごとのコントロールチェンジの番号
 	u8 m_cc[FC_PARAMS] = {};        // コントロールチェンジで届いた値（m_cc_mask の bit が立っている欄だけ）
 	u32 m_cc_mask = 0;
 	double m_bend = 0.0, m_mod = 0.0, m_frame = 0.0, m_lfo = 0.0;
