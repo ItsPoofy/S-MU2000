@@ -1,0 +1,161 @@
+{
+	"ov_board_row_tip": "口 E のプラグインボードのチャンネル（MU のパートではない）。右クリックで音色を選ぶ。ダブルクリックで音色のウィンドウに出す。",
+	"ov_board_sub_fmt": "口 E ch %d   M %d  L %d",
+	"ov_board_ins_none": "そのまま出す（エフェクトに通さない）",
+	"ov_board_no_voices": "このボードにはまだ音色が無い",
+
+	// Overview list (overview.cpp). Column headers that double as help
+	// keys keep their Japanese key (see headers_with_help call sites).
+	// may start with \n
+	"ov_bighint": "\nダブルクリックで大きな窓に出して触る",
+
+	// may start with \n
+	"ov_bighint_master": "\nダブルクリックでマスターの窓に出して触る",
+
+	// %s %s + why unused
+	"ov_var_off_fmt": "%s  %s\nバリエーションの接続が INSERTION なので、この値は使われない",
+
+	// %s %s + how to turn
+	"ov_slider_fmt": "%s  %s\n左右か上下にドラッグ・ホイール・ダブルクリックで打つ",
+
+	// %s %s, display only
+	"ov_slider_ro_fmt": "%s  %s\n演奏の値（表示だけ）",
+	"ov_ins1": "インサーション 1",
+	"ov_ins2": "インサーション 2",
+	"ov_ins3": "インサーション 3",
+	"ov_ins4": "インサーション 4",
+
+	// %s: part
+	"ov_fx_for_part_fmt": "パート %s に掛けるエフェクト",
+
+	// %s + type
+	"ov_fx_now_sys_fmt": "%s（いま SYSTEM・%s）",
+
+	// %s + part + type
+	"ov_fx_now_fmt": "%s（いま %s・%s）",
+	"ov_unhook": "このパートから外す",
+	"ov_unhook_sys": "このパートから外して SYSTEM に戻す",
+	"ov_hook": "このパートに掛ける",
+	"ov_hook_sys": "INSERTION にしてこのパートに掛ける",
+
+	// may contain \n
+	"ov_drag_note": "印をドラッグして、別のパートの INS 欄に落とすと移る。\n種類が NO EFFECT のまま掛けると、そのパートの音が消える",
+
+	// may contain \n
+	"ov_drag_note2": "つかんでパートの INS 欄に落としても掛けられる。\n種類が NO EFFECT のまま掛けると、そのパートの音が消える",
+	"ov_rclick_fx": "右クリックでエフェクトを掛ける",
+	"ov_not_fx": "掛かっていない（右クリックで掛ける）",
+
+	// %s %s
+	"ov_move_fmt": "%s（%s）を移す",
+
+	// %s %s + help, may contain \n
+	"ov_tip_ins_fmt": "%s: %s\nダブルクリックで設定の窓・ドラッグで別のパートへ・右クリックで種類や外す",
+
+	// %s %s + help, may contain \n
+	"ov_tip_var_fmt": "%s: %s\nドラッグで別のパートへ・右クリックで種類や外す",
+
+	// may contain \n
+	"ov_peg_hint": "\n左の点: 縦で出だしの音程\n真ん中の点: 横でアタックの時間\n右の点: 横でリリースの時間、縦でリリースレベル",
+
+	// may contain \n
+	"ov_porta_hint": "\n点を横につまんで動かす（右へ長く、左へ短く）",
+	"ov_khz": "20 kHz 以上",
+
+	// %s %s
+	"ov_hpf_on_fmt": "HPF : %s (%s)",
+
+	// %s
+	"ov_hpf_off_fmt": "HPF : %s (掛かっていない)",
+
+	// may contain \n
+	"ov_filter_hint": "\n右の点: 横でカットオフ（右へ明るく）、縦でレゾナンス（上へ強く）\n左の点: 横で HPF（右へ低音が削れる）",
+	"ov_eq_pt_hint": "点をつまんで、横で周波数、縦でゲイン（1 が低音、2 が高音）",
+	"ov_eq_master_hint": "点をつまんで、横で周波数、縦でゲイン。点の近くでホイールを回すと幅（Q）",
+
+	// may contain \n
+	"ov_vib_hint": "\n波の山の点: 横で速さ、縦で深さ\n平らな所の終わりの点: 横で掛かり始めるまでの時間",
+
+	// %s %s
+	"ov_rcv_mute_fmt": "受信 %s（%s）",
+	"ov_mute_word": "ミュート",
+	"ov_solo_off_word": "ソロの外",
+
+	// %s %d %d
+	"ov_rcv_fmt": "受信 %s   M %d  L %d",
+
+	// %s %s %d %d
+	"ov_range_fmt": "%s %s（%d-%d）",
+
+	// may contain \n
+	"ov_kb_audition_tip": "左クリックで鳴らす（下ほど強く）。右クリックで試聴の鍵に印、もう一度右クリックで印を消す\n何鍵でも付けられる（和音で試聴）。印が無ければ音色を替えても鳴らない。印はパートごとで、覚えない\nPC のキーボードでも弾ける（白鍵だけ）: A の段が C3 から、Q の段がその 1 オクターブ上、数字の段がさらに 1 オクターブ上。Z を押しながらで半音下、X で半音上。Shift を押している間はモジュレーションが上がる。PageUp / PageDown でオクターブを動かす",
+	"ov_kb_play_tip": "押すと鳴らす（左右どちらのボタンでも）。下ほど強く",
+
+	// %d, may contain \n
+	"ov_mod_tip_fmt": "モジュレーション（CC1）  %d\nホイールで回す（Ctrl で大きく）・上下にドラッグ",
+	"ov_off_no_part": "OFF（どのパートにも掛けない）",
+	"ov_conn_sys": "SYSTEM（全パートから送る）",
+	"ov_conn_ins": "INSERTION（1 つのパートに掛ける）",
+	"ov_conn_tip": "選んだパートに掛かる",
+
+	// %s: effect slot
+	"ov_fx_kind_fmt": "%s の種類",
+	"ov_rclick_kind": "右クリックで種類を選ぶ",
+
+	// %s %s %s, may contain \n
+	"ov_move_tip_fmt": "%s: %s → %s\nダブルクリックで設定の窓・右クリックで種類と掛けるパート・つかんでパートの INS 欄へ",
+
+	// %s %s: drag source
+	"ov_drag_to_fmt": "%s（%s）を掛けるパートの INS 欄へ",
+	"ov_master_name_tip": "ダブルクリックでマスターの窓（マスターボリューム・移調・エフェクトの戻り・マスター EQ）",
+	"ov_part_col": "パート（右クリックで音色）",
+	"ov_tip_mute": "ミュート（このパートを鳴らさない）",
+	"ov_tip_solo": "ソロ（S を入れたパートだけを鳴らす）",
+	"ov_voices_prefix": "発音 ",
+
+	// %s: native/firmware
+	"ov_engine_fmt": "口: %s",
+
+	// may contain \n
+	"ov_engine_tip": "いま鳴らしている口（F4 で切り替え）\nfirmware: 実機の firmware が鳴らす（効果も実機どおり）\nnative: SH-2 を止めて、こちらが式でレジスタを組んで鳴らす",
+
+	// may contain \n
+	"ov_voices_tip": "発音: 鳴っている声の数（離して消え切るまでを含む）。1 音で 2 つ以上の声を使う音色もある\nM は SWP30 のマスタ（64 まで、青）、S はスレーブ（64 まで、橙）。マスタが埋まるとスレーブに回る",
+	"ov_cpu_tip": "CPU: 音声の処理にかかっている時間の、締め切りに対する割合（100%% を越えると音が途切れる）",
+	"ov_zoom_label": "表示の大きさ（小さな絵はダブルクリックで大きな窓に出る）",
+	"ov_ins_section": "インサーション",
+
+	// Second-wave overview strings (upstream part-voice rework).
+	// %s %s %s + drag/wheel
+	"ov_value_tip_fmt": "%s  %s\n%s（ドラッグかマウスホイール）",
+	"ov_discrete": "離す",
+	"ov_legend_combined": "合わせた特性",
+	"ov_legend_filter": "フィルタ",
+
+	// Attack %.0f, Release %.0f
+	"ov_env_vol_long": "音量  Attack %.0f ms   Decay 2000+ ms   Release %.0f ms",
+
+	// Attack/Decay/Release %.0f
+	"ov_env_vol": "音量  Attack %.0f ms   Decay %.0f ms   Release %.0f ms",
+
+	// Init/Attack/Release/Rel %.0f
+	"ov_env_pitch": "音程  Init %+.0f cent   Attack %.0f ms   Release %.0f ms → %+.0f cent",
+
+	// %d, may contain \n
+	"ov_mod_wheel_hint": "MODULATION WHEEL（CC1）  %d\nモジュレーションホイール。ドラッグかマウスホイールで上下する。上げるほど、右の MW LFO PMOD DEPTH のぶんのビブラートが掛かる（受信チャンネルへ CC1 を送る）",
+
+	// %s %d %s + drag/wheel
+	"ov_param_tip_fmt": "%s  %d\n%s（ドラッグかマウスホイール）",
+
+	// %d %.0f
+	"ov_wheel_fmt": "ホイール %d : ±%.0f cent",
+
+	// %d %.0f
+	"ov_mw_fmt": "MW LFO PM : %d (最大 ±%.0f cent)",
+
+	// %.0f
+	"ov_own_fmt": "音色の揺れ ±%.0f cent",
+
+	// Spectrum backdrop fallback (overview.cpp).
+	"ov_silent": "（鳴っていない）"
+}

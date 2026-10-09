@@ -354,6 +354,12 @@ Windows の exe は **MSYS2 の DLL に依存しない**ように静的リンク
 SH2 と MEG の JIT は x86-64 と arm64 の両方にある。`midisend` と `rec`（実機と比べるための道具）は
 Windows だけ。macOS のビルドは [doc/porting-macos.md](doc/porting-macos.md)。
 
+## 翻訳
+
+窓・メニュー・ツールチップの文は、[`locale/`](locale/) の下に言語ごとのフォルダーで置いてある（いまは英語と日本語）。
+言語を足す・直すのにプログラムは要らず、ビルドしなくても自分の訳を画面で試せる。手引きは
+[locale/README.md](locale/README.md)（英語）。
+
 ## 由来とライセンス
 
 中核となるチップの実装は **MAME から取り込んでいる**。MAME 全体は GPL だが、
