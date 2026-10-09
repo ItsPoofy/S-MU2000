@@ -105,6 +105,19 @@ static void persistence()
 		require(unsupported.audio_out.empty() && unsupported.audio.stream.driver == ui::audio_driver::native &&
 		        unsupported.audio.stream.sample_rate == 0 && unsupported.audio.stream.left == 0 && unsupported.audio.stream.right == 1,
 		        "Unavailable driver kept its incompatible device or format");
+	saved.preferences.stream = {96000, 1024, 6, 7};
+	runtime.preferences.stream = {};
+	edited = runtime; edited.device = "New stereo output";
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.device == edited.device && saved.preferences.stream.sample_rate == 0 &&
+	        saved.preferences.stream.buffer_frames == 0 && saved.preferences.stream.left == 0 && saved.preferences.stream.right == 1,
+	        "Device change retained an obsolete saved format after recovery");
+	saved.preferences.stream = {96000, 1024, 6, 7};
+	runtime = edited; edited.preferences.stream.sample_rate = 48000;
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.preferences.stream.sample_rate == 48000 && saved.preferences.stream.buffer_frames == 0 &&
+	        saved.preferences.stream.left == 0 && saved.preferences.stream.right == 1,
+	        "Rate change retained an obsolete saved channel route");
 	ui::menu_state menu;
 	for (const auto &groups : {ui::menu_ports(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
 		const auto &last = groups.back();
