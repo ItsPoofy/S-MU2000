@@ -8,7 +8,13 @@
 //   ・上に絵が 3 つ: 波の形、音量の動き、音程の動き
 // 値は全部「コマ」（60 分の 1 秒）と「段」（音量の 16 段）。当時のゲームの音作りと同じ刻み。
 // 触った値はすぐ音源へ渡る（鳴っている音にも効く）。組（128 個の音色）は fc_banks.h が設定のフォルダーに保存する。
-// 何も開いていない状態で触ると、初期の音色の写しから新しい組を作る
+// 何も開いていない状態で触ると、初期の音色の写しから新しい組を作る。
+//
+// つまみの見出しには、その値を動かすコントロールチェンジの番号が出る。番号は「CC の割り当て」で付け替えられる
+// （fc_banks.h の cc_map。FC ボード全部に共通で、設定に覚える）。
+// シーケンサーがコントロールチェンジで動かしている値は、つまみにその値を出す（見出しの番号に色）。
+// その値は曲のもので、組には入っていない。ここでその欄を動かすと、動かした欄だけを
+// 組に書き、その欄をコントロールチェンジから引き取る（音源の側の値を捨てる）。ほかの欄は組の値のまま
 
 #ifndef S_MU2000_UI_FC_VOICE_EDITOR_H
 #define S_MU2000_UI_FC_VOICE_EDITOR_H
@@ -24,14 +30,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 namespace ui {
 
 class fc_voice_editor
 {
 public:
-	// program はいま選んでいるプログラム（0-127）。target はどのボードの組か（0-2 = PLG-1・2・3、fc_banks::MULTI = 16 パートのボード）
-	void draw(int program, bridge &br, int target)
+	// program はいま選んでいるプログラム（0-127）。target はどのボードの組か（0-2 = PLG-1・2・3、fc_banks::MULTI = 16 パートのボード）。
+	// live は、そのボードがいま鳴らす音色（mu2000::fc_board_live。無ければ組の音色だけを出す）。channel は 16 パートのボードのチャンネル
+	void draw(int program, bridge &br, int target, const mu2000::fc_live *live = nullptr, int channel = 0)
 	{
 		namespace fb = fc_banks;
 		namespace vb = smu2000::vboard;
@@ -47,6 +55,33 @@ public:
 		std::shared_ptr<const fb::bank> cur = fb::current(target);
 		fb::voice v = cur ? cur->prog[size_t(program)] : vb::fc_default_voice(program);
 		bool changed = false;
+		// コントロールチェンジで動いている欄（bit = vb::fc_param）には、その値を出す。ここで動かして引き取ったばかりの欄は、
+		// 音源からの答えが 1 コマ遅れて来るので、少しの間は見ない
+		const fb::voice base = v;
+		if (m_dropped_frames > 0 && --m_dropped_frames == 0)
+			m_dropped = 0;
+		u32 cc = 0;
+		if (live && live->program == program) {
+			cc = live->edited & ~m_dropped;
+			for (int i = 0; i < vb::FC_PARAMS; i++)
+				if (cc & (1u << i))
+					vb::fc_set_param(v, i, vb::fc_get_param(live->voice, i));
+		}
+		const fb::voice shown = v;
+		const vb::fc_cc_map &ccs = fb::cc_map();
+		// 欄の番号の札（「CC27」。割り当てが無ければ出さない）。コントロールチェンジで動いている欄は色を付ける
+		const auto cc_tag = [&](int param, bool same_line) {
+			if (!ccs.cc[param])
+				return;
+			if (same_line)
+				ImGui::SameLine();
+			if (cc & (1u << param))
+				ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(cc_color()), "CC%d", ccs.cc[param]);
+			else
+				ImGui::TextDisabled("CC%d", ccs.cc[param]);
+		};
+		bool whole = false;                 // 音色を丸ごと入れ替えた（初期に戻す・貼る）
+		u32 drop = 0;                       // 音源の側で捨ててもらう欄
 
 		// ---- 組（128 個の音色のまとまり）
 		{
@@ -123,7 +158,7 @@ public:
 		ImGui::SameLine();
 		if (ImGui::SmallButton(UI_TEXT(fme_reset_voice, "Initial voice"))) {
 			v = vb::fc_default_voice(program);
-			changed = true;
+			changed = whole = true;
 		}
 		if (ImGui::IsItemHovered())
 			xgui::hint("%s", UI_TEXT(fme_reset_tip, "Initial voice\nPuts the built-in voice of this program number back."));
@@ -136,9 +171,35 @@ public:
 		ImGui::BeginDisabled(!has_clip());
 		if (ImGui::SmallButton(UI_TEXT(fme_paste, "Paste"))) {
 			v = clip();
-			changed = true;
+			changed = whole = true;
 		}
 		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::SmallButton(UI_TEXT(fce_cc_assign, "CC assign...")))
+			ImGui::OpenPopup("fccc");
+		if (ImGui::IsItemHovered())
+			xgui::hint("%s", UI_TEXT(fce_cc_assign_tip, "Control change numbers\nEvery value of this editor can be moved from a sequencer with a control change; the number is shown beside each control. Here you choose which number moves which value. The numbers are shared by all FC boards and remembered in the settings."));
+		assign_popup(br);
+
+		// コントロールチェンジで動いている欄があれば、その番号を 1 行で
+		if (cc) {
+			std::string list;
+			for (int i = 0; i < vb::FC_PARAMS; i++)
+				if (cc & (1u << i))
+					list += (list.empty() ? "CC" : " CC") + std::to_string(ccs.cc[i]);
+			ImGui::PushStyleColor(ImGuiCol_Text, cc_color());
+			ImGui::TextWrapped(UI_TEXT(fce_cc_fmt, "Moved by control change: %s"), list.c_str());
+			ImGui::PopStyleColor();
+			if (ImGui::IsItemHovered())
+				xgui::hint("%s", UI_TEXT(fce_cc_tip, "Values moved by control change\nThe highlighted values are coming from the sequencer as control changes. They belong to the song, not to the voice set: a program change puts the set's values back. Moving one of them here takes it over from the control change and writes it into the set."));
+			ImGui::SameLine();
+			if (ImGui::SmallButton(UI_TEXT(fce_cc_drop, "Back to the set"))) {
+				drop = cc;
+				v = base;
+			}
+			if (ImGui::IsItemHovered())
+				xgui::hint("%s", UI_TEXT(fce_cc_drop_tip, "Back to the set\nDrops the values that came by control change, as a program change would. The voice set is not changed."));
+		}
 
 		const bool square = v.wave == fb::voice::SQUARE;
 		const bool triangle = v.wave == fb::voice::TRIANGLE;
@@ -146,8 +207,10 @@ public:
 		// ---- 3 列: 波・音量・音程。それぞれ上に絵、下につまみ
 		if (ImGui::BeginTable("fcedit", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
 			const float pic_h = fs * 4.5f;
-			const auto int_slider = [&](const char *label, const char *id, int value, int lo, int hi, const char *fmt, const char *tip) {
+			// param は vb::fc_param。見出しの右に、その欄のコントロールチェンジの番号
+			const auto int_slider = [&](int param, const char *label, const char *id, int value, int lo, int hi, const char *fmt, const char *tip) {
 				ImGui::TextDisabled("%s", label);
+				cc_tag(param, true);
 				ImGui::SetNextItemWidth(-FLT_MIN);
 				int x = value;
 				if (ImGui::SliderInt(id, &x, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp))
@@ -174,9 +237,10 @@ public:
 				}
 				if (ImGui::IsItemHovered() || ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
 					xgui::hint("%s", UI_TEXT(fce_wave_tip, "Wave\nSquare: the lead and chord sound, its tone set by the duty below. Triangle: the 16-step bass wave; as on the real chip it has no volume, it sounds or it does not. Noise: hiss, snares, explosions. Metal noise: a short loop of noise, buzzing and metallic. The key sets how fast the noise runs."));
+				cc_tag(vb::FC_P_WAVE, false);
 			}
 			ImGui::BeginDisabled(!square);
-			v.duty_len = u8(int_slider(UI_TEXT(fce_duty_len, "Duty steps"), "##dlen", v.duty_len, 1, 4, "%d",
+			v.duty_len = u8(int_slider(vb::FC_P_DUTY_LEN, UI_TEXT(fce_duty_len, "Duty steps"), "##dlen", v.duty_len, 1, 4, "%d",
 			                           UI_TEXT(fce_duty_len_tip, "Duty steps\nHow many duty settings the square wave cycles through. 1 keeps one tone; 2 to 4 switch between them for the shimmering, sweeping sounds.")));
 			for (int i = 0; i < v.duty_len; i++) {
 				static const char *const DUTY[4] = { "1/8", "1/4", "1/2", "3/4" };
@@ -201,10 +265,11 @@ public:
 					if (ImGui::IsItemHovered())
 						xgui::hint("%s", UI_TEXT(fce_duty_tip, "Duty\nHow much of each cycle the square wave stays high. 1/2 is hollow and round, 1/4 brighter, 1/8 thin and nasal. 3/4 sounds like 1/4 on its own but differs inside a sequence."));
 				}
+				cc_tag(vb::FC_P_DUTY1 + i, true);
 				ImGui::PopID();
 			}
 			if (v.duty_len > 1)
-				v.duty_frames = u8(int_slider(UI_TEXT(fce_duty_frames, "Frames per step"), "##dfr", v.duty_frames, 1, 30, "%d",
+				v.duty_frames = u8(int_slider(vb::FC_P_DUTY_FRAMES, UI_TEXT(fce_duty_frames, "Frames per step"), "##dfr", v.duty_frames, 1, 30, "%d",
 				                              UI_TEXT(fce_frames_tip, "Frames per step\nHow long each step lasts, in frames of 1/60 second. 1 is the fastest.")));
 			ImGui::EndDisabled();
 
@@ -214,20 +279,20 @@ public:
 			picture("fcvol", pic_h, [&](ImDrawList *dl, ImVec2 a, ImVec2 b) { draw_volume(dl, a, b, v); });
 			if (triangle)
 				ImGui::TextWrapped("%s", UI_TEXT(fce_tri_note, "The triangle has no volume steps: these only decide when it stops."));
-			v.decay = u8(int_slider(UI_TEXT(fce_decay, "Fade while held"), "##dec", v.decay, 0, 60, v.decay ? UI_TEXT(fce_decay_fmt, "1 step / %d frames") : UI_TEXT(fce_decay_off, "holds"),
+			v.decay = u8(int_slider(vb::FC_P_DECAY, UI_TEXT(fce_decay, "Fade while held"), "##dec", v.decay, 0, 60, v.decay ? UI_TEXT(fce_decay_fmt, "1 step / %d frames") : UI_TEXT(fce_decay_off, "holds"),
 			                        UI_TEXT(fce_decay_tip, "Fade while held\nWhile the key is down the volume drops one of its 16 steps every this many frames (1/60 second). 0 holds the volume. 4 is the plucked sound of the initial voices 9-16; 1 is a short blip.")));
 			ImGui::BeginDisabled(!v.decay);
-			v.floor = u8(int_slider(UI_TEXT(fce_floor, "Stops at step"), "##flo", v.floor, 0, 15, v.floor ? "%d" : UI_TEXT(fce_floor_off, "0 (silence)"),
+			v.floor = u8(int_slider(vb::FC_P_FLOOR, UI_TEXT(fce_floor, "Stops at step"), "##flo", v.floor, 0, 15, v.floor ? "%d" : UI_TEXT(fce_floor_off, "0 (silence)"),
 			                        UI_TEXT(fce_floor_tip, "Stops at step\nThe fade stops at this volume step and holds there while the key is down. 0 fades to silence. A soft key press that starts below this step does not fade.")));
 			ImGui::EndDisabled();
-			v.release = u8(int_slider(UI_TEXT(fce_release, "Fade after release"), "##rel", v.release, 1, 15, UI_TEXT(fce_release_fmt, "%d steps / frame"),
+			v.release = u8(int_slider(vb::FC_P_RELEASE, UI_TEXT(fce_release, "Fade after release"), "##rel", v.release, 1, 15, UI_TEXT(fce_release_fmt, "%d steps / frame"),
 			                          UI_TEXT(fce_release_tip, "Fade after release\nAfter the key is let go the volume drops this many steps every frame. 15 cuts at once, 2 is the initial voices, 1 leaves a short tail of a quarter second.")));
 
 			// ======== 音程
 			ImGui::TableNextColumn();
 			ImGui::SeparatorText(UI_TEXT(fce_pitch, "Pitch"));
 			picture("fcpitch", pic_h, [&](ImDrawList *dl, ImVec2 a, ImVec2 b) { draw_pitch(dl, a, b, v); });
-			v.arp_len = u8(int_slider(UI_TEXT(fce_arp_len, "Arpeggio steps"), "##alen", v.arp_len, 1, 4, "%d",
+			v.arp_len = u8(int_slider(vb::FC_P_ARP_LEN, UI_TEXT(fce_arp_len, "Arpeggio steps"), "##alen", v.arp_len, 1, 4, "%d",
 			                          UI_TEXT(fce_arp_len_tip, "Arpeggio steps\nOne key plays up to four pitches in turn, fast enough to sound like a chord: the classic way to get harmony out of one channel. 1 turns it off.")));
 			if (v.arp_len > 1) {
 				const float w = (ImGui::GetContentRegionAvail().x - st.ItemSpacing.x * (v.arp_len - 1)) / v.arp_len;
@@ -245,25 +310,30 @@ public:
 						xgui::hint("%s", UI_TEXT(fce_arp_tip, "Arpeggio step\nSemitones above (or below) the key for this step. 0, +4, +7 is a major chord; 0, +3, +7 minor; 0, +12 the octave trill. Drag, or double-click to type."));
 					ImGui::PopID();
 				}
-				v.arp_frames = u8(int_slider(UI_TEXT(fce_arp_frames, "Frames per step"), "##afr", v.arp_frames, 1, 30, "%d",
+				// 並びの番号の札（つまみの下に、同じ順で）
+				for (int i = 0, shown_tags = 0; i < v.arp_len; i++)
+					if (ccs.cc[vb::FC_P_ARP1 + i])
+						cc_tag(vb::FC_P_ARP1 + i, shown_tags++ > 0);
+				v.arp_frames = u8(int_slider(vb::FC_P_ARP_FRAMES, UI_TEXT(fce_arp_frames, "Frames per step"), "##afr", v.arp_frames, 1, 30, "%d",
 				                             UI_TEXT(fce_frames_tip, "Frames per step\nHow long each step lasts, in frames of 1/60 second. 1 is the fastest.")));
 			}
 			{
-				int sw = int_slider(UI_TEXT(fce_sweep, "Starts off pitch by"), "##swp", v.sweep, -48, 48, UI_TEXT(fce_sweep_fmt, "%+d semitones"),
+				int sw = int_slider(vb::FC_P_SWEEP, UI_TEXT(fce_sweep, "Starts off pitch by"), "##swp", v.sweep, -48, 48, UI_TEXT(fce_sweep_fmt, "%+d semitones"),
 				                    UI_TEXT(fce_sweep_tip, "Starts off pitch\nThe note starts this many semitones above (or below) the key and slides to it. A high start falling fast is a kick drum or a tom on the triangle, a laser on the square; a low start rising is a jump."));
-				v.sweep = s8(sw);
 				// ずれを決めたのにコマが 0 だと何も起きないので、最初に動かしたときに 6 コマにする
-				if (v.sweep && !v.sweep_frames)
+				// （コントロールチェンジで来たずれを出しているだけのときは、コマに触らない）
+				if (sw != v.sweep && sw && !v.sweep_frames)
 					v.sweep_frames = 6;
+				v.sweep = s8(sw);
 			}
 			ImGui::BeginDisabled(!v.sweep);
-			v.sweep_frames = u8(int_slider(UI_TEXT(fce_sweep_frames, "Reaches pitch in"), "##swf", v.sweep_frames, v.sweep ? 1 : 0, 60, UI_TEXT(fce_frames_fmt, "%d frames"),
+			v.sweep_frames = u8(int_slider(vb::FC_P_SWEEP_FRAMES, UI_TEXT(fce_sweep_frames, "Reaches pitch in"), "##swf", v.sweep_frames, v.sweep ? 1 : 0, 60, UI_TEXT(fce_frames_fmt, "%d frames"),
 			                               UI_TEXT(fce_sweep_frames_tip, "Reaches pitch in\nHow many frames (1/60 second) the slide takes. It moves in steps, one per frame.")));
 			ImGui::EndDisabled();
-			v.vib_depth = u8(int_slider(UI_TEXT(fce_vib, "Vibrato"), "##vib", v.vib_depth, 0, 100, v.vib_depth ? UI_TEXT(fce_vib_fmt, "%d cents") : UI_TEXT(fce_off, "off"),
+			v.vib_depth = u8(int_slider(vb::FC_P_VIB_DEPTH, UI_TEXT(fce_vib, "Vibrato"), "##vib", v.vib_depth, 0, 100, v.vib_depth ? UI_TEXT(fce_vib_fmt, "%d cents") : UI_TEXT(fce_off, "off"),
 			                            UI_TEXT(fce_vib_tip, "Vibrato\nA vibrato this voice always has, on top of the one the modulation wheel adds. In cents (100 is a semitone each way), about 6 times a second.")));
 			ImGui::BeginDisabled(!v.vib_depth);
-			v.vib_delay = u8(int_slider(UI_TEXT(fce_vib_delay, "Vibrato starts after"), "##vdl", v.vib_delay, 0, 120, UI_TEXT(fce_frames_fmt, "%d frames"),
+			v.vib_delay = u8(int_slider(vb::FC_P_VIB_DELAY, UI_TEXT(fce_vib_delay, "Vibrato starts after"), "##vdl", v.vib_delay, 0, 120, UI_TEXT(fce_frames_fmt, "%d frames"),
 			                            UI_TEXT(fce_vib_delay_tip, "Vibrato starts after\nHow long a note is held straight before the vibrato comes in, in frames (60 is one second). Short notes stay clean; long ones sing.")));
 			ImGui::EndDisabled();
 			ImGui::EndTable();
@@ -271,6 +341,19 @@ public:
 
 		if (changed) {
 			vb::fc_clamp(v);
+			if (whole) {
+				drop |= cc;
+			} else if (cc) {
+				// コントロールチェンジの値を出しているとき: 動かした欄だけを組に書き、その欄をコントロールチェンジから引き取る
+				const fb::voice moved = v;
+				v = base;
+				std::memcpy(v.name, moved.name, sizeof(v.name));
+				for (int i = 0; i < vb::FC_PARAMS; i++)
+					if (vb::fc_get_param(moved, i) != vb::fc_get_param(shown, i)) {
+						vb::fc_set_param(v, i, vb::fc_get_param(moved, i));
+						drop |= cc & (1u << i);
+					}
+			}
 			std::shared_ptr<fb::bank> nb;
 			if (cur) {
 				nb = std::make_shared<fb::bank>(*cur);
@@ -280,6 +363,14 @@ public:
 			}
 			nb->prog[size_t(program)] = v;
 			fb::commit(br, target, nb);
+		}
+		if (drop) {
+			m_dropped |= drop;
+			m_dropped_frames = 4;
+			br.post([slot = target == fb::MULTI ? -1 : target, channel, drop](mu2000 &mu) {
+				mu.fc_board_clear_edits(slot, channel, drop);
+				return std::string();
+			});
 		}
 		// つまみを離したら、ファイルへ書く
 		if (fb::unsaved(target) && !ImGui::IsAnyItemActive()) {
@@ -301,6 +392,80 @@ private:
 
 	static ImU32 line_color() { return IM_COL32(110, 200, 255, 255); }
 	static ImU32 axis_color() { return IM_COL32(80, 90, 110, 255); }
+	static ImU32 cc_color() { return IM_COL32(255, 190, 90, 255); }       // コントロールチェンジで動いている欄
+
+	// 「CC の割り当て」の小窓。欄ごとに番号を決める（0 = 割り当てない）。使えない番号は飛ばし、ほかの欄が使っている
+	// 番号を選ぶと、そちらの割り当てが外れる
+	static void assign_popup(bridge &br)
+	{
+		namespace fb = fc_banks;
+		namespace vb = smu2000::vboard;
+		if (!ImGui::BeginPopup("fccc"))
+			return;
+		const float fs = ImGui::GetFontSize();
+		char duty[4][24], arp[4][24];
+		for (int i = 0; i < 4; i++) {
+			std::snprintf(duty[i], sizeof(duty[i]), UI_TEXT(fce_cc_duty_fmt, "Duty %d"), i + 1);
+			std::snprintf(arp[i], sizeof(arp[i]), UI_TEXT(fce_cc_arp_fmt, "Arpeggio %d"), i + 1);
+		}
+		struct row { int param; const char *name; };
+		const row wave[] = {
+			{ vb::FC_P_WAVE, UI_TEXT(fce_wave, "Wave") }, { vb::FC_P_DUTY_LEN, UI_TEXT(fce_duty_len, "Duty steps") },
+			{ vb::FC_P_DUTY_FRAMES, UI_TEXT(fce_duty_frames, "Frames per step") },
+			{ vb::FC_P_DUTY1, duty[0] }, { vb::FC_P_DUTY2, duty[1] }, { vb::FC_P_DUTY3, duty[2] }, { vb::FC_P_DUTY4, duty[3] },
+		};
+		const row volume[] = {
+			{ vb::FC_P_DECAY, UI_TEXT(fce_decay, "Fade while held") }, { vb::FC_P_FLOOR, UI_TEXT(fce_floor, "Stops at step") },
+			{ vb::FC_P_RELEASE, UI_TEXT(fce_release, "Fade after release") },
+		};
+		const row pitch[] = {
+			{ vb::FC_P_ARP_LEN, UI_TEXT(fce_arp_len, "Arpeggio steps") }, { vb::FC_P_ARP_FRAMES, UI_TEXT(fce_arp_frames, "Frames per step") },
+			{ vb::FC_P_ARP1, arp[0] }, { vb::FC_P_ARP2, arp[1] }, { vb::FC_P_ARP3, arp[2] }, { vb::FC_P_ARP4, arp[3] },
+			{ vb::FC_P_SWEEP, UI_TEXT(fce_sweep, "Starts off pitch by") }, { vb::FC_P_SWEEP_FRAMES, UI_TEXT(fce_sweep_frames, "Reaches pitch in") },
+			{ vb::FC_P_VIB_DEPTH, UI_TEXT(fce_vib, "Vibrato") }, { vb::FC_P_VIB_DELAY, UI_TEXT(fce_vib_delay, "Vibrato starts after") },
+		};
+		const auto column = [&](const char *title, const row *rows, size_t n) {
+			ImGui::TableNextColumn();
+			ImGui::SeparatorText(title);
+			for (size_t k = 0; k < n; k++) {
+				const int now = fb::cc_map().cc[rows[k].param];
+				ImGui::PushID(rows[k].param);
+				ImGui::SetNextItemWidth(fs * 5.5f);
+				int x = now;
+				if (ImGui::InputInt("##cc", &x, 1, 10)) {
+					// 使えない番号は、動かした向きへ飛ばす。端まで行ったら 0（割り当てない）か、元のまま
+					const int dir = x >= now ? 1 : -1;
+					x = std::clamp(x, 0, 119);
+					while (x > 0 && x < 120 && !vb::fc_cc_allowed(x))
+						x += dir;
+					if (x >= 120)
+						x = now;
+					fb::assign_cc(br, rows[k].param, std::max(x, 0));
+				}
+				ImGui::SameLine();
+				if (now)
+					ImGui::TextUnformatted(rows[k].name);
+				else
+					ImGui::TextDisabled("%s  (%s)", rows[k].name, UI_TEXT(fce_off, "off"));
+				ImGui::PopID();
+			}
+		};
+		if (ImGui::BeginTable("fccct", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV)) {
+			ImGui::TableNextRow();
+			column(UI_TEXT(fce_wave, "Wave"), wave, std::size(wave));
+			column(UI_TEXT(fce_volume, "Volume"), volume, std::size(volume));
+			column(UI_TEXT(fce_pitch, "Pitch"), pitch, std::size(pitch));
+			ImGui::EndTable();
+		}
+		if (ImGui::SmallButton(UI_TEXT(fce_cc_defaults, "Default numbers")))
+			fb::reset_cc(br);
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::PushTextWrapPos(fs * 40.0f);
+		ImGui::TextWrapped("%s", UI_TEXT(fce_cc_assign_note, "0 leaves a value without a control change. A number can move one value only: choosing one that is in use takes it away from the other value. Numbers the board or the MU part already listens to are skipped (0, 1, 6, 7, 10, 11, 32, 38, 64, 91, 93, 94, 96-101, and 120 up). Values are the editor's numbers as they are; semitone offsets are sent with 64 as 0."));
+		ImGui::PopTextWrapPos();
+		ImGui::PopStyleColor();
+		ImGui::EndPopup();
+	}
 
 	// 絵の枠。中を描く関数に左上と右下を渡す
 	template <typename F> static void picture(const char *id, float h, F &&draw)
@@ -430,6 +595,8 @@ private:
 	std::string m_note, m_name_for;
 	char m_set_name[15] = {};
 	int m_name_target = -1;
+	u32 m_dropped = 0;                 // ここで動かして、コントロールチェンジから引き取ったばかりの欄
+	int m_dropped_frames = 0;
 };
 
 } // namespace ui

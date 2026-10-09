@@ -483,6 +483,7 @@ public:
 		fc_banks::save_all(br);
 		for (int i = 0; i < fc_banks::TARGETS; i++)
 			r.board_fc[i] = fc_banks::current_path(i);
+		r.board_fc_cc = fc_banks::cc_map() == smu2000::vboard::fc_cc_map() ? std::string() : smu2000::vboard::fc_cc_text(fc_banks::cc_map());
 		write_settings_file(path, collect_settings(r));
 	}
 
@@ -1161,6 +1162,10 @@ public:
 				else
 					std::fprintf(stderr, CLI_T("Board file: %s (%s)\n", "ボードのファイル: %s（%s）\n"), err.c_str(), r.board_file.c_str());
 			}
+			// FC ボードの音色の値を動かすコントロールチェンジの番号（FC ボード全部に共通）
+			fc_banks::adopt_cc(smu2000::vboard::fc_cc_parse(r.board_fc_cc));
+			if (eng)
+				eng->mu.set_fc_cc_map(fc_banks::cc_map());
 			// FC ボードの音色の組は、ボードごと（PLG-1・2・3 と 16 パートのボード）
 			for (int i = 0; eng && i < fc_banks::TARGETS; i++) {
 				if (r.board_fc[i].empty())
