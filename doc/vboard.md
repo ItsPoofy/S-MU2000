@@ -100,6 +100,31 @@ FC ボードの音色は書き換えられる。「音色」の窓で、FC ボ�
 MIDI のバンクセレクトとプログラムチェンジを自分で聞くのに加えて、ワーク RAM のバンクとプログラムが変わったのを見て追う
 （`mu2000::vb_follow_ram`）。設定には `board4=`・`board4_part=` 〜 `board6=`・`board6_part=` で残る。
 
+## Domino から FC ボードの音色を選ぶ
+
+`tools/domino/fcdef.py` が、Domino（takabosoft）の音源定義ファイルに FC ボードの音色の並びを入れる。
+Domino のトラックの音色欄でマップ「FC BOARD PLG-n」を選ぶと、そのボードのバンク（MSB 90〜95・LSB 0）と
+プログラムチェンジが入る。
+
+```bash
+# FC ボードだけの定義ファイル
+python tools/domino/fcdef.py "S-MU2000 FC board.xml"
+# いま使っている定義ファイルの写しに、FC ボードの並びを足す（XG の音色と両方選べる）
+python tools/domino/fcdef.py --into S-MU2000.xml "S-MU2000+FC.xml"
+```
+
+出来たファイルを Domino の `Module` フォルダーに置き、環境設定の音源で選ぶ。
+
+| マップ | 送るもの |
+|---|---|
+| FC BOARD PLG-1 (MSB 90) 〜 PLG-6 (MSB 95) | バンクセレクトとプログラムチェンジ。1 パートの FC ボード（差込口ごと） |
+| FC BOARD 16 parts (port E) | プログラムチェンジだけ。16 パートの FC ボード |
+
+並ぶのは初期の 16 個。自分で作った音色の組を使っているボードは、`--set 1=<組のファイル>`（16 パートのボードは
+`--set 16=`）を付けると、その組の名前で 128 個並ぶ。`--set` を付けなくても、設定ファイル（`gui.ini`）の
+`board_fc=` などに組が入っていれば、そこから読む。音色名はここで付けたものか使う人が付けたものなので、
+FC ボードだけの定義ファイルは配って差し支えない。
+
 ## 中の作り
 
 - `mu2000::set_virtual_board(kind, part)` で挿す・外す
