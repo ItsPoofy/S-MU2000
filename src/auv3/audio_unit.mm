@@ -23,13 +23,25 @@
 // 描き出しの中では確保も錠もしない。器は allocateRenderResources で取る。
 
 #import "audio_unit.h"
-#import "view_controller.h"
 
-#import <AVFoundation/AVFoundation.h>
+// The panel is view_controller.h (AppKit) on macOS, view_controller_ios.h
+// (UIKit) on iOS: same shared editor through src/vst3/panel_uiview.mm, only the
+// host-side view class differs. Nothing else in this file is AppKit:
+// AUAudioUnit, AUMIDIEventList and AUEventBlock are all there on iOS.
+#import <TargetConditionals.h>
+#if !TARGET_OS_IPHONE
+#import "view_controller.h"
 #import <Cocoa/Cocoa.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#else
+#import "view_controller_ios.h"
+#import <CoreAudioKit/CoreAudioKit.h>
+#endif
+
+#import <AVFoundation/AVFoundation.h>
 #import <CoreMIDI/CoreMIDI.h>
 
+#include "compat/cli_text.h"
 #include "ui/midi_split.h"
 #include "vst3/engine.h"
 
@@ -507,6 +519,7 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 
 // 画面。AUv2・VST3 と同じパネル（view_controller.mm）。拡張の中で動くので
 // engine は直接渡せる（AUv2 の kEngineProperty 回りは要らない）
+#if !TARGET_OS_IPHONE
 - (void)requestViewControllerWithCompletionHandler:(void (^)(NSViewController * __nullable))completionHandler
 {
 	// **view を触るのは主の糸で。** ホストは普通は主の糸からこれを呼ぶが、
@@ -516,29 +529,61 @@ static NSString *const kStateKey = @"S-MU2000.nvram";
 	AUAudioUnit *au = self;
 	dispatch_async(dispatch_get_main_queue(), ^{
 		// What was handed back goes to the log: "the host asked for a view and
-		// nothing appeared" is told apart by this line, with the "画面を作る"
-		// (building the panel) line before it
-		eng->log_line("画面を頼まれた");
+		// nothing appeared" is told apart by this line, with the
+		// CLI_T("building the panel", "画面を作る") line before it
+		eng->log_line(CLI_T("asked for a view", "画面を頼まれた"));
 		SMU2000ViewControllerV3 *vc =
 		    [[SMU2000ViewControllerV3 alloc] initWithEngine:eng audioUnit:au];
 		NSViewController *answer = (vc && vc.view) ? vc : nil;
 		char b[96];
 		if (answer)
-			std::snprintf(b, sizeof(b), "画面を渡した %g x %g",
+			std::snprintf(b, sizeof(b), CLI_T("gave the view %g x %g", "画面を渡した %g x %g"),
 			              answer.view.frame.size.width, answer.view.frame.size.height);
 		else
-			std::snprintf(b, sizeof(b), "画面を渡せない");
+			std::snprintf(b, sizeof(b), CLI_T("cannot give the view", "画面を渡せない"));
 		eng->log_line(b);
 		if (completionHandler)
 			completionHandler(answer);
 	});
 }
+#endif
+
+#if TARGET_OS_IPHONE
+// The iOS twin of the method above: same contract (main thread, logged answer),
+// UIViewController instead of NSViewController. Hosts that embed through the
+// principal AUViewController never call this; hosts that ask (auval-style
+// validation, some DAWs) get the same panel.
+- (void)requestViewControllerWithCompletionHandler:(void (^)(UIViewController * __nullable))completionHandler
+{
+	// **view を触るのは主の糸で。** The mac twin's note applies unchanged:
+	// loadView lays out preferredContentSize, which throws off-main-thread.
+	smu2000::vst3::engine *eng = _engine.get();
+	AUAudioUnit *au = self;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		eng->log_line(CLI_T("asked for a view", "画面を頼まれた"));
+		SMU2000ViewControllerV3 *vc =
+		    [[SMU2000ViewControllerV3 alloc] initWithEngine:eng audioUnit:au];
+		UIViewController *answer = (vc && vc.view) ? vc : nil;
+		char b[96];
+		if (answer)
+			std::snprintf(b, sizeof(b), CLI_T("gave the view %g x %g", "画面を渡した %g x %g"),
+			              answer.view.frame.size.width, answer.view.frame.size.height);
+		else
+			std::snprintf(b, sizeof(b), CLI_T("cannot give the view", "画面を渡せない"));
+		eng->log_line(b);
+		if (completionHandler)
+			completionHandler(answer);
+	});
+}
+#endif
 
 // 画面の置き方。パネルは決まった大きさ（1400x360）1 枚だけなので、
-// どれを渡されても全部使えると答える
+// どれを渡されても全部使えると答える。Foundation only (NSIndexSet/NSArray),
+// so this compiles on iOS as it stands.
 - (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations
 {
-	_engine->log_line("置き方を聞かれた");
+	_engine->log_line(CLI_T("asked which view configurations are supported",
+	                          "置き方を聞かれた"));
 	NSMutableIndexSet *s = [NSMutableIndexSet indexSet];
 	for (NSUInteger i = 0; i < availableViewConfigurations.count; i++)
 		[s addIndex:i];

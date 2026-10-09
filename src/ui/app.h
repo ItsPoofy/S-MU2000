@@ -80,7 +80,26 @@ class app
 {
 public:
 	app(bridge &b, midi_in *mi, midi_out &tha, midi_out &thb, midi_out &muo)
-	    : br(b), midi(mi), thru_a(tha), thru_b(thb), mu_out(muo) {}
+	    : br(b), midi(mi), thru_a(tha), thru_b(thb), mu_out(muo)
+	{
+		// The Sampling window asks the bridge which recording device is open;
+		// the answer is ours, and it changes from two places (that window's
+		// combo and the panel's A/D INPUT menu), so it is a question and not a
+		// value either of them writes.
+		b.set_ain_current_fn([this] { return ain_name; });
+	}
+
+	// A backstop, not the plan: shutdown() joins both of these, but a process
+	// can leave by a path that never reaches it (see shutdown()), and a
+	// std::thread destroyed while joinable calls std::terminate. Joining here
+	// turns that abort into a clean exit.
+	~app()
+	{
+		if (m_ain_lister.joinable())
+			m_ain_lister.join();
+		if (reboot.joinable())
+			reboot.join();
+	}
 
 	// ---- shared state (both windows keep the same)
 
@@ -144,6 +163,7 @@ public:
 	u64 reported_drops = 0;          // MIDI drops the UI thread last reported
 
 	std::thread reboot;              // the factory-reset reboot, while it runs
+	bool m_shut = false;              // shutdown() has run (see it: it is idempotent)
 
 	void join_reboot()
 	{
@@ -354,17 +374,38 @@ public:
 	// Which popup the point asks for. The
 	// card slot, PHONES and A/D INPUT have their own; everywhere else gets
 	// the port picker
-	virtual std::vector<menu_group> context_menu(int x, int y)
+	// Which menu a press opens. Named and public because a platform adds groups
+	// of its own to some of these and not others - iOS puts Bluetooth and
+	// network MIDI in the menus that carry MIDI at all, and the ROM import in
+	// the card menu, since it is a storage thing - and it should not have to
+	// repeat the hit test to find out which one it is looking at.
+	enum class menu_kind { none, card, phones, power, ain, ports };
+	menu_kind menu_kind_at(int x, int y) const
 	{
 		if (panel.on_card_slot(x, y))
-			return menu_card(menu_snapshot());
+			return menu_kind::card;
 		if (panel.on_phones(x, y))
-			return menu_phones(menu_snapshot());
+			return menu_kind::phones;
 		if (panel.on_power(x, y))
-			return menu_power(menu_snapshot());
+			return menu_kind::power;
 		if (panel.on_ad_input(x, y))
+			return menu_kind::ain;
+		return menu_kind::ports;
+	}
+	virtual std::vector<menu_group> context_menu(int x, int y)
+	{
+		switch (menu_kind_at(x, y)) {
+		case menu_kind::card:
+			return menu_card(menu_snapshot());
+		case menu_kind::phones:
+			return menu_phones(menu_snapshot());
+		case menu_kind::power:
+			return menu_power(menu_snapshot());
+		case menu_kind::ain:
 			return menu_ain_only(audio_in::list(), ain_name);
-		return menu_ports(menu_snapshot());
+		default:
+			return menu_ports(menu_snapshot());
+		}
 	}
 
 	// ---- the event verbs, in pump vocabulary. Every pump (wnd_proc, the
@@ -607,9 +648,8 @@ public:
 			return;
 		if (m_ain_lister.joinable())
 			m_ain_lister.join();
-		const std::string current = ain_name;
-		m_ain_lister = std::thread([this, current] {
-			br.set_ain_devices(audio_in::list(), current);
+		m_ain_lister = std::thread([this] {
+			br.set_ain_devices(audio_in::list());
 			m_ain_listing.store(false);
 		});
 	}
@@ -645,6 +685,20 @@ public:
 			f();
 	}
 
+	// The engine reads A/D input through its own pointer (engine::fill() calls
+	// ain->pop() once per sample), so opening a device is only half the job -
+	// the machine has to be told about it. This cannot live in make_audio(),
+	// because the front ends make the objects at different points: the desktops
+	// wire the engine before run() makes them, iOS the other way round. It goes
+	// where the device opens instead, which both paths below share.
+	// open=false also covers a device that failed to open: an engine pulling
+	// from an input that is not there would only count emptiness.
+	void attach_ain(bool open)
+	{
+		if (eng)
+			eng->ain = open ? ain : nullptr;
+	}
+
 	bool choose_ain(int dev, bool keep = false)
 	{
 		if (!keep)
@@ -654,15 +708,18 @@ public:
 		ain->stop();
 		if (dev < 0) {
 			ain_name.clear();
+			attach_ain(false);
 		} else {
 			const auto names = audio_in::list();
 			if (dev < int(names.size())) {
 				std::string err;
 				if (!ain->start(names[size_t(dev)], err)) {
+					attach_ain(false);
 					std::fprintf(stderr, "A/D INPUT: %s\n", err.c_str());
 					if (!keep)
 						menu_error(err);
 				} else {
+					attach_ain(true);
 					std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"),
 					            ain->device_name().c_str(),
 					            ain->format_line().c_str());
@@ -837,6 +894,29 @@ public:
 			std::printf(CLI_T("  This song uses %d ports. C and D are not supported, so ports 3 and up are %s\n", "  この曲は %d 口ぶん。C・D は未対応なので、口 3 以降は%s\n"),
 			            play.ports_used(),
 			            play.fold_extra_ports() ? CLI_T("played on top of A and B", " A・B に重ねて鳴らす") : CLI_T("not played", "鳴らさない"));
+		std::fflush(stdout);
+		return true;
+	}
+
+	// The same, from bytes rather than a path: a front end that cannot hand over
+	// a path - iOS reads a picked file while its grant lasts, because the grant
+	// dies with the process - plays the file it read. The reporting is
+	// play_song's, so a failure reads the same whichever way it arrived.
+	bool play_song_from_memory(const u8 *data, size_t size, const std::string &name)
+	{
+		std::string err;
+		if (!play.start_from_memory(data, size, name, br, err)) {
+			std::fprintf(stderr, "開けない: %s\n", err.c_str());
+			char m[512];
+			std::snprintf(m, sizeof m, UI_TEXT(dlg_cannot_fmt, "Cannot open: %s"), err.c_str());
+			menu_error(m);
+			return false;
+		}
+		std::printf("再生: %s（%.1f 秒）\n", name.c_str(), play.length());
+		if (play.ports_used() > 2)
+			std::printf("  この曲は %d 口ぶん。C・D は未対応なので、口 3 以降は%s\n",
+			            play.ports_used(),
+			            play.fold_extra_ports() ? " A・B に重ねて鳴らす" : "鳴らさない");
 		std::fflush(stdout);
 		return true;
 	}
@@ -1310,9 +1390,9 @@ public:
 #if defined(__APPLE__)
 		// The parallel slave thread joins the output unit's audio workgroup
 		// from here (Apple's parallel real-time threads pattern; the join
-		// itself is in compat/realtime.h). Null keeps today's behavior.
-		// Only macOS has a group to hand over, so only it asks. This was
-		// gui_mac.cpp's own line before the three front ends shared a base
+		// itself is in compat/realtime.h), and a null group leaves the thread
+		// outside any workgroup. Only macOS has a group to hand over, so only it
+		// asks.
 		eng->mu.set_realtime_workgroup(out->realtime_workgroup());
 #endif
 		return true;
@@ -1327,12 +1407,15 @@ public:
 		const auto names = audio_in::list();
 		const int dev = find_device(names, ain_name);
 		std::string aerr;
-		if (dev >= 0 && ain->start(names[size_t(dev)], aerr))
+		if (dev >= 0 && ain->start(names[size_t(dev)], aerr)) {
+			attach_ain(true);
 			std::printf(CLI_T("A/D INPUT: %s (%s)\n", "A/D INPUT: %s（%s）\n"), ain->device_name().c_str(),
 			            ain->format_line().c_str());
-		else
+		} else {
+			attach_ain(false);
 			std::printf(CLI_T("A/D INPUT: none (%s)\n", "A/D INPUT: なし（%s）\n"),
 			            dev < 0 ? CLI_T("device not found", "デバイスが見つからない") : aerr.c_str());
+		}
 		std::fflush(stdout);
 		save_settings();
 	}
@@ -1341,8 +1424,21 @@ public:
 	// editor windows, drain the audio thread, all-notes-off the THRU ports,
 	// keep the card and the settings, snapshot for the next boot, close up.
 	// The boot thread join stays in main (it owns the thread)
+	// Everything that has to happen while the process is still whole: the audio
+	// thread stopped, the ports closed, the card flushed, the settings written.
+	//
+	// Public and idempotent because not every front end gets to run()'s
+	// epilogue: AppKit's event loop ([NSApp run], window_mac.mm's run_window)
+	// never returns, so closing the window there goes through terminate: and
+	// exit(), which destroys statics without ever coming back here. The macOS
+	// delegate therefore calls this from applicationShouldTerminate:, and the
+	// flag keeps the epilogue's own call from doing the work twice - a second
+	// join() on a spent thread would throw.
 	void shutdown()
 	{
+		if (m_shut)
+			return;
+		m_shut = true;
 		pc_shutdown_all(list, pc, fx, shapes, master, sampling, br);
 		{
 			ImGuiContext *const panel_ctx = ImGui::GetCurrentContext();

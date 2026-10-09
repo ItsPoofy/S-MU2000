@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for the thin iOS host app (src/ios/smoke.mm).
+
+  It exists because iOS only discovers app extensions inside a containing app, so the
+  AUv3 cannot be tested without one. This is the smallest app that answers "does the
+  extension register, find its ROMs and make a sound" - it renders offline and reports a
+  peak, so it needs no audio session, no output route and no hardware, and runs the same on
+  the simulator and on a device.
+
+  It is not the standalone: no audio or MIDI device choice, no panel, no settings. The
+  standalone replaces this once the smoke test passes.
+
+  The first version of this file said "No UIScene manifest on purpose, because a scene-based
+  app gets no UIApplicationDelegate callbacks until a scene connects". That was wrong and it
+  cost a crash - see the manifest's own comment below for what this iOS actually does.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>S-MU2000</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.tarboh.smu2000.ios.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>S-MU2000</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>17.0</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<!--
+	  Bluetooth LE MIDI pairing (CABTMIDICentralViewController /
+	  CABTMIDILocalPeripheralViewController in src/ios/midi_setup.mm) goes
+	  through CoreBluetooth, which requires this key from iOS 13. Without it
+	  the pairing sheets have no permission to scan or advertise.
+	-->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>S-MU2000 uses Bluetooth to connect to Bluetooth MIDI instruments and controllers.</string>
+	<!--
+	  The network MIDI session (MIDINetworkSession, toggled from the same
+	  menu) talks to other devices on the local network, which requires this
+	  key from iOS 14.
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>S-MU2000 uses the local network to send and receive network MIDI.</string>
+	<!--
+	  A/D INPUT records through the microphone (audio_in in src/ui/audio_ios.mm).
+	  Recording needs this key; without it the system denies capture silently
+	  and the input list stays empty. The prompt appears when the input menu
+	  is first opened, not at startup.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>S-MU2000 records audio for sampling through the microphone (A/D INPUT).</string>
+	<!--
+	  The scene manifest is NOT optional on this iOS, contrary to the note that used to
+	  be here. Without it the app installs, then traps with SIGTRAP the moment UIKit
+	  connects the first scene:
+
+	      ___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke
+	      (~/Library/Logs/DiagnosticReports/S-MU2000-*.ips, EXC_BREAKPOINT)
+
+	  So the delegate in src/ios/smoke.mm is a UIWindowSceneDelegate, the window is built
+	  from the UIWindowScene rather than from UIScreen bounds, and this manifest points at
+	  the class by name. All three are required; none of them alone is enough.
+
+	  The delegate class name is spelled out literally rather than as
+	  $(PRODUCT_MODULE_NAME).SmokeDelegate: this plist is copied verbatim by the Makefile
+	  with no variable expansion step, so the substitution would never happen and the
+	  scene would connect to a class that does not exist.
+	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<!--
+					  SMUAppDelegate is the standalone's scene delegate (src/ios/app.mm).
+					  This was SmokeDelegate, the name of the self-test host in the same
+					  file's place - and a stale name here fails completely silently: UIKit
+					  resolves the class, finds nothing, never calls
+					  scene:willConnectToSession:options:, and the app shows a black screen
+					  with no log line and no crash. It is not worth a comment how long
+					  that took to see: the app was running, UIKit was fully initialised in
+					  the log, and the only symptom was that nothing of ours had happened.
+					-->
+					<key>UISceneDelegateClassName</key>
+					<string>SMUAppDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<!-- Files the app keeps a copy of (a playlist's MIDI, a DLS bank, a card
+	     image) go in Documents, so they have to be somewhere the user can reach:
+	     this key is what puts "On My iPhone > S-MU2000" in Files. Without it the
+	     copies would sit in the container where nothing but the app can go. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

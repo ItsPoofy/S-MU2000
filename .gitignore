@@ -1,5 +1,9 @@
 build/
 build-*/
+# The signing team for the iOS build (make ios-team-id writes it). Ten hex
+# characters, no secret - but it is per machine, so it does not belong in a
+# checkout.
+.ios-team-id
 *.o
 *.a
 *.exe

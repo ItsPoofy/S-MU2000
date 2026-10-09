@@ -60,6 +60,22 @@ std::string player::name() const
 	return m_list[size_t(c)].title.empty() ? m_list[size_t(c)].name : m_list[size_t(c)].title;
 }
 
+// 一覧に足す曲を作るのは 1 つだけ。長さと口の数もここで決まり、鳴らす側（run）が
+// 状態行に出すのと同じ値が入る
+static player::entry make_entry(const std::string &path, const std::string &name,
+                                const std::string &title,
+                                const std::vector<smf::event> &evs)
+{
+	player::entry e;
+	e.path = path;
+	e.name = name;
+	e.title = title;
+	e.length = evs.back().time;
+	for (const smf::event &x : evs)
+		e.ports = std::max(e.ports, int(x.port) + 1);
+	return e;
+}
+
 bool player::add(const std::string &path, std::string &err, int *index)
 {
 	{
@@ -79,13 +95,28 @@ bool player::add(const std::string &path, std::string &err, int *index)
 		err = "中身が空";
 		return false;
 	}
-	entry e;
-	e.path = path;
-	e.name = file_name(path);
-	e.title = meta.title;
-	e.length = evs.back().time;
-	for (const smf::event &x : evs)
-		e.ports = std::max(e.ports, int(x.port) + 1);
+	entry e = make_entry(path, file_name(path), meta.title, evs);
+	std::lock_guard<std::mutex> lock(m_lock);
+	m_list.push_back(std::move(e));
+	m_order.clear();
+	if (index)
+		*index = int(m_list.size()) - 1;
+	return true;
+}
+
+bool player::add_from_memory(const u8 *data, size_t size, const std::string &name,
+                             std::string &err, int *index)
+{
+	std::vector<smf::event> evs;
+	smf::song_meta meta;
+	if (!smf::load_from_memory(data, size, evs, err, &meta))
+		return false;
+	if (evs.empty()) {
+		err = "中身が空";
+		return false;
+	}
+	entry e = make_entry(std::string(), name, meta.title, evs);
+	e.evs = std::move(evs);   // path が無いぶん、ここが中身の唯一の持ち物
 	std::lock_guard<std::mutex> lock(m_lock);
 	m_list.push_back(std::move(e));
 	m_order.clear();
@@ -202,6 +233,16 @@ bool player::start(const std::string &path, bridge &br, std::string &err)
 	return true;
 }
 
+bool player::start_from_memory(const u8 *data, size_t size, const std::string &name,
+                               bridge &br, std::string &err)
+{
+	int index = -1;
+	if (!add_from_memory(data, size, name, err, &index))
+		return false;
+	play(index, br);
+	return true;
+}
+
 void player::launch(bridge &br)
 {
 	m_quit.store(false);
@@ -299,17 +340,20 @@ void player::run(bridge &br)
 	while (!quit()) {
 		// ---- 曲を開く
 		std::string path;
+		std::vector<smf::event> events;
+		smf::song_meta meta;
 		{
 			std::lock_guard<std::mutex> lock(m_lock);
 			const int c = m_cur.load(std::memory_order_relaxed);
 			if (c < 0 || c >= int(m_list.size()))
 				break;
-			path = m_list[size_t(c)].path;
+			const entry &e = m_list[size_t(c)];
+			path = e.path;
+			events = e.evs;   // ファイルでない曲（iOS の選択、wasm）は最初から入っている
 		}
-		std::vector<smf::event> events;
-		smf::song_meta meta;
 		std::string err;
-		const bool ok = smf::load(path, events, err, &meta) && !events.empty();
+		const bool ok = (events.empty() ? smf::load(path, events, err, &meta)
+		                                : true) && !events.empty();
 		int ports = 1;
 		for (const smf::event &e : events)
 			ports = std::max(ports, int(e.port) + 1);
