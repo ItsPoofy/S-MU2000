@@ -210,11 +210,34 @@ $(BUILD)/audio_output_test$(EXE): tools/test_audio_output.cpp $(AUDIO_OUTPUT_TES
                                src/ui/audio_output_switch.h src/ui/audio_out.h \
                                src/ui/menu.h src/ui/texts.h src/ui/texts_en.h src/ui/texts_ja.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ tools/test_audio_output.cpp $(AUDIO_OUTPUT_TEST_SRC) $(PORTAUDIO_LIB) $(LDFLAGS) $(AUDIO_OUTPUT_TEST_LIBS)
+	$(CXX) $(CXXFLAGS) $(AUDIO_OUTPUT_TEST_FLAGS) -o $@ tools/test_audio_output.cpp $(AUDIO_OUTPUT_TEST_SRC) $(PORTAUDIO_LIB) $(LDFLAGS) $(AUDIO_OUTPUT_TEST_LIBS)
 
 .PHONY: check-audio-output
 check-audio-output: $(BUILD)/audio_output_test$(EXE)
 	$(WINE) $(BUILD)/audio_output_test$(EXE) $(if $(AUDIO_DEVICES),--devices)
+
+# The recording half, same shape. The listing is the part every run can check;
+# --devices opens a real device where one may be opened (AUDIO_DEVICES=1).
+ifeq ($(PLATFORM),windows)
+AUDIO_INPUT_TEST_SRC := src/ui/audio_in.cpp
+AUDIO_INPUT_TEST_LIBS := -lole32 -lavrt -lwinmm
+else ifeq ($(PLATFORM),macos)
+AUDIO_INPUT_TEST_SRC := src/ui/audio_in_mac.cpp
+AUDIO_INPUT_TEST_LIBS := -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
+else
+AUDIO_INPUT_TEST_SRC := src/ui/audio_in_linux.cpp
+AUDIO_INPUT_TEST_LIBS := -lasound
+endif
+
+$(BUILD)/audio_input_test$(EXE): tools/test_audio_input.cpp $(AUDIO_INPUT_TEST_SRC) \
+                                src/ui/audio_in.h src/ui/audio_out.h src/ui/lang.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(AUDIO_INPUT_TEST_FLAGS) -o $@ tools/test_audio_input.cpp \
+	    $(AUDIO_INPUT_TEST_SRC) $(LDFLAGS) $(AUDIO_INPUT_TEST_LIBS)
+
+.PHONY: check-audio-input
+check-audio-input: $(BUILD)/audio_input_test$(EXE)
+	$(WINE) $(BUILD)/audio_input_test$(EXE) $(if $(AUDIO_DEVICES),--devices)
 
 # The native effects on their own (src/dsp/README.md): a small tool and worked
 # example that includes nothing of the emulator. check-fx runs every effect type
@@ -809,13 +832,15 @@ else # macOS
 export MACOSX_DEPLOYMENT_TARGET := 11.0
 
 MAC_FRAMEWORKS := -framework CoreAudio -framework AudioToolbox \
+                  -framework AVFAudio -framework Foundation \
                   -framework CoreMIDI -framework AudioUnit \
                   -framework CoreFoundation -framework CoreGraphics \
                   -framework CoreText -framework Cocoa \
                   -framework UniformTypeIdentifiers \
                   -framework QuartzCore
 
-MAC_IO_OBJS := $(BUILD)/src/ui/audio_out_mac.o $(BUILD)/src/ui/midi_in_mac.o
+# live needs a backend of its own; gui gets the same two through MAC_GUI_SRCS.
+MAC_IO_OBJS := $(BUILD)/src/ui/audio_out_mac.o $(BUILD)/src/ui/midi_in_apple.o
 
 $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/live.o
 	@mkdir -p $(dir $@)
@@ -832,7 +857,7 @@ $(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(MAC_IO_OBJS) $(BUILD)/src/l
 MAC_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
                 src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
                 src/ui/audio_out_mac.cpp src/ui/audio_in_mac.cpp \
-                src/ui/midi_in_mac.cpp src/ui/midi_out_mac.cpp \
+                src/ui/midi_in_apple.cpp src/ui/midi_out_apple.cpp \
                 src/xg/model.cpp \
                 src/ui/window_mac.mm src/ui/app_mac.cpp src/ui/shot_mac.mm \
                 src/gui_mac.cpp
@@ -843,6 +868,7 @@ MAC_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
 MAC_IMGUI_SRCS := $(IMGUI_CORE) \
                   $(IMGUI_DIR)/backends/imgui_impl_metal.mm
 MAC_PC_SRCS    := src/ui/pc_editor.cpp src/ui/pc_window_mac.mm src/ui/xg_ui.cpp \
+                  src/ui/file_ask_mac.mm \
                   src/ui/overview.cpp src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
                   src/ui/master_editor.cpp src/ui/sampling_editor.cpp src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp src/ui/sampling_library.cpp src/ui/fx_icons.cpp
 MAC_PC_OBJS    := $(MAC_IMGUI_SRCS) $(MAC_PC_SRCS)
@@ -1381,6 +1407,756 @@ clean:
 # 型の大きさが食い違ったまま繋がって落ちる（statetest がこれで落ちていた。
 # swp30.h に変数を 1 つ足したら、古い大きさのまま繋がった mu2000.o が
 # 別の場所を触りに行っていた）。だから build の下にある .d を全部拾う
--include $(shell find $(BUILD) -name '*.d' 2>/dev/null)
+#
+# build-ios も同じ仕掛けに入れる。iOS の .d は置かれるのに読まれていなかった
+# （window_ios.d は app_ios.h を正しく挙げているのに、make は見ない）ので、
+# ヘッダだけ直したときは .o が作り直されず、rm -rf build-ios しないと直らない
+# ように見えた。 simulator/ と device/ の両方が build-ios の下なので、文字通りの
+# build-ios で両方拾う（変数にすると定義順の罠 - $(IOS_ROOT) はこの行より後で定義）。
+#
+# 1 つだけ手で払う場合: ソースを改名・削除したとき、古い .d が残って消えた
+# .cpp を指し続ける ("No rule to make target ... audio_ios.cpp")。audio_ios.cpp →
+# .mm の改名で実際に踏んだ。find build-ios -name '*.d' -delete で直る（次に
+# 付く .o が .d を作り直す）。改名は稀なので、仕掛けにはしない。
+-include $(shell find $(BUILD) build-ios -name '*.d' 2>/dev/null)
 
 .PHONY: all clean regen check test test-update vst3 install-vst3 probe clap install-clap vsti install-vsti vsti-probe au install-au au-probe check-au
+
+# ---- iOS AUv3 ----------------------------------------------------------------
+#
+# Everything from here to the end of the file is inside the two fences below, and
+# that is the point of them: this block asks xcrun where the SDK is, runs
+# tools/ios_sign.py four times over and reads a profile directory, and none of
+# that is any use to a Windows or Linux build - which still had to pay for it,
+# because a makefile is read whole before any target runs. So it is read only when
+# an ios% goal was asked for, and only on macOS, where xcrun and the signing
+# identities are.
+#
+# MAKECMDGOALS rather than a variable: there is no earlier point at which "which
+# target was asked for" is known. The cost is that an ios% goal has to be spelled
+# on the command line (it always is - these targets cannot be reached as a
+# prerequisite of anything), and that a target defined here cannot be a
+# prerequisite of a target defined above, which nothing wants.
+ifeq ($(PLATFORM),macos)
+ifneq ($(filter ios%,$(MAKECMDGOALS)),)
+
+# The AUv3 extension built for iOS. Reuses AUV3_SRCS unchanged - engine, AUv3 core and
+# the shared ImGui panel are already platform-free (doc/ios-auv3.md) - and only replaces
+# the toolchain flags and the bundle layout.
+#
+# Two things are NOT macOS-shaped and are handled here rather than in the sources:
+#
+#   * Bundle layout. macOS is App.app/Contents/PlugIns/X.appex/Contents/MacOS/X.
+#     iOS is flat: App.app/PlugIns/X.appex/X. There is no Contents and no MacOS
+#     subdirectory.
+#   * Toolchain. -isysroot plus -target arm64-apple-ios, and the macOS deployment
+#     target has to be filtered out or clang rejects the combination.
+#
+# The AppKit-only files are excluded (pc_window_mac.mm, window_mac.mm): UIKit versions
+# are step 7, and the extension builds and installs without them.
+# Two SDKs, and they are not interchangeable: iphoneos builds for a device
+# (LC_BUILD_VERSION platform 2), iphonesimulator for the simulator (platform 7).
+# Installing a device build on the simulator fails with "does not contain code for any
+# platform ... this device can run code for iOS-simulator", so each gets its own tree.
+#   make ios-app                                        device
+#   make ios-app IOS_SDK_NAME=iphonesimulator           simulator
+IOS_SDK_NAME ?= iphoneos
+IOS_SDK    := $(shell xcrun --sdk $(IOS_SDK_NAME) --show-sdk-path)
+IOS_MIN    ?= 17.0
+# 17.0, not 14.0: the AUv3 only needs 14 (UMP arrived there), but the current
+# Xcode's libc++ no longer supports 14 as a deployment target and warns
+# "The selected platform is no longer supported by libc++" for it. 17 costs
+# nothing - every device that can host an AUv3 in 2026 runs it - and the plists
+# below carry the same floor so an install can never disagree with the binary.
+ifeq ($(IOS_SDK_NAME),iphonesimulator)
+IOS_TARGET := arm64-apple-ios$(IOS_MIN)-simulator
+IOS_ROOT   := build-ios/simulator
+else
+IOS_TARGET := arm64-apple-ios$(IOS_MIN)
+IOS_ROOT   := build-ios/device
+endif
+# IOS_DEBUG defaults to 1 and should stay that way until the extension has booted, found its
+# ROMs and produced audio. Without debug info a crash report is a wall of hex offsets
+# (the first launch died with a frame at 0xccc6e4 and no name); with it the same report
+# names UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption immediately.
+#
+# -Og rather than -O0: -O0 is the reflex answer and it is wrong here, because this process
+# emulates a 28 MHz SH2 in a C++ interpreter and an unoptimised interpreter can slow a boot
+# enough to muddy the measurement we are trying to make. -Og keeps the frames and their
+# callers - it does not inline away the function being debugged - and leaves the hot loop
+# largely alone.
+#
+# -Og is the part that matters. Apple's linker discards DWARF from the linked executable
+# (verified: obj-g/src/ios/smoke.o has 10 debug sections, the linked binary has 0, even when
+# linked by hand with -g), so -g buys nothing in the artefact. What it does keep is the symbol
+# table - 91 symbols, 15 of them SmokeDelegate methods - and that is what a crash report uses
+# to symbolicate. -Og is therefore there to stop the optimiser inlining those names away, not
+# to carry debug info. Keep it until this stops crashing; the cost is interpreter speed.
+#
+# The object directory is suffixed because make does not know that a flag changed. Sharing one
+# directory would let a toggle silently link a mixture of -O3 and -Og objects, which is worse
+# than either setting.
+#
+# This block must stay ABOVE the IOS_BUILD assignment: := expands immediately, so a use above
+# the definition yields an empty value and no error. That happened once - IOS_BUILD came out
+# as build-ios/simulator/ with no object subdirectory and IOS_OPTFLAGS was never applied.
+IOS_DEBUG ?= 1
+ifeq ($(IOS_DEBUG),1)
+IOS_OPTFLAGS := -Og -g
+IOS_OBJ      := obj-g
+else
+IOS_OPTFLAGS := -O3
+IOS_OBJ      := obj
+endif
+
+IOS_BUILD  := $(IOS_ROOT)/$(IOS_OBJ)
+IOS_APP    := $(IOS_ROOT)/S-MU2000.app
+IOS_APPEX  := $(IOS_APP)/PlugIns/S-MU2000AU.appex
+IOS_BIN    := $(IOS_APPEX)/S-MU2000AU
+
+# The -mXXX-version-min flag is per-SDK and does not exist for the other one; the
+# -target triple already carries the deployment version, so drop it and let the triple
+# do that job rather than passing a flag the SDK rejects.
+IOS_CXXFLAGS := $(filter-out -mmacosx-version-min=% -O3,$(CXXFLAGS)) $(IOS_OPTFLAGS) \
+                -isysroot $(IOS_SDK) -target $(IOS_TARGET)
+# CoreText is not optional: src/ui/font_file.h walks family name -> font file through
+# CTFontDescriptorCreateWithAttributes / CTFontDescriptorCopyAttribute to find the CJK
+# face. The header compiles on iOS; it is the link that needs the framework.
+IOS_FW := -framework Foundation -framework AudioToolbox -framework AVFoundation \
+          -framework AVFAudio -framework CoreAudioKit -framework UniformTypeIdentifiers \
+          -framework CoreAudio -framework CoreMIDI -framework UIKit -framework Metal \
+          -framework QuartzCore -framework CoreGraphics -framework CoreText
+
+IOS_ENGINE_OBJS := $(SRCS:%.cpp=$(IOS_BUILD)/%.o)
+
+# Deliberately not AUV3_SRCS. That list carries the AppKit view layer -
+# src/auv3/view_controller.{h,mm}, src/vst3/panel_nsview.h and src/vst3/view_mac.mm -
+# which cannot compile for iOS. audio_unit.mm itself is portable (only AUAudioUnit,
+# AUMIDIEventList and AUEventBlock) and is reused unchanged; the factory is the iOS
+# no-UI variant. The view layer is step 7.
+# src/mu2000.cpp is separate because the macOS rule passes it separately too
+# ($(BUILD)/src/mu2000.o): it is the machine's own API - run_sample, lcd_render,
+# native_midi, load_state and the rest - and the engine calls into it directly.
+# The PC-editor sources are the ui::xgui layer the engine also calls; they come from
+# MAC_PC_SRCS with pc_window_mac.mm dropped, since that is AppKit. They are ImGui and
+# shared, which is the point - nothing here is rewritten for iOS.
+IOS_PC_SRCS := src/ui/pc_editor.cpp src/ui/xg_ui.cpp src/ui/overview.cpp \
+               src/ui/fx_editor.cpp src/ui/fx_help.cpp src/ui/part_shapes.cpp \
+               src/ui/master_editor.cpp src/ui/sampling_editor.cpp \
+               src/ui/sampling_romwave.cpp src/ui/sampling_presets.cpp \
+               src/ui/sampling_library.cpp src/ui/fx_icons.cpp
+
+# The AUv3-UI: factory_ios.mm is the AUViewController + factory (one class,
+# like macOS), view_controller_ios.mm hosts the shared panel through
+# src/vst3/panel_uiview.mm, and view.cpp is the shared plug_view both draw.
+# view_mac.mm / panel_nsview.mm stay mac-only; this is their UIKit twin.
+# pc_window_ios.mm is the editors' iOS host: the plugin UI opens the same five
+# editors through it (ios_window::open_pc_window), so it links here, not only
+# in the standalone.
+IOS_AUV3_SRCS := src/auv3/audio_unit.mm src/auv3/factory_ios.mm \
+                 src/auv3/view_controller_ios.mm \
+                 src/ui/presenter_ios.mm \
+                 src/mu2000.cpp \
+                 src/vst3/engine.cpp src/vst3/iids.cpp src/vst3/view.cpp \
+                 src/vst3/panel_uiview.mm src/vst3/view_ios.mm src/ui/menu_ios.mm src/ui/pc_window_ios.mm \
+                 src/ui/rom_import_ios.mm src/ui/file_ask_ios.mm \
+                 $(PANEL_SRCS) $(IOS_PC_SRCS) $(VST3_SDK_SRCS)
+IOS_AUV3_OBJS := $(IOS_AUV3_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+IOS_AUV3_OBJS := $(IOS_AUV3_OBJS:%.mm=$(IOS_BUILD)/%.o)
+
+# ImGui core plus the Metal backend, which is iOS's own GPU API and is already vendored.
+# The PC-editor window (pc_window_mac.mm) is AppKit and is left out.
+IOS_IMGUI_OBJS := $(IMGUI_CORE:%.cpp=$(IOS_BUILD)/%.o) \
+                  $(IOS_BUILD)/$(IMGUI_DIR)/backends/imgui_impl_metal.o
+
+$(IOS_BUILD)/$(IMGUI_DIR)/backends/imgui_impl_metal.o: $(IMGUI_DIR)/backends/imgui_impl_metal.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -fobjc-arc -c -o $@ $<
+
+$(IOS_BUILD)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(VST3_INC) $(IMGUI_FLAGS) -c -o $@ $<
+
+$(IOS_BUILD)/%.o: %.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(VST3_INC) $(IMGUI_FLAGS) $(AUV3_FLAGS) -ObjC++ -c -o $@ $<
+
+# ROMs baked into the extension. Off by default for the same reason as macOS: the
+# images are Yamaha's and must not travel in anything we hand out. The normal
+# path on iOS is not baking at all - the user picks the dump from Files or
+# iCloud Drive and it is copied into the app's own container
+# (src/ui/rom_import_ios.mm), which the shared ROM search finds ahead of the bundle.
+# Baking stays only as a development shortcut (no picker round trip per launch).
+# engine.cpp already searches module_dir()/../Resources/roms, which lands here on the
+# flat iOS layout.
+#   make ios-auv3                     no ROMs (a build to look at)
+#   make ios-auv3 IOS_ROMS=roms       ROMs baked into S-MU2000AU.appex/Resources/roms
+IOS_ROMS ?=
+
+# The appex's ROMs are a *prerequisite of its signing*, not a step that follows it.
+# codesign hashes every file in the bundle, so ROMs copied in after the sign
+# invalidate it, and codesign reports that as the deeply misleading
+#   "invalid Info.plist (plist or signature have been modified)"
+# while the plist is in fact perfect - simctl then fails the whole install with
+# "Missing bundle ID", because it cannot read the extension. This bit: the signature
+# was from 15:17 and Resources/ from 15:27.
+IOS_APPEX_STAMP := $(IOS_ROOT)/.appex.stamp
+
+# Defined before first use, always: := expands immediately, so a use above the
+# definition gives an empty target name and make reports nothing to do, silently.
+IOS_APPEX_PLIST := $(IOS_APPEX)/Info.plist
+
+# Device provisioning lives HERE, above first use: every SIGN_DEPS/SIGN_FLAGS
+# below is :=-expanded at its rule, and a use above the definition silently
+# expands empty (the fourth time this trap has bitten - see the comment inside).
+# ---- device provisioning (iphoneos only) --------------------------------------
+# A real device's installd refuses a bundle without embedded.mobileprovision:
+# "Application is missing the application-identifier entitlement". The profile
+# comes from one manual Xcode pass (team + run on the device) and lives in
+# ~/Library/MobileDevice/Provisioning Profiles/. This finds it by the bundle id
+# read from the packaging plist (so renames propagate) and fails LOUDLY when
+# absent, instead of producing an app that installs nowhere. The simulator needs
+# ad-hoc and nothing else, so all of it is iphoneos-only.
+#
+# Only the app profile is handled: whether installd also demands one for the
+# appex id is unknown until an install says so - that is the next round IF the
+# error names it, not a structure built on a guess.
+ifeq ($(IOS_SDK_NAME),iphoneos)
+# Who is signing. A bundle id belongs to a team, so a third-party build needs its
+# own ids and they have to be registered before a profile exists; tools/ios_sign.py
+# derives them from the team and finds the identity and the profiles. The team
+# comes from TEAM_ID=, SMU2000_IOS_TEAM_ID or .ios-team-id (see ios-team-id below),
+# and with none of them set everything is the shipped id and an ad-hoc signature -
+# which is all the simulator needs, and all a device install will refuse.
+#
+# `:=` so each query runs once at parse time, not once per rule that mentions it.
+IOS_TEAM_ID    := $(shell $(PYTHON) tools/ios_sign.py team --team "$(TEAM_ID)")
+IOS_BUNDLE_ID  := $(shell $(PYTHON) tools/ios_sign.py app-id --team "$(TEAM_ID)")
+IOS_APPEX_ID   := $(shell $(PYTHON) tools/ios_sign.py appex-id --team "$(TEAM_ID)")
+IOS_IDENTITY   := $(shell $(PYTHON) tools/ios_sign.py identity --team "$(TEAM_ID)")
+# With a team, sign as that team's identity; without one, ad-hoc (-), which is
+# what a build for the simulator or for a jailbroken device wants.
+#
+# IOS_CODESIGN_ID, not CODESIGN_ID: the shared CODESIGN_ID ?= above is what the
+# macOS auv3 recipes sign with, and `CODESIGN_ID="Developer ID: ..." make auv3`
+# is a documented thing to type. This line used `:=` on the same name, so on any
+# invocation that reached it the macOS value was replaced by an ad-hoc one - and
+# because the iphoneos branch is the default, that was every make that read this
+# block, including one that only wanted to know whether the mac plug-ins were
+# signed. Two names, one meaning each.
+IOS_CODESIGN_ID := $(if $(IOS_IDENTITY),$(IOS_IDENTITY),-)
+# A team with profiles but no certificate signs ad-hoc, and an ad-hoc signature
+# installs nowhere: the device refuses it at install time, long after the build
+# said nothing was wrong. So this is checked before signing rather than left for
+# installd to find. A build that wants ad-hoc on purpose (a jailbroken device)
+# asks for it by passing an empty team, which is what the simulator does anyway.
+.PHONY: FORCE
+
+define IOS_REQUIRE_IDENTITY
+	@if [ -n "$(IOS_TEAM_ID)" ] && [ -z "$(IOS_IDENTITY)" ]; then \
+	  echo "ios: team $(IOS_TEAM_ID) has no signing certificate on this machine"; \
+	  echo "     Xcode > Settings > Accounts > $(IOS_TEAM_ID) > Manage Certificates"; \
+	  echo "     then + Apple Development. A profile alone does not sign anything."; \
+	  echo "     (an ad-hoc device build on purpose: make ... IOS_TEAM_ID=)"; \
+	  exit 1; \
+	fi
+endef
+# Two locations: Xcode 27 keeps managed profiles under UserData, older Xcode (and
+# manual downloads) under MobileDevice. Both are searched; the bundle id decides.
+IOS_PROV_DIRS := $(HOME)/Library/Developer/Xcode/UserData/Provisioning\ Profiles $(HOME)/Library/MobileDevice/Provisioning\ Profiles
+
+# The embedded profiles, found by bundle id: tools/ios_sign.py reads each one's
+# own application-identifier (a wildcard counts - free provisioning hands out
+# those), newest first. IOS_PROFILE / IOS_APPEX_PROFILE override with an explicit
+# path when several match or the wrong one wins; the printed basename says which
+# one won, so a surprise is visible rather than silent.
+#
+# FORCE re-runs both rules on every build, and cmp makes that a no-op when the
+# profile that is there is already the right one. It is there because the bundle
+# id is derived from the team: a build that switched teams would otherwise keep
+# the previous team's profile, and installd would refuse the install with a
+# message about an id nobody asked for.
+$(IOS_APP)/embedded.mobileprovision: FORCE
+	@prof="$(IOS_PROFILE)"; \
+	if [ -z "$$prof" ]; then prof="$(shell $(PYTHON) tools/ios_sign.py profile --which APP --team "$(TEAM_ID)")"; fi; \
+	if [ -z "$$prof" ]; then \
+	  echo "ios: no provisioning profile for $(IOS_BUNDLE_ID)"; \
+	  echo "     a profile belongs to the team that registered the id, so set yours:"; \
+	  echo "       make ios-team-id TEAM_ID=ABCDE12345   (then 'make ios-sign-info')"; \
+	  echo "     already have one for this exact id? IOS_PROFILE=/path/to/one.mobileprovision"; \
+	  exit 1; \
+	fi; \
+	if cmp -s "$$prof" $@; then exit 0; fi; \
+	cp -f "$$prof" $@; \
+	echo "ios: embedded $$(basename "$$prof")"
+
+# The appex carries its own profile too (its id differs): installd checks nested
+# code, so hoping the app's profile covers it is a guess the error would bill.
+# Same search, same loud failure, its own override.
+$(IOS_APPEX)/embedded.mobileprovision: FORCE
+	@prof="$(IOS_APPEX_PROFILE)"; \
+	if [ -z "$$prof" ]; then prof="$(shell $(PYTHON) tools/ios_sign.py profile --which APPEX --team "$(TEAM_ID)")"; fi; \
+	if [ -z "$$prof" ]; then \
+	  echo "ios: no provisioning profile for $(IOS_APPEX_ID) (the AUv3's own id)"; \
+	  echo "     the extension target needs its own; 'make ios-sign-info' says what is missing"; \
+	  echo "     already have one? IOS_APPEX_PROFILE=/path/to/one.mobileprovision"; \
+	  exit 1; \
+	fi; \
+	if cmp -s "$$prof" $@; then exit 0; fi; \
+	cp -f "$$prof" $@; \
+	echo "ios: embedded $$(basename "$$prof") in appex"
+
+# The entitlements the profiles carry (application-identifier above all).
+# PlistBuddy prints the Entitlements subdict as XML, which is what --entitlements
+# wants at top level.
+$(IOS_ROOT)/app.xcent: $(IOS_APP)/embedded.mobileprovision
+	@security cms -D -i $< -o $(IOS_ROOT)/prov.plist
+	@/usr/libexec/PlistBuddy -x -c "Print :Entitlements" $(IOS_ROOT)/prov.plist > $@
+
+$(IOS_ROOT)/appex.xcent: $(IOS_APPEX)/embedded.mobileprovision
+	@security cms -D -i $< -o $(IOS_ROOT)/prov-appex.plist
+	@/usr/libexec/PlistBuddy -x -c "Print :Entitlements" $(IOS_ROOT)/prov-appex.plist > $@
+
+IOS_APP_SIGN_DEPS  := $(IOS_APP)/embedded.mobileprovision $(IOS_ROOT)/app.xcent
+IOS_APP_SIGN_FLAGS := --entitlements $(IOS_ROOT)/app.xcent
+IOS_APPEX_SIGN_DEPS  := $(IOS_APPEX)/embedded.mobileprovision $(IOS_ROOT)/appex.xcent
+IOS_APPEX_SIGN_FLAGS := --entitlements $(IOS_ROOT)/appex.xcent
+else
+IOS_APP_SIGN_DEPS  :=
+IOS_APP_SIGN_FLAGS :=
+# Simulator: the shipped (empty) entitlements file. One --entitlements only -
+# codesign takes a single one, so the device branch above replaces this rather
+# than adding to it.
+IOS_APPEX_SIGN_DEPS  :=
+IOS_APPEX_SIGN_FLAGS := --entitlements packaging/auv3-ios-appex.entitlements
+# Ad-hoc on purpose, and set here rather than inherited: a simulator install
+# wants no identity and no profile, and IOS_CODESIGN_ID is only defined in the
+# branch above, so without this the recipes below would ask codesign to sign with
+# an empty string.
+IOS_CODESIGN_ID := -
+endif
+
+$(IOS_APPEX_STAMP): $(IOS_BIN) $(IOS_APPEX_PLIST) ios-auv3-roms $(IOS_APPEX)/art/real/panel.txt $(IOS_APPEX_SIGN_DEPS)
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none \
+	          $(IOS_APPEX_SIGN_FLAGS) $(IOS_APPEX)
+	@touch $@
+
+.PHONY: ios-auv3-signed
+
+ios-auv3-signed: $(IOS_APPEX_STAMP)
+
+ios-auv3-roms:
+ifneq ($(strip $(IOS_ROMS)),)
+	@rm -rf $(IOS_APPEX)/roms
+	@cp -R $(IOS_ROMS) $(IOS_APPEX)/roms
+	@echo "ROM を入れた: $(IOS_ROMS) -> $(IOS_APPEX)/roms"
+endif
+
+# The appex Info.plist is its own target, not a step inside the link rule.
+# Copied from inside that rule it could go stale: a relink produced a fresh
+# binary while the plist stayed at its old mtime, and codesign compares the
+# binary's embedded plist against the file, so it failed with
+#   "invalid Info.plist (plist or signature have been modified)"
+# naming the plist rather than the staleness. simctl then refused the whole
+# install with "Missing bundle ID", because it cannot read the extension.
+#
+# Nothing to do with nested Resources subdirectories: the signature covers
+# roms/, roms/dump/mu1000/ and roms/standin/ correctly. Nor with hashes -
+# Info.plist is deliberately omitted from CodeResources by the signature rules
+# ('^Info\.plist$': omit), which is why nothing in CodeResources could have
+# flagged this.
+$(IOS_APPEX_PLIST): packaging/auv3-ios-appex-Info.plist
+	@mkdir -p $(dir $@)
+	@cp -f $< $@
+	@if [ -n "$(IOS_APPEX_ID)" ] && \
+	    [ "$(IOS_APPEX_ID)" != "$$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $<)" ]; then \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $(IOS_APPEX_ID)" $@; \
+	  echo "ios: appex id -> $(IOS_APPEX_ID)"; \
+	fi
+
+$(IOS_BIN): $(IOS_ENGINE_OBJS) $(IOS_AUV3_OBJS) $(IOS_IMGUI_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -o $@ $^ $(IOS_FW) -e _NSExtensionMain -fapplication-extension
+	@echo "出来た: $(IOS_BIN)"
+
+# The thin host app. iOS only discovers app extensions inside a containing app, so the
+# extension cannot be tested without one. src/ios/smoke.mm renders offline and reports a
+# peak, which needs no audio session, no output route and no hardware - so the same test
+# runs on the simulator and on a device.
+IOS_APP_BIN   := $(IOS_APP)/S-MU2000        # the smoke-test host
+IOS_STANDALONE := $(IOS_APP)/Standalone       # the real front end, step 1
+
+# ---- iOS standalone front end -------------------------------------------------
+#
+# Shaped like MAC_GUI_SRCS + MAC_PC_SRCS, so the two read as twins:
+#
+#   *_GUI_SRCS   the shared panel, the per-concern ports (_ios), the window shell
+#                and the main
+#   *_PC_SRCS    the five PC editors, which are the same files as everywhere
+#
+# The deliberate difference from the macOS list: no *_mac equivalents for audio,
+# because iOS's backend is written from scratch against AVAudioEngine (see
+# IOS_AUDIO_SRCS). MIDI is the opposite case and is shared.
+#
+# src/ios/smoke.mm is not in here. It has its own main() and answers a different
+# question ("does the extension register?"), so it is a separate executable.
+IOS_GUI_SRCS := src/ui/panel.cpp src/ui/editor.cpp src/ui/effects.cpp \
+                src/ui/png.cpp src/ui/layout.cpp src/ui/svg.cpp src/ui/player.cpp \
+                src/xg/model.cpp \
+                src/ui/window_ios.mm src/ui/app_ios.cpp src/ui/pc_window_ios.mm \
+                src/ui/menu_ios.mm src/ui/presenter_ios.mm \
+                src/ui/rom_import_ios.mm src/ui/file_ask_ios.mm \
+                src/ios/app.mm
+
+# MIDI: CoreMIDI, shared with macOS. CoreMIDI.h is complete on iOS -
+# MIDIClientCreate, MIDIPortConnectSource and the event-block variants are all
+# declared there - so these two compile for it as they are: plain C++ with no #if
+# and no Objective-C, which is also why they need no -ObjC++. Named _apple because
+# one file serves both platforms, unlike the audio back ends below.
+#
+# Audio: NOT portable. CoreMIDI is the same API on iOS and CoreAudio is not: iOS
+# ships CoreAudio.framework with only three headers (AudioHardwareBase.h,
+# AudioServerPlugIn.h, CoreAudioTypes.h) and no umbrella, and
+# AudioObjectGetPropertyData appears in no public header - only in the link stub
+# CoreAudio.tbd. The AudioHardware HAL that audio_out_mac.cpp and audio_in_mac.cpp
+# are built on therefore does not exist in public form on iOS, and those two fail
+# to compile there on "CoreAudio/CoreAudio.h file not found". iOS gets
+# AVAudioSession + AVAudioEngine against the same class interfaces instead.
+IOS_APPLE_PORT_SRCS := src/ui/midi_in_apple.cpp src/ui/midi_out_apple.cpp
+# Three files, one per direction as on every other platform, plus the core the
+# two share. audio_core_ios.mm holds audio_out's and audio_in's own methods - the
+# render block, the input tap, the resampler, the ring - because both directions
+# use the same ring and the same WAV header; audio_out_ios.mm and
+# audio_in_ios.mm answer what only iOS can (which device, which permission, which
+# sample rate the device runs at). session_ios.mm is the AVAudioSession, which
+# both directions watch.
+IOS_AUDIO_SRCS := src/ui/audio_out_ios.mm src/ui/audio_in_ios.mm \
+                  src/ui/audio_core_ios.mm src/ui/session_ios.mm
+
+IOS_GUI_OBJS := $(IOS_GUI_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+IOS_GUI_OBJS := $(IOS_GUI_OBJS:%.mm=$(IOS_BUILD)/%.o)
+
+IOS_APPLE_PORT_OBJS := $(IOS_APPLE_PORT_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+
+IOS_AUDIO_OBJS := $(IOS_AUDIO_SRCS:%.mm=$(IOS_BUILD)/%.o)
+
+# PC editor: the same view files as macOS and Windows, built once.
+IOS_PC_OBJS := $(IOS_PC_SRCS:%.cpp=$(IOS_BUILD)/%.o)
+
+# IMGUI_FLAGS on the three front-end files: app.h reaches fx_editor.h, which
+# includes imgui.h. The generic %.mm rule below carries it for the extension, but
+# these rules exist to add -ObjC++ without the AUv3 flags, so they must not drop it.
+#
+# -fobjc-arc on the two .mm files because every other Objective-C++ file here uses
+# it (the mac %.mm rule, AUV3_FLAGS): without it these built as MRC, which the
+# compiler reported as a missing [super dealloc] in dealloc - and an MRC
+# CADisplayLink target is a dangling-pointer crash waiting for the autorelease pool
+# to drain. pc_window_ios.mm already had ARC through the generic %.mm rule, so this
+# also makes the three iOS files consistent with each other.
+$(IOS_BUILD)/src/ios/app.o: src/ios/app.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -ObjC++ -fobjc-arc -c -o $@ $<
+
+$(IOS_BUILD)/src/ui/window_ios.o: src/ui/window_ios.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -ObjC++ -fobjc-arc -c -o $@ $<
+
+$(IOS_BUILD)/src/ui/app_ios.o: src/ui/app_ios.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) $(IMGUI_FLAGS) -c -o $@ $<
+
+# mu2000.o and smf.o are named explicitly because IOS_ENGINE_OBJS is SRCS - the SH2
+# and its peripherals - and neither of those two is in it. Every desktop target links
+# the same pair ($(OBJS) $(BUILD)/src/mu2000.o $(BUILD)/src/smf.o), and smf.cpp is
+# what ui/player.cpp calls to read a MIDI file: without it, smf::load is undefined.
+# Neither file has a platform dependency.
+#
+# Deliberately NOT $(IOS_BIN): that is the appex *executable*, and linking one gives
+# "ld: unsupported mach-o filetype (only MH_OBJECT and MH_DYLIB can be linked)". The
+# two ship in one bundle and do not share a binary.
+$(IOS_STANDALONE): $(IOS_GUI_OBJS) $(IOS_APPLE_PORT_OBJS) $(IOS_AUDIO_OBJS) \
+                   $(IOS_PC_OBJS) \
+                   $(IOS_IMGUI_OBJS) $(IOS_ENGINE_OBJS) \
+                   $(IOS_BUILD)/src/mu2000.o $(IOS_BUILD)/src/smf.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -o $@ $^ $(IOS_FW)
+
+$(IOS_BUILD)/src/ios/smoke.o: src/ios/smoke.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -fobjc-arc -c -o $@ $<
+
+$(IOS_APP_BIN): $(IOS_BUILD)/src/ios/smoke.o $(IOS_BIN)
+	@mkdir -p $(dir $@)
+	$(CXX) $(IOS_CXXFLAGS) -o $@ $(IOS_BUILD)/src/ios/smoke.o $(IOS_FW)
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP)
+	@echo " smoke host: $(IOS_APP)"
+
+# The standalone, not the smoke host. Same bundle, different executable, so the
+# .appex still registers; the two never ship together.
+#
+# Simulator first: no signing, no certificate, no device.
+#   make ios-standalone IOS_SDK_NAME=iphonesimulator
+#   xcrun simctl install booted build-ios/simulator/S-MU2000.app
+#   xcrun simctl launch booted com.tarboh.smu2000.ios.app
+#   make ios-app IOS_SDK_NAME=iphonesimulator
+#   xcrun simctl boot "iPhone 18 Pro"
+#   xcrun simctl install booted build-ios/simulator/S-MU2000.app
+#   xcrun simctl spawn booted log stream --predicate 'process == "S-MU2000"'
+#   xcrun simctl launch booted com.tarboh.smu2000
+# The Info.plist is its own target, not a step inside one of the executables' rules.
+# It used to be copied by the smoke rule only, so `make ios-standalone` reused
+# whatever plist happened to be in the bundle - and a stale UISceneDelegateClassName
+# is invisible: UIKit resolves no such class, never calls the scene delegate, and the
+# app shows a black screen with no log line and no crash.
+$(IOS_APP)/Info.plist: packaging/ios-app-Info.plist
+	@mkdir -p $(dir $@)
+	@cp -f $< $@
+	@if [ -n "$(IOS_BUNDLE_ID)" ] && \
+	    [ "$(IOS_BUNDLE_ID)" != "$$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $<)" ]; then \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $(IOS_BUNDLE_ID)" $@; \
+	  echo "ios: app id -> $(IOS_BUNDLE_ID)"; \
+	fi
+
+.PHONY: ios ios-team-id ios-sign-info
+
+# `make ios` on its own: the iOS targets and what each is for. The build has a
+# dozen iOS targets and the one a newcomer wants is usually two steps away from
+# its name (a simulator run needs a ROM import first, a device run needs a
+# profile), so the list says which is which.
+ios:
+	@echo "iOS targets (SDK: IOS_SDK_NAME=iphoneos (default) or iphonesimulator)"
+	@echo
+	@echo "  simulator, no signing needed (IOS_SDK_NAME=iphonesimulator):"
+	@echo "    ios-standalone            the synth, for the simulator"
+	@echo "    ios-auv3                  the AUv3 extension on its own"
+	@echo "    ios-app                   the smoke host (renders offline, checks the appex)"
+	@echo "    ios-standalone IOS_ROMS=roms  ... with the ROM images in the bundle"
+	@echo "    ios-install               build, install and launch on the booted simulator"
+	@echo
+	@echo "  device (a team id, and profiles for the ids it derives):"
+	@echo "    ios-sign-info TEAM_ID=...  what signing would use, and what is missing"
+	@echo "    ios-team-id   TEAM_ID=...  remember the team in .ios-team-id, once"
+	@echo "    ios-app       TEAM_ID=...  signed .app"
+	@echo "    ios-standalone TEAM_ID=... signed, without the app wrapper"
+	@echo
+	@echo "  ROMs (one-time; the images are Yamaha's and not shipped):"
+	@echo "    ios-app-roms IOS_ROMS=dir copy a set into the app bundle"
+	@echo
+	@echo "  doc/ios-auv3.md has the whole story, install and troubleshooting."
+	@echo "  Start with 'make ios-sign-info TEAM_ID=...' if you are building for a device."
+
+
+# Remember the team in the checkout, so the iOS targets need no argument after
+# this once. The file is git-ignored (see .gitignore) and only ever read.
+ios-team-id:
+	@if [ -z "$(TEAM_ID)" ]; then \
+	  echo "usage: make ios-team-id TEAM_ID=ABCDE12345"; \
+	  echo "  (find it in Xcode > Settings > Accounts, or the developer portal)"; \
+	  exit 1; \
+	fi
+	@echo "$(TEAM_ID)" > .ios-team-id
+	@echo "ios: team $(TEAM_ID) written to .ios-team-id (git-ignored)"
+
+# What signing would use, and what is still missing. The first thing to run when
+# a device install is refused: it prints the two ids a profile has to exist for.
+ios-sign-info:
+	@$(PYTHON) tools/ios_sign.py report --team "$(TEAM_ID)"
+
+.PHONY: ios-app-info ios-install ios-install-sim
+
+ios-app-info: $(IOS_APP)/Info.plist
+
+# Build, install and launch on the booted simulator: the loop that runs dozens of
+# times a day, so it should not be three commands with a device name in them. The
+# device is named rather than left as "booted", which is ambiguous with two
+# simulators up and installs to the wrong one. Simulator only - a device needs a
+# team and a profile, which is `ios-app TEAM_ID=...` plus devicectl (doc).
+#
+# --console-pty is deliberately absent: it attaches stdout for as long as the app
+# runs, which is what you want while watching and what you do not want in a target
+# that is supposed to return.
+# Any booted iOS simulator, preferring an iPhone where both are up: the name is
+# the only thing to go on, and an iPad is just as good a target.
+IOS_SIMULATOR_UDID := $(shell xcrun simctl list devices booted -j 2>/dev/null | \
+	python3 -c 'import json,sys; ds=[d for v in json.load(sys.stdin)["devices"].values() for d in v]; print(next((d["udid"] for d in ds if "iPhone" in d["name"]), ds[0]["udid"]) if ds else "")' 2>/dev/null)
+
+# A second invocation, not a target-specific variable: IOS_SDK_NAME defaults to
+# the device, and every path below (IOS_ROOT, IOS_APP) was resolved while this
+# makefile was read, so changing it per target would be too late - the install
+# would run against the device tree. So the entry point re-executes make with
+# the simulator SDK set from the start.
+ios-install:
+	@$(MAKE) --no-print-directory ios-install-sim IOS_SDK_NAME=iphonesimulator
+
+.PHONY: ios-install-sim
+
+ios-install-sim:
+	@$(MAKE) --no-print-directory ios-standalone
+	@# The name in the plist is whichever front end was built last (both live in
+	@# one bundle), and the stamps mean a target whose binary is current does not
+	@# re-run its recipe - so an `ios-app` before this leaves CFBundleExecutable
+	@# saying S-MU2000 and installd refuses the bundle. Set it here and re-sign,
+	@# because changing the plist changes what is signed.
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Standalone" $(IOS_APP)/Info.plist
+	@# Ad-hoc, with no entitlements: a simulator install wants neither an identity
+	@# nor a profile, and the device answers are not resolved in this invocation.
+	@codesign --force --sign - --timestamp=none $(IOS_APP)
+	@if [ -z "$(IOS_SIMULATOR_UDID)" ]; then \
+	  echo "ios: no booted iPhone simulator - start one in Xcode, or:"; \
+	  echo "     xcrun simctl boot \"iPhone 17\""; \
+	  exit 1; \
+	fi
+	@xcrun simctl install "$(IOS_SIMULATOR_UDID)" $(IOS_APP)
+	@xcrun simctl launch "$(IOS_SIMULATOR_UDID)" $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" $(IOS_APP)/Info.plist)
+	@echo "ios: launched on $(IOS_SIMULATOR_UDID)"
+	@echo "     logs:    xcrun simctl spawn $(IOS_SIMULATOR_UDID) log stream --predicate 'processImagePath CONTAINS \"S-MU2000\"'"
+	@echo "     picture: xcrun simctl io $(IOS_SIMULATOR_UDID) screenshot /tmp/panel.png"
+	@echo "     ROMs:    launch it once and use the card menu, or IOS_ROMS=roms on the build above"
+
+# Both front ends live in one bundle and choose between themselves by name, so each
+# target must SET the name rather than inherit whatever the other left behind.
+# Neither did at first, and the symptom was confusing rather than obvious:
+#   make ios-standalone ... ; make ios-app ...   -> nothing to do, and the app still
+#     ran the standalone, because CFBundleExecutable still said Standalone
+# deleting the app first "fixed" it, because that re-copied Info.plist from source.
+#
+# A stamp per front end, each depending on the binary, the plist and the shared
+# assets, with the sign last - the sign has to cover the final contents.
+# Both stamps must be DEFINED before they are USED as targets. := expands
+# immediately, so a use above the definition yields an empty target name and
+# make reports nothing to do with no error at all. That happened once: the
+# standalone's stamp was defined 25 lines below its own rule.
+IOS_PANEL_DIR   := $(IOS_APP)/art/real
+
+
+IOS_SMOKE_STAMP := $(IOS_ROOT)/.smoke.stamp
+IOS_APP_STAMP  := $(IOS_ROOT)/.standalone.stamp
+
+$(IOS_SMOKE_STAMP): $(IOS_APP_BIN) $(IOS_APP)/Info.plist $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable S-MU2000" \
+	    $(IOS_APP)/Info.plist
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
+	@touch $@
+
+.PHONY: ios-app
+
+ios-app: $(IOS_SMOKE_STAMP)
+	@echo "smoke host: $(IOS_APP)"
+
+# Points CFBundleExecutable at Standalone and re-signs, so one .app can carry either
+# front end. Two things make this its own target rather than a step inside
+# ios-app-roms: the plist is a *parallel* dependency, so PlistBuddy rewriting it while
+# codesign was reading it gave "bundle format unrecognized, invalid, or unsuitable";
+# and the sign has to come after the swap, or the signature covers the wrong contents.
+# **Signing is last, and everything that goes into the bundle is a prerequisite of
+# this rule** - the binary, the plist, the artwork and the ROMs. As siblings of the
+# stamp they were all runnable in parallel with codesign, which signed a bundle whose
+# Resources/panel was still being filled; the signature then covered the wrong
+# contents and the install failed. Ordering inside a rule cannot fix that, only a
+# dependency can.
+#
+# The two ROM targets are .PHONY and often no-ops (IOS_ROMS unset), which is fine:
+# a phony prerequisite simply always runs, and running it with an empty IOS_ROMS
+# does nothing.
+$(IOS_APP_STAMP): $(IOS_STANDALONE) $(IOS_APP)/Info.plist \
+                  $(IOS_PANEL_DIR)/panel.txt ios-app-roms $(IOS_APPEX_STAMP) $(IOS_APP_SIGN_DEPS)
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Standalone" \
+	    $(IOS_APP)/Info.plist
+	$(IOS_REQUIRE_IDENTITY)
+	@codesign --force --sign "$(IOS_CODESIGN_ID)" --timestamp=none $(IOS_APP_SIGN_FLAGS) $(IOS_APP)
+	@touch $@
+
+.PHONY: ios-app-stamp
+
+ios-standalone: $(IOS_APP_STAMP)
+	@echo "standalone: $(IOS_APP)"
+
+# The panel artwork, for the standalone. Same shape as the VST3 bundle's
+# $(VST3_PANEL) rule, but NOT under Resources/panel/: any subdirectory under the
+# app's Resources/ breaks ad-hoc codesign with
+#   "bundle format unrecognized, invalid, or unsuitable"
+# verified by bisection - an empty Resources/emptydir/ fails, a lone
+# Resources/lone.txt signs, and even the Apple-blessed Resources/en.lproj/ fails.
+# Top-level directories (Frameworks/sub/, roms/, art/) sign fine. The likely
+# mechanism, offered as a hypothesis rather than a fact: in iOS bundles lproj dirs
+# and artwork live at the top level, and Resources/-with-subdirs is a macOS-bundle
+# shape (Contents/Resources), so format detection misfires on a flat bundle that has
+# one. Either way the empirical rule is solid: keep subdirs out of Resources/.
+#
+# So the art goes to S-MU2000.app/art/real/, which layout::find_default() reaches
+# through its step 4 (module_dir + "art/real/panel.txt") with no code change: on the
+# flat iOS bundle module_dir() is the app root itself. The images resolve relative
+# to panel.txt, so they sit beside it.
+#
+# These are our own artwork (drawn by tools/panel_art/make_panel.py), not Yamaha's, so
+# unlike the ROMs they are not gated behind IOS_ROMS.
+$(IOS_PANEL_DIR)/panel.txt: $(wildcard art/real/*.png) art/real/panel.txt
+	@mkdir -p $(dir $@)
+	@cp -f art/real/*.png art/real/panel.txt $(dir $@)
+
+.PHONY: ios-panel-art
+
+ios-panel-art: $(IOS_PANEL_DIR)/panel.txt
+
+# The appex gets its own copy: S-MU2000AU.appex/art/real/. The extension is a
+# separate process with its own module_dir (the appex root), so the app's copy is
+# unreachable from it - and without this the AUv3 UI would silently fall back to
+# built-in defaults while the standalone shows full art. Same step-4 lookup, same
+# top-level shape that signs. Duplicated bytes, zero shared-container wrangling.
+$(IOS_APPEX)/art/real/panel.txt: $(wildcard art/real/*.png) art/real/panel.txt
+	@mkdir -p $(dir $@)
+	@cp -f art/real/*.png art/real/panel.txt $(dir $@)
+
+.PHONY: ios-appex-art
+
+ios-appex-art: $(IOS_APPEX)/art/real/panel.txt
+
+# The standalone's ROMs. Beside the binary (S-MU2000.app/roms/), which is engine
+# candidate 3b (module_dir + "roms" in src/vst3/engine.cpp) - so no code change is
+# needed, and a top-level directory signs fine.
+#
+# Deliberately NOT Resources/roms: besides the codesign rule above, that path was
+# never searched for the iOS layouts anyway (the candidates are ../Resources[/roms]
+# for Contents/MacOS-style bundles, then roms/ beside the binary).
+#
+# Off by default like every other ROM rule in this Makefile: the images are Yamaha's
+# and must not travel in anything we hand out. Locally, pass the directory:
+#   make ios-standalone IOS_ROMS=roms
+ios-app-roms:
+ifneq ($(strip $(IOS_ROMS)),)
+	@rm -rf $(IOS_APP)/roms
+	@cp -R $(IOS_ROMS) $(IOS_APP)/roms
+	@echo "ROM を app に入れた: $(IOS_ROMS) -> $(IOS_APP)/roms"
+endif
+
+.PHONY: ios-app-roms
+
+.PHONY: ios-app ios-standalone
+
+ios-auv3: $(IOS_BIN) ios-auv3-roms
+	@echo "iOS 拡張: $(IOS_APPEX)"
+	@echo "これを .app に入れて起動すれば登録される（ROM は app group に置く）"
+
+.PHONY: ios-auv3
+
+endif # filter ios%,$(MAKECMDGOALS)
+
+# The fence above means these two exist only on macOS, where nothing above can
+# build them. Saying so beats "No rule to make target", which is what a Windows
+# or Linux builder would otherwise get from `make ios`.
+else
+
+.PHONY: ios ios-install
+
+ios:
+	@echo "iOS builds need macOS with Xcode: the iOS toolchain, the simulator and"
+	@echo "the signing identities are all macOS tools (make ios on macOS lists the"
+	@echo "targets)."
+
+ios-install:
+	@$(MAKE) ios
+
+endif # PLATFORM is macos

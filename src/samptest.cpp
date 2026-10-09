@@ -2104,6 +2104,54 @@ static smu2000::voicelib::item g_lib_item;      // ライブラリの確かめ�
 				      "、組は" + (cc_bank_kept ? "そのまま" : "書き換わった") + "、同じ番号の知らせで" + (cc_kept ? "残る" : "消える") + "、違う番号の知らせで" +
 				      (cc_dropped ? "戻る" : "残る") + "、プログラムチェンジで" + (cc_pc ? "戻る" : "残る") + "、押したまま 2 倍音 " + std::to_string(second(h1)) +
 				      " → " + std::to_string(second(h2)) + " → " + std::to_string(second(h3)) + " 倍");
+
+				// 画面のエディタのための口: 欄の値を CC の値にして戻すと同じ（fc_get_param）、欄を選んで捨てられる（clear_edits）
+				bool get_same = true;
+				for (int i = 0; i < vb::FC_PARAMS; i++)
+					for (int x = 0; x < 128; x++) {
+						vb::fc_voice a;
+						vb::fc_set_param(a, i, x);
+						vb::fc_voice b2;
+						vb::fc_set_param(b2, i, vb::fc_get_param(a, i));
+						get_same = get_same && std::memcmp(&a, &b2, sizeof(a)) == 0;
+					}
+				vb::fc_board pick;
+				pick.midi(0xc0, 0, 0);
+				pick.midi(0xb0, 23, 0);
+				pick.midi(0xb0, 27, 9);
+				pick.clear_edits(1u << vb::FC_P_DUTY1);
+				const vb::fc_voice pv = pick.current();
+				const bool pick_ok = pick.edited() == (1u << vb::FC_P_DECAY) && pv.duty[0] == 2 && pv.decay == 9;
+				pick.clear_edits();
+				check(get_same && pick_ok && pick.edited() == 0,
+				      "FC ボードの音色の欄を CC の値で読み出せて、欄を選んで捨てられる",
+				      std::string("読み出しは") + (get_same ? "同じ" : "違う") + "、選んで捨てると" + (pick_ok ? "ほかは残る" : "食い違う"));
+
+				// 番号の付け替え（fc_cc_map）: デューティ 1 を CC50 にすると CC50 で動き、CC23 では動かない。使えない番号は断る。
+				// 使われている番号を付けると元の欄から外れる。設定の形にして読み戻すと同じで、変な値は 0（割り当てない）になる
+				vb::fc_cc_map map;
+				const bool map_default = map.param_of(23) == vb::FC_P_DUTY1 && map.param_of(0) < 0 && map == vb::fc_cc_map();
+				const bool map_set = map.assign(vb::FC_P_DUTY1, 50) && !map.assign(vb::FC_P_WAVE, 7) && !map.assign(vb::FC_P_WAVE, 120) &&
+				                     map.param_of(50) == vb::FC_P_DUTY1 && map.param_of(23) < 0 && map.cc[vb::FC_P_WAVE] == 20;
+				vb::fc_board mapped;
+				mapped.set_cc_map(map);
+				mapped.midi(0xc0, 0, 0);
+				mapped.midi(0xb0, 23, 0);
+				const bool old_ignored = mapped.edited() == 0;
+				mapped.midi(0xb0, 50, 0);
+				const bool new_works = mapped.edited() == (1u << vb::FC_P_DUTY1) && mapped.current().duty[0] == 0;
+				const bool map_steal = map.assign(vb::FC_P_DECAY, 50) && map.cc[vb::FC_P_DUTY1] == 0 && map.param_of(50) == vb::FC_P_DECAY &&
+				                       map.assign(vb::FC_P_DECAY, 0) && map.param_of(50) < 0;
+				const vb::fc_cc_map back_map = vb::fc_cc_parse(vb::fc_cc_text(map));
+				const vb::fc_cc_map odd = vb::fc_cc_parse("7,300,-4,40,40,x,41");
+				const bool map_text = back_map == map && vb::fc_cc_parse("") == vb::fc_cc_map() &&
+				                      odd.cc[0] == 0 && odd.cc[1] == 0 && odd.cc[2] == 0 && odd.cc[3] == 40 && odd.cc[4] == 0 && odd.cc[5] == 0 &&
+				                      odd.cc[6] == 41 && odd.cc[7] == vb::FC_PARAM_CC[7];
+				check(map_default && map_set && old_ignored && new_works && map_steal && map_text,
+				      "FC ボードの音色の値を動かす CC の番号を付け替えられる",
+				      std::string("初期の番号は") + (map_default ? "合う" : "合わない") + "、付け替えは" + (map_set ? "通る" : "通らない") + "、元の番号は" +
+				      (old_ignored ? "効かない" : "まだ効く") + "、新しい番号は" + (new_works ? "効く" : "効かない") + "、使われている番号は" +
+				      (map_steal ? "元から外れる" : "重なる") + "、設定の形は" + (map_text ? "読み戻せる" : "食い違う"));
 			}
 
 			// 架空のボードを挿したまま起動すると、firmware の「Checking PLG」に答える（doc/plg-protocol.md）。

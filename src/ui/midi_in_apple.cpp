@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 //
-// CoreMIDI input for macOS. Same interface as midi_in.cpp (WinMM).
+// CoreMIDI input, for macOS and iOS alike - CoreMIDI.h is complete on both, so
+// this file compiles for either unchanged. Same interface as midi_in.cpp (WinMM).
 //
 // CoreMIDI is friendlier than WinMM here: it hands over a whole packet list,
 // SysEx included, on its own thread. There are no receive buffers to pre-post,

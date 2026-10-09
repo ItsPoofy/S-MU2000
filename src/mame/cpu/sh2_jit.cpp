@@ -25,6 +25,13 @@
 
 #include "sh2.h"
 
+// TARGET_OS_IPHONE decides the iOS exclusion below, so it comes from Apple's own
+// header rather than from a build flag nobody will remember to pass. Guarded by
+// __APPLE__ because there is no such header anywhere else.
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 // JIT を使うか:
 //   x86-64 と arm64（MinGW の __x86_64__ と MSVC の _M_X64 の両方。これで MSVC x64 も JIT を使う）
 //   x86-32 の移植（Phase 3 で完了）。32bit では SMU_JIT32_PORT_SH2 を自分で define して
@@ -33,7 +40,17 @@
 #if defined(_WIN32) && (defined(__i386__) || defined(_M_IX86)) && !defined(SMU_JIT32_NO_SH2)
 	#define SMU_JIT32_PORT_SH2
 #endif
-#if defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64)
+// iOS cannot JIT, even though it is __aarch64__. MAP_JIT pages need
+// pthread_jit_write_protect_np to become writable and that call is unavailable on
+// iOS, so the mapping succeeds but the first write faults with
+// KERN_PROTECTION_FAILURE inside exec_mem::copy_code - seen on the simulator on the
+// first boot, with the firmware's ROMs already loaded (Standalone-*.ips,
+// sh2_device::jit::init <- jit::compile <- jit_run). jit::init returning false
+// selects the interpreter, which is fully working, so this is a fallback and not a
+// loss.
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define SMU2000_SH2_JIT 0
+#elif defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64)
 #define SMU2000_SH2_JIT 1
 #elif defined(_WIN32) && (defined(__i386__) || defined(_M_IX86)) && defined(SMU_JIT32_PORT_SH2)
 #define SMU2000_SH2_JIT 1
