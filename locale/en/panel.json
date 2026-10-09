@@ -1,0 +1,74 @@
+{
+	// Bottom strip tabs (panel.cpp)
+	"tab_panel": "Panel",
+	"tab_editor": "Editor",
+	"tab_effects": "Effects",
+
+	// Front page hint (panel.cpp)
+	"hint_front": "Turn the big dial with the wheel / click buttons / keys: A=PLAY E=EDIT U=UTIL F=EFFECT [ ]=PART",
+
+	// Editor page (editor.cpp)
+	// may contain \n
+	"editor_hint": "Drag knobs up/down, or use the wheel.\nSends XG parameter changes.\nValues are read back from the MU2000.",
+	"editor_xg_reset": "XG reset",
+	"editor_all_off": "All notes off",
+
+	// Effects page (effects.cpp)
+	"effects_title": "Effects (sending XG parameter changes)",
+	"effects_values_note": "Values are read back from the MU2000. Changes from the panel or songs appear here too.",
+
+	// may contain \n
+	"effects_insertion_note": "Insertion works on the selected part. Variation can be used as insertion\nby setting CONNECT to INSERTION.",
+
+	// panel.txt parse errors (layout.cpp; printf format taking %d and %s)
+	"layout_line_error": "line %d: %s\n",
+
+	// Engine boot log (engine.h, bootcache.h; shown on the terminal).
+	// The *_fmt entries are printf formats taking the shown arguments.
+	// %s: a ROM file problem
+	"engine_warn_fmt": "warning: %s\n",
+
+	// %s: settings file in use
+	"engine_nvram_fmt": "Settings: %s\n",
+
+	// %s: snapshot path
+	"engine_boot_cached_fmt": "Booted from snapshot (%s)\n",
+
+	// %s: snapshot path
+	"engine_boot_saved_fmt": "Saved boot snapshot: %s\n",
+
+	// shown in the window's message area
+	"engine_boot_failed": "Boot failed",
+
+	// shown in the window's message area
+	"engine_resetting": "Factory resetting...",
+	"engine_restarting": "Restarting...",
+	"engine_reset_done": "Factory reset done\n",
+
+	// %s
+	"bootcache_read_error_fmt": "Cannot read boot snapshot: %s\n",
+
+	// %s: device and backend error
+	"audio_switch_failed_fmt": "Cannot switch audio output:\n%s",
+
+	// Status line (status.h, app.h; printf format taking %d, %.0f, %.1f
+	// and three %s). status_none fills IN/OUT with no port, status_booting
+	// shows while the engine is not up yet.
+	"status_format": "Voices %d/128  CPU %.0f%%  worst %.1f ms  %s   IN: %s   OUT: %s   (pick ports from the MIDI IN A jack or by right-click)",
+	"status_none": "none",
+	"status_booting": "Starting...",
+
+	// Status middle per backend (app_win.h, app_mac.h, app_linux.h): what
+	// each audio backend measures. Shown inside status_format's %s.
+	// %.0f ms of wait, drop count
+	"status_middle_win_fmt": "wait %.0f ms  late %llu",
+
+	// drop count
+	"status_middle_mac_fmt": "late %llu",
+
+	// drop count
+	"status_middle_linux_fmt": "starved %llu",
+
+	// Command-line help (tool_args.h; may contain \n, no printf verbs).
+	"help_usage": "Usage: gui <rom directory> [--midi N] [--midi-b N] [--midi-c N] [--midi-d N] [--midi-e N] [--midiout N] [--midiout-b N] [--midiout-mu N] [--latency ms] [--exclusive] [--layout panel.txt] [--play song.mid] [--lcd] [--fast-midi] [--host-midi]\n        [--factory]   forget remembered settings and boot factory-fresh\n        [--editor]    also open the PC editor (F2 or right-click in the window)\n        [--list-window] also open the list window (F3 or right-click)\n        [--fx-window] also open the insertion setup window (double-click an insertion cell in the list)\n        [--shapes-window] also open the part voice window (double-click a VIB picture etc. in the list)\n        [--master-window] also open the master window (double-click the master row)\n        [--sampling-window] also open the sampling window\n        [--player-window] also open the MIDI player window\n        [--board-window] also open the plug-in boards window\n        [--lang ja|en] language (else lang= in editor.ini, else the locale: Japanese iff it says ja)\n        [--help]      show this help\n        gui --dump-layout panel.txt   write out the current layout\n        gui --list\n        gui [<rom directory> --boot] --shot image.png [--size 1000x400]\n"
+}
