@@ -163,7 +163,7 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	// bridge, four MIDI inputs (mu2000::MIDI_PORTS of them) and three outputs
 	// (THRU A, THRU B, and the machine's own OUT), then the app over them.
 	static ui::bridge br;
-	static ui::midi_in  midi_ports[mu2000::MIDI_PORTS];
+	static ui::midi_in  midi_ports[ui::IN_PORTS];
 	static ui::midi_out mout, mout_b, mout_mu;
 	static ui::gui_app gui(br, midi_ports, mout, mout_b, mout_mu);
 	ui::g_gui = &gui;
