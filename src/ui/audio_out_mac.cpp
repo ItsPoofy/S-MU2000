@@ -261,6 +261,7 @@ struct audio_out::impl
 	audio_stream_renderer renderer;
 	audio_stream_options stream;
 	u32 rate = AUDIO_RATE, channels = 2;
+	bool software_conversion = false;
 	AudioDeviceID dev = kAudioObjectUnknown;
 	bool      hog_owned = false;   // we have the device to ourselves
 	bool      hog_took = false;    // and taking it is what got it, so we give it back
@@ -309,7 +310,10 @@ struct audio_out::impl
 		}
 		interleaved = io->mNumberBuffers == 1 ? static_cast<s16 *>(io->mBuffers[0].mData) : scratch.data();
 		if (!interleaved) return;
-		renderer.render(interleaved, frames, channels, stream.left, stream.right, fill, audio_stream_renderer::pcm16);
+		if (software_conversion)
+			renderer.render(interleaved, frames, channels, stream.left, stream.right, fill, audio_stream_renderer::pcm16);
+		else
+			fill(interleaved, frames); // original 44.1 kHz stereo; CoreAudio converts
 		if (io->mNumberBuffers > 1) {
 			unsigned ch = 0;
 			for (UInt32 b = 0; b < io->mNumberBuffers; b++) {
@@ -442,17 +446,17 @@ audio_out::~audio_out()
 		for (const auto &range : ranges)
 			if (rate >= range.mMinimum && rate <= range.mMaximum) { m_info.rates.push_back(rate); break; }
 	if (m_info.rates.empty()) m_info.rates.push_back(int(hardware.mSampleRate));
-	up->rate = m_stream.sample_rate ? u32(m_stream.sample_rate) : u32(hardware.mSampleRate);
-	up->channels = hardware.mChannelsPerFrame;
-	if (!valid_audio_route(m_stream, up->channels)) return dispose("The selected output channels are unavailable");
+	if (!valid_audio_route(m_stream, hardware.mChannelsPerFrame)) return dispose("The selected output channels are unavailable");
+	up->software_conversion = custom_audio_format(m_stream);
+	up->rate = up->software_conversion ? (m_stream.sample_rate ? u32(m_stream.sample_rate) : u32(hardware.mSampleRate)) : AUDIO_RATE;
+	up->channels = up->software_conversion ? hardware.mChannelsPerFrame : 2;
 	up->stream = m_stream;
-	up->renderer.configure(int(up->rate), m_stream.quality);
+	if (up->software_conversion) up->renderer.configure(int(up->rate), m_stream.quality);
 	m_info.rate = int(up->rate);
 	m_info.buffer_rate = int(hardware.mSampleRate);
 	m_capture_rate = up->rate;
 	m_capture_channels = up->channels;
-	// Generate 16-bit interleaved audio at the requested stream rate, with
-	// the hardware channel count. CoreAudio converts to the device format.
+	// Auto/default routing keeps the original client format and conversion path.
 	AudioStreamBasicDescription fmt{};
 	fmt.mSampleRate       = up->rate;
 	fmt.mFormatID         = kAudioFormatLinearPCM;

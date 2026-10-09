@@ -43,7 +43,7 @@ PaDeviceIndex find_output(audio_driver driver, const std::string &wanted, bool e
 		for (int i = 0; i < host->deviceCount; i++) {
 			const auto index = Pa_HostApiDeviceIndexToDeviceIndex(api, i);
 			const auto *info = Pa_GetDeviceInfo(index);
-			if (!info || info->maxOutputChannels < 2) continue;
+			if (!info || info->maxOutputChannels < 1) continue;
 			const std::string name = info->name;
 			if (pass == 0 ? name == wanted : name.find(wanted) != std::string::npos) return index;
 		}
@@ -132,7 +132,7 @@ void audio_out::run_portaudio(int latency_ms)
 	mapping.flags = paAsioUseChannelSelectors; mapping.channelSelectors = selectors;
 	PaStreamParameters output{};
 	output.device = device;
-	output.channelCount = asio ? 2 : std::max(m_stream.left, m_stream.right) + 1;
+	output.channelCount = std::min(info->maxOutputChannels, asio ? 2 : std::max(m_stream.left, m_stream.right) + 1);
 	output.sampleFormat = paFloat32;
 	output.suggestedLatency = asio ? 0.0 : (latency_ms > 0 ? double(latency_ms) / 1000 : info->defaultLowOutputLatency);
 	output.hostApiSpecificStreamInfo = asio ? &mapping : nullptr;

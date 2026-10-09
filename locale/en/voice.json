@@ -1,0 +1,199 @@
+{
+	// Part voice window (part_shapes.cpp).
+	"ps_graph": "Graph",
+	"ps_knobs": "Knobs",
+
+	// may contain \n
+	"ps_hint_knobs": "Showing knobs (drag the value bars). Click to switch to the graph.",
+
+	// may contain \n
+	"ps_hint_graph": "Showing the graph (drag the picture). Click to switch to knobs.",
+	"ps_tab_shape": "Shape",
+	"ps_tab_all": "All",
+	"ps_tab_drum": "Drum",
+	"ps_out_label": "Send to",
+	"ps_out_label_ctrl": "Ctrl+right-click sends to",
+	"ps_out_panel": "Panel ports",
+	"ps_out_hint": "Where Ctrl+right-click sends. Ordinary edits (dragging a knob or slider) do not go here, they go to the built-in sound engine\nCtrl+right-click a value, fader or key to send just that parameter (not to the sound engine) so a sequencer can record it. A section heading sends the whole section, the MW wheel sends CC1, the bend wheel sends pitch bend, a voice or kit row sends bank select and program change; in the editor's drum page, a cell sends that item and a key or name sends the whole key. Panel ports: parts on A go to THRU A, on B to THRU B",
+	"ps_out_sent_fmt": "Sent %s (%d)",
+	"ps_out_no_rcv": "Not sent: the part's receive channel is OFF",
+	"ps_drum_not": "This part is not a drum part (part mode DRUMS1-4). Choose a drum kit or set the part mode to DRUMS1-4 to edit its keys here",
+	"ps_drum_plain": "Part mode DRUM (no number) ignores every drum setup. Set it to DRUMS1-4 to edit its keys here",
+	"ps_drum_mode_hint": "Which drum setup (DRUMS1-4) this part uses. DRUM (no number) takes no setup. Changing the kit resets the setup it uses",
+	"ps_drum_play": "Play",
+	"ps_drum_follow": "Follow played keys",
+	"ps_drum_title_mix": "Pitch, level, pan and sends",
+	"ps_drum_title_filter": "Filter and EQ (this key)",
+	"ps_drum_title_env": "EG (this key)",
+	"ps_drum_no_shape": "No picture for this key (no sound in this kit)",
+	"ps_drum_env_fmt": "Attack %.0f ms   Decay 1 %.0f ms   Decay 2 to %.0f dB",
+	"ps_drum_pitch_fmt": "Pitch %+.2f semitones",
+	"ps_title_vib": "Vibrato (VIB)",
+	"ps_title_wobble": "Wobble (VIB/MW/BEND)",
+	"ps_about_wobble": "One picture for the wobble. Sideways is the modulation wheel (0 at the left, 127 at the right), up/down is cents. The background wave is the vibrato itself, getting deeper towards the right. The orange dotted line is the voice's own depth (it moves with Vib Depth); where the curve passes it, the wheel starts to win. Below are Rate, Depth, Delay and MW LFO PM, plus the live MW (CC1) and pitch bend. Letting the bend go springs it back to the middle (Ctrl+release keeps it)",
+	"ps_bend_hint_fmt": "PITCH BEND  %+d (%+.2f semitones)\nDrag sideways to bend (Shift for finer, wheel for steps). Letting go springs back to the middle, Ctrl+release keeps it. Sends pitch bend to the receive channel",
+	"ps_title_mod": "Modulation (MW)",
+	"ps_title_filterenv": "Filter and EQ (FILTER/EQ)",
+	"ps_title_env": "EG and pitch EG (EG/PEG)",
+
+	// may contain \n
+	"ps_about_vib": "Voice wobble (vibrato). The picture is the actual wobble including Depth (the thin gray line is the voice's own wobble at the default Depth 64). The faders change speed (Rate), depth (Depth) and delay (Delay)",
+
+	// may contain \n
+	"ps_about_mod": "Extra vibrato from raising the modulation wheel. Sideways is wheel position, up/down is depth. The left wheel is CC1, the right is MW LFO PM. Louder of the two wins over the voice's own wobble (the background band)",
+
+	// may contain \n
+	"ps_about_filterenv": "Brightness. Sideways is real frequency; green is this part's spectrum now. Thick is filter plus part EQ (thin is filter alone, dotted EQ alone). Per voice, EQ right after the filter (before insertion). Faders change Cutoff, Resonance, HPF and the EQ bass/treble gains and frequencies",
+
+	// may contain \n
+	"ps_about_env": "Volume shape (blue: attack, decay, sustain, release) and pitch movement (orange) on one real-time axis with one release time. Left is volume (dB), right is pitch (cents). Faders change EG Attack, Decay, Release and pitch EG Init, Attack, Rel Lv, Rel Tm. Green background is the spectrum after the EG (horizontal is frequency, before insertion).",
+
+	// %d %d
+	"ps_fx_ins_fmt": "Insertion %d (INS %d)",
+	"ps_fx_var_ins": "Variation (VAR, as insertion)",
+	"ps_fx_var": "Variation (VAR)",
+	"ps_fx_cho": "Chorus (CHO)",
+	"ps_fx_rev": "Reverb (REV)",
+
+	// may contain \n
+	"ps_about_fx_part": "The effect on this part. Top: this part's spectrum after (green) and before (gray) at the same scale. Bottom: change type and parameters. Details opens the settings window.",
+
+	// may contain \n
+	"ps_about_fx_var": "Variation. With both [INS] and [PART] on in the header row, it plays on this part and type and parameters are editable here. Otherwise, only this part's send (Var Send) changes at the bar right of the type row (knobs are view-only). Top is output (green) and input (gray) spectra.",
+
+	// may contain \n
+	"ps_about_fx_sys": "A system effect this part sends to. Top: output (green) and input (gray) spectra mixing all parts' sends. Bottom: change type, return, pan and parameters. Details opens the settings window.",
+	"ps_title_route": "Routing (sends and order)",
+
+	// may contain \n
+	"ps_about_route": "Which effects this part's sound goes through. Drag the send amounts up/down, wheel, or double-click to change. XG order is fixed VAR to CHO to REV; Flow opens and closes front-to-back sends to pick parallel or series order. Shift plus wheel scrolls sideways.",
+	"ps_tab_matrix": "Matrix",
+	"ps_hint_bar": "Hover over an item for an explanation here (uncheck Show help to hide this bar)",
+	"ps_board_note": "This is a channel of the plug-in board on port E, not one of the MU's parts. Pick its voice on the left. In the row above, drag the bars for volume, expression, pan, pitch bend, modulation and the variation / chorus / reverb sends; click INS to send the channel through an insertion effect; press the keys to play it, or play from the PC keyboard. Right-click keys to mark them: marked keys sound for a second each time you pick a voice.\n\nThe vibrato, filter, envelope and EQ pictures belong to the MU's own tone generator, so there are none for a board channel.",
+
+	// Modulation matrix (part_shapes.cpp): row/column labels rebuilt per
+	// call (cheap, always current); keys stay in the static tables.
+	"mx_src_mw_name": "Modulation",
+	"mx_src_mw_about": "Modulation wheel (CC1)",
+	"mx_src_bend_name": "Pitch bend",
+	"mx_src_bend_about": "Pitch bend (amount from center, either direction)",
+	"mx_src_cat_name": "Channel AT",
+	"mx_src_cat_about": "Channel aftertouch (key pressure, one per channel)",
+	"mx_src_pat_name": "Poly AT",
+	"mx_src_pat_about": "Polyphonic aftertouch (pressure per key)",
+	"mx_src_ac1_name": "AC1",
+	"mx_src_ac1_about": "AC1 (control change set by AC1 CC No)",
+	"mx_src_ac2_name": "AC2",
+	"mx_src_ac2_about": "AC2 (control change set by AC2 CC No)",
+	"mx_dst_pitch_name": "Pitch",
+	"mx_dst_pitch_sub": "Pitch",
+	"mx_dst_filter_name": "Filter",
+	"mx_dst_filter_sub": "Filter",
+	"mx_dst_amp_name": "Volume",
+	"mx_dst_amp_sub": "Amp",
+	"mx_dst_lfo_pmod_name": "LFO pitch",
+	"mx_dst_lfo_pmod_sub": "Vibrato",
+	"mx_dst_lfo_fmod_name": "LFO filter",
+	"mx_dst_lfo_fmod_sub": "Wah",
+	"mx_dst_lfo_amod_name": "LFO volume",
+	"mx_dst_lfo_amod_sub": "Tremolo",
+
+	// %s %s + row help
+	"mx_hint_cc_fmt": "%s\n%s. The 6 cells in this row are what this source moves. Wheel over a header changes the CC number",
+
+	// %s + row help
+	"mx_hint_row_fmt": "%s\nThe 6 cells in this row are what this source moves",
+
+	// %s %s %s %s %s %s
+	"mx_hint_cell_fmt": "%s  %s\n%s → %s. %s (drag up/down, wheel, double-click for default %s)",
+
+	// %s %s
+	"mx_dst_sub_fmt": "%s (%s)",
+
+	// Variation switches, fx panels, flow graphics (upstream part-voice
+	// rework). Node names resolve through ps_flow_node().
+	// %s
+	"ps_var_part_hint": "%s\nOn puts the variation on this part (off: on no part). Only applies in insertion (INS) connection; with both INS and PART on, type and parameters are editable here",
+
+	// %s
+	"ps_var_ins_hint": "%s\nOn: insertion connection (whole sound of the played part passes through, splitting into dry plus reverb/chorus sends); off: system connection (collects all parts' Var Send, mixes at return). Only one variation exists, shared with other parts. While INS and PART are not both on, only this part's Send is editable here",
+	"ps_var_cap_sys": "SYSTEM (all parts' Send)",
+	"ps_fx_legend_part": "Green: processed  Gray: unprocessed (this part only)",
+	"ps_fx_legend_sys": "Green: out  Gray: in (all parts' sends mixed)",
+
+	// %s: part
+	"ps_fx_other_part_fmt": "Another part's (%s) insertion. This part's Var Send does nothing",
+	"ps_fx_other_none": "Insertion-connected but on no part. This part's Var Send does nothing",
+
+	// EQ overlay caption (may contain ±)
+	"ps_fx_eq_title": "EQ/filter (guide)  +/-18 dB",
+
+	// %s: top frequency
+	"ps_fx_wah_touch_fmt": "Stronger hit goes to %s",
+
+	// %s: top frequency
+	"ps_fx_wah_lfo_fmt": "LFO to %s",
+	"ps_fx_type_fallback": "Effect type",
+	"ps_fx_details": "Details",
+
+	// may contain \n
+	"ps_fx_details_hint": "Effect settings window\nA window with big knobs and explanations for this effect",
+
+	// %s %s
+	"ps_fx_viewonly_fmt": "%s  %s\nNot this part's insertion, so view-only here (turn on INS and PART above to edit)",
+
+	// %s %s %s
+	"ps_fx_param_fmt": "%s  %s\n%s (drag up/down, wheel, double-click to type a value)",
+	"ps_node_part": "Part",
+	"ps_node_var": "Variation",
+	"ps_node_cho": "Chorus",
+	"ps_node_rev": "Reverb",
+	"ps_node_out": "Out",
+
+	// %s: part or OFF
+	"ps_node_ins_fmt": "(insertion: %s)",
+	"ps_node_part_hint": "This part's sound (after insertion)",
+	"ps_node_dry_hint": "Dry plus returns mixed, to master EQ",
+
+	// %s %d + why idle
+	"ps_var_send_idle_fmt": "%s  %d (ineffective)\nVariation is insertion-connected, so part sends do nothing. Values stay movable; switching back to system connection (INS off) sends at this value",
+	"ps_why_0_mine": "This part's sound fully passes through variation (Var Send unused)",
+	"ps_why_0_other": "Variation is on another part (or OFF); this part's sound does not pass through",
+	"ps_why_3_mine": "This part's sound fully passes through variation, so there is no dry sound passing by (Dry Level unused)",
+	"ps_why_3_other": "During insertion connection, Dry Level works on no part; dry sound is always max",
+	"ps_why_45": "During insertion connection, sends from variation to chorus/reverb do nothing. Sound through variation is sent by the part's Cho Send and Rev Send",
+	"ps_why_7_mine": "Sound through variation goes straight to output (Var Return unused)",
+	"ps_why_7_other": "Variation does not pass this part's sound",
+
+	// %s %s %s
+	"ps_badge_fixed_fmt": "%s (pinned by insertion connection)\n%s. Adjustable via %s; takes effect when back in system connection. Switch with [INS] in the variation panel",
+	"ps_where_dialog": "the settings window (variation Details)",
+	"ps_where_fader": "the fader below",
+
+	// %s %d %s
+	"ps_badge_fmt": "%s  %d\n%s (drag up/down, wheel, double-click to alternate 0 and default)",
+	"ps_pre_parallel": "Parallel",
+	"ps_pre_parallel_about": "Play the 3 separately (all front-to-back sends at 0)",
+	"ps_pre_vcr": "V-C-R",
+	"ps_pre_vcr_about": "Variation out to chorus, chorus out to reverb (series)",
+	"ps_pre_vr": "V-R",
+	"ps_pre_vr_about": "Variation out to reverb only",
+	"ps_pre_cr": "C-R",
+	"ps_pre_cr_about": "Chorus out to reverb only",
+	"ps_flow_ways": "Flow",
+
+	// %s %s, may contain \n
+	"ps_flow_ways_hint": "Flow: %s\n%s. XG order is fixed VAR to CHO to REV, never back to front. Part sends and returns stay as they are",
+
+	// Variation send slider + folding voice pane (upstream rework).
+	// %s %d
+	"ps_var_send_hint": "%s  %d\nThis part's send to variation (works in system connection). Drag to change",
+
+	// may contain \n
+	"ps_fold_open_hint": "Open the voice panel\nShow category, voice and bank columns on the left",
+
+	// may contain \n
+	"ps_fold_close_hint": "Fold the voice panel\nFold category, voice and bank columns to the left edge, giving the width to the right tabs",
+	"ps_fold_char1": "V",
+	"ps_fold_char2": "o"
+}

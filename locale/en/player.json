@@ -1,0 +1,22 @@
+{
+	"ply_idle": "Nothing is playing",
+	"ply_prev": "Prev",
+	"ply_play": "Play",
+	"ply_pause": "Pause",
+	"ply_stop": "Stop",
+	"ply_next": "Next",
+	"ply_loop_none": "No loop",
+	"ply_loop_all": "Loop the list",
+	"ply_loop_one": "Loop one song",
+	"ply_loop_shuffle": "Shuffle",
+	"ply_loop_tip": "No loop: play the list once and stop. Loop the list: start again from the top. Loop one song: repeat the current song. Shuffle: play the list in a random order, shuffled again each time round.",
+	"ply_beat_fmt": "Bar %d  Beat %d   Tempo %.1f",
+	"ply_chasing": "catching up the settings...",
+	"ply_paused": "paused",
+	"ply_col_song": "Song",
+	"ply_col_len": "Length",
+	"ply_add": "Add files...",
+	"ply_clear": "Clear the list",
+	"ply_path": "Path of a MIDI file",
+	"ply_add_path": "Add"
+}

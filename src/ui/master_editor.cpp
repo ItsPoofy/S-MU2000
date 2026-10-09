@@ -141,7 +141,7 @@ void master_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 			if (ImGui::Button(UI_TEXT(me_board_open, "Plug-in boards...")))
 				request_board_window();
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", UI_TEXT(me_board_open_tip, "Opens the Plug-in Boards window: the three slots (PLG-1 to PLG-3) and, for a 16-part board, its channels."));
+				ImGui::SetTooltip("%s", UI_TEXT(me_board_open_tip, "Opens the Plug-in Boards window: the slots (PLG-1 to PLG-3, and the extra PLG-4 to PLG-6) and, for a 16-part board, its channels."));
 		} else {
 			m_boards.board_pane(br);
 		}
@@ -414,7 +414,7 @@ void master_editor::sysex_pane(const xg_snapshot &ram, bridge &br)
 		ImGui::TextDisabled("%s", xgui::file_note().c_str());
 }
 
-// プラグインボードの窓（gui）。上に差込口 3 つ（幅いっぱい）、下にマルチパートのボードの 16 チャンネル
+// プラグインボードの窓（gui）。上に差込口（幅いっぱい）、下にマルチパートのボードの 16 チャンネル
 void board_editor::draw(xg::model &m, const xg_snapshot &ram, bridge &br)
 {
 	(void)ram;
@@ -474,10 +474,14 @@ void board_panes::board_pane(bridge &br)
 	                          UI_TEXT(me_board_user, "Your own board (waves you made)") + '\0' +
 	                          UI_TEXT(me_board_user16, "Your own board, 16 parts on port E") + '\0' +
 	                          UI_TEXT(me_board_fm16, "FM board (4-operator FM), 16 parts on port E") + '\0';
-	// 差込口は実機と同じ 3 つ（PLG-1〜3）。1 段ずつ
+	// 差込口は実機と同じ 3 つ（PLG-1〜3）。1 段ずつ。その下に、増設の差込口（PLG-4〜6。本体は知らない。1 パートのボードだけ）
+	const std::string extra_kinds = std::string(UI_TEXT(me_board_none, "(none)")) + '\0' + UI_TEXT(me_board_fc, "FC board (8-bit console sounds)") + '\0' +
+	                                UI_TEXT(me_board_user, "Your own board (waves you made)") + '\0';
 	for (int slot = 0; slot < mu2000::PLG_SLOTS; slot++) {
+		if (slot == mu2000::PLG_FW_SLOTS)
+			ImGui::SeparatorText(UI_TEXT(me_board_extra_head, "Extra slots (PLG-4 to PLG-6): the MU does not know these"));
 		ImGui::PushID(slot);
-		board_slot_pane(br, slot, kinds);
+		board_slot_pane(br, slot, mu2000::board_slot_extra(slot) ? extra_kinds : kinds);
 		ImGui::PopID();
 	}
 }
@@ -491,10 +495,26 @@ void board_panes::board_slot_pane(bridge &br, int slot, const std::string &kinds
 	ImGui::SameLine();
 	bool changed = false;
 	ImGui::SetNextItemWidth(-fs * 6.5f);
-	const bool kind_changed = ImGui::Combo("##board", &m_board_kind[slot], kinds.c_str());
+	const bool extra = mu2000::board_slot_extra(slot);
+	bool kind_changed = false;
+	if (extra) {
+		// 増設の差込口の品書きは 3 つ（なし・FC ボード・オリジナルのボード）
+		static const int KINDS[3] = { mu2000::VBOARD_NONE, mu2000::VBOARD_FC, mu2000::VBOARD_USER };
+		int pick = m_board_kind[slot] == mu2000::VBOARD_FC ? 1 : m_board_kind[slot] == mu2000::VBOARD_USER ? 2 : 0;
+		if (ImGui::Combo("##board", &pick, kinds.c_str())) {
+			m_board_kind[slot] = KINDS[std::clamp(pick, 0, 2)];
+			kind_changed = true;
+		}
+	} else {
+		kind_changed = ImGui::Combo("##board", &m_board_kind[slot], kinds.c_str());
+	}
 	changed |= kind_changed;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05.\n\nThe DLS board is the same kind of board with a different tone generator: it plays a DLS sound bank that you choose (for example Windows' gm.dls), 16 channels on port E, channel 10 for drums, voices picked by bank select and program change."));
+	if (ImGui::IsItemHovered()) {
+		if (extra)
+			ImGui::SetTooltip("%s", UI_TEXT(me_board_extra_tip, "An extra slot, beyond the three the real MU has. The MU's firmware only ever talks to three boards, so a board here is known to this program alone: it plays, and the Voice window shows its voices, but the MU's own display does not name them. Single-part boards only."));
+		else
+			ImGui::SetTooltip("%s", UI_TEXT(me_board_tip, "A board that never existed, plugged in for fun. As with a real board, it plays on the part chosen below while that part is on the board's bank (MSB 90, LSB 0; plugging it in here selects it), in place of that part's own voice. On any other bank the part plays its own voice. Plugging or unplugging restarts the MU, as boards go in with the power off. Its sound goes through the MU's mixer and effects: the part's volume, expression, pan and reverb / chorus sends apply. It answers the MU's plug-in board check: the MU lists it under UTIL > PLG, PartAssign there moves it, the display names its voices and [AUDITION] plays it.\n\nFC board, program change 1-16:\n 1 square (duty 1/2)   2 square (1/4)   3 square (1/8)   4 triangle\n 5 noise   6 metallic noise   7 duty sweep   8 octave arpeggio\n 9-16 the same, fading while held\nPitch bend and the mod wheel (vibrato) work. Up to 8 notes.\n\nThe 16-part FC board is a multi-part board, like the real PLG100-XG: it does not borrow a part. It is a tone generator of its own on a fifth MIDI port, port E, after the MU's ports A-D: 16 channels, each with its own program, volume (CC7), expression (CC11), pan (CC10) and reverb / chorus sends (CC91 / CC93) into the MU's effects. The MU only lists its name under UTIL > PLG; its parts are not on the display and its voices cannot be chosen from the panel (the same on a real MU). Play it from MIDI IN E (in the port menu), the fifth port of a MIDI file, or after the cable message F5 05.\n\nThe DLS board is the same kind of board with a different tone generator: it plays a DLS sound bank that you choose (for example Windows' gm.dls), 16 channels on port E, channel 10 for drums, voices picked by bank select and program change."));
+	}
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
 	ImGui::BeginDisabled(mu2000::board_is_multi(m_board_kind[slot]));       // 16 パートのボードは本体のパートを借りない
@@ -526,7 +546,10 @@ void board_panes::board_slot_pane(bridge &br, int slot, const std::string &kinds
 			if (old_kind && mu.virtual_board_playing(slot) && (!kind || old_part != part))
 				select(old_part, 0, 0);
 			mu.set_virtual_board(kind, part, slot);
-			if (kind && old_kind && old_part != part)
+			// 増設の差込口は本体を起動し直さない（本体は知らないままなので）。挿したその場で、ボードのバンクを選ぶ
+			if (kind && mu2000::board_slot_extra(slot) && (!old_kind || old_part != part))
+				select(part, mu2000::board_bank_msb(slot), mu2000::VBOARD_BANK_LSB);
+			else if (kind && old_kind && old_part != part)
 				select(part, mu2000::board_bank_msb(slot), mu2000::VBOARD_BANK_LSB);
 			return std::string();
 		});
@@ -534,7 +557,7 @@ void board_panes::board_slot_pane(bridge &br, int slot, const std::string &kinds
 		m_board_seen[slot]->store(-1);
 		// 挿した・外した: 実機と同じく電源を入れ直す。本体（firmware）がボードを探すのは起動のときだけで、
 		// 見つけていないと液晶は Silence のまま、[AUDITION] の音もボードへ送ってこない
-		if (kind_changed) {
+		if (kind_changed && !extra) {
 			if (mu2000::board_is_multi(m_board_kind[slot]))
 				for (int o = 0; o < mu2000::PLG_SLOTS; o++)
 					if (o != slot && mu2000::board_is_multi(m_board_kind[o])) {
@@ -602,6 +625,14 @@ void board_panes::board_slot_pane(bridge &br, int slot, const std::string &kinds
 	}
 	if ((seen & 0xff) && (seen & 0xff) != m_board_part[slot])
 		m_board_part[slot] = seen & 0xff;
+	if (extra) {
+		if ((seen & 0xff) && (seen & 0xff) != m_board_part[slot])
+			m_board_part[slot] = seen & 0xff;
+		if ((seen & 0xff) && !(seen & 0x200))
+			ImGui::TextDisabled(UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB %d, LSB 0 there to hear the board"), mu2000::board_bank_msb(slot));
+		ImGui::TextDisabled(UI_TEXT(me_board_extra_note, "Plays on bank MSB %d, LSB 0. The MU's display shows Silence there; pick its voices in the Voice window."), mu2000::board_bank_msb(slot));
+		return;
+	}
 	if ((seen & 0xff) && !(seen & 0x200))
 		ImGui::TextDisabled(UI_TEXT(me_board_idle, "Silent now: that part is on another bank. Select bank MSB %d, LSB 0 there to hear the board"), mu2000::board_bank_msb(slot));
 	if (!(seen & 0x100))

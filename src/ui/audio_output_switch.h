@@ -4,6 +4,7 @@
 
 #include "audio_out.h"
 #include "audio_preferences.h"
+#include "audio_start.h"
 #include <thread>
 
 namespace ui {
@@ -12,26 +13,24 @@ struct audio_output_switch_result {
 	bool selected = false;
 	bool restored = false;
 	std::string error;
+	audio_output_config config;
 };
 
-inline audio_output_switch_result switch_audio_output(
-	audio_out &out, const audio_out::fill_fn &fill,
-	const audio_output_config &wanted, const audio_output_config &previous)
+template <typename Output, typename Fill>
+audio_output_switch_result switch_audio_output(
+	Output &out, const Fill &fill,
+	const audio_output_config &wanted, const audio_output_config &previous, bool restore = true)
 {
-	const auto open = [&](const audio_output_config &c, std::string &error) {
-		out.stop();
-		out.set_stream_options(c.preferences.stream);
-		out.set_control_panel(c.control_panel);
-		return out.start(c.preferences.latency_ms, fill, error, c.preferences.exclusive,
-		                 c.device, false, true);
-	};
 	audio_output_switch_result r;
-	if (open(wanted, r.error)) {
+	r.config = wanted;
+	if (start_audio_stream(out, fill, r.config, r.error)) {
 		r.selected = true;
 		return r;
 	}
+	if (!restore) { out.stop(); return r; }
 	std::string restore_error;
-	r.restored = open(previous, restore_error);
+	r.config = previous;
+	r.restored = start_audio_stream(out, fill, r.config, restore_error);
 	if (!r.restored) {
 		out.stop();
 		r.error += "\n" + restore_error;

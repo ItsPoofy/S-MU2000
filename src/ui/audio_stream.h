@@ -29,6 +29,11 @@ struct audio_stream_info {
 	int buffer_rate = 0; // 0: stream rate; CoreAudio periods use the hardware clock
 };
 
+inline bool custom_audio_format(const audio_stream_options &s)
+{
+	return s.sample_rate != 0 || s.left != 0 || s.right != 1;
+}
+
 inline bool valid_audio_request(const audio_stream_options &s)
 {
 	return supported_audio_driver(s.driver) && int(s.quality) >= 0 && int(s.quality) <= 2 && (s.sample_rate == 0 || (s.sample_rate >= 8000 && s.sample_rate <= 192000)) &&
@@ -38,6 +43,8 @@ inline bool valid_audio_request(const audio_stream_options &s)
 
 inline bool valid_audio_route(const audio_stream_options &s, unsigned channels)
 {
+	// The original mono path played the left side of the default stereo pair.
+	if (channels == 1 && s.left == 0 && s.right == 1) return true;
 	return s.left >= 0 && s.right >= 0 && unsigned(s.left) < channels &&
 	       unsigned(s.right) < channels && s.left != s.right;
 }
@@ -67,13 +74,14 @@ public:
 			std::fill_n(dst, size_t(n) * channels, Sample{});
 			for (unsigned i = 0; i < n; i++) {
 				dst[size_t(i) * channels + left] = convert(m_stereo[i * 2]);
-				dst[size_t(i) * channels + right] = convert(m_stereo[i * 2 + 1]);
+				if (channels > 1) dst[size_t(i) * channels + right] = convert(m_stereo[i * 2 + 1]);
 			}
 			dst += size_t(n) * channels;
 			frames -= n;
 		}
 	}
 	static s16 pcm16(float v) { return s16(std::lrint(std::clamp(v, -1.0f, 32767.0f / 32768) * 32768)); }
+	static s16 pcm16_truncate(float v) { return s16(std::clamp(v, -1.0f, 1.0f) * 32767); }
 private:
 	resampler m_rs;
 	unsigned m_chunk = 512;

@@ -48,19 +48,15 @@
 
 namespace ui {
 
-// THE list of UI languages. One line per language; the enum, the codes,
-// the display names, the count and the texts() dispatch below all derive
-// from it, so adding a language is one line here plus its data:
-//
-//   texts_xx.h          the panel/window table (checked by tools/check_texts.py)
-//   HELP/fx_help rows   one text per row (a missing one falls back to Japanese)
-//   UI_LANG_LIST entry  this list
+// THE list of UI languages: UI_LANG_LIST(X), one X(code, "name") per language.
+// It is generated (ui/lang_list.inc) from locale/languages.json by
+// tools/locale_tool.py; the enum, the codes, the display names, the count and
+// the texts() dispatch all derive from it. Adding a language is a folder under
+// locale/ and an entry in that file (locale/README.md), never an edit here.
 //
 // English must stay listed: it is the fallback when the wanted language
-// has no table.
-#define UI_LANG_LIST(X) \
-	X(ja, "日本語") \
-	X(en, "English")
+// has no table, and for every text a partial translation leaves out.
+#include "ui/lang_list.inc"
 
 enum class lang : int {
 #define X(code, name) code,
@@ -283,8 +279,11 @@ inline void resolve()
 			slot() = l;
 			return;
 		}
-		std::fprintf(stderr, "--lang: unknown language '%s' (want ja|en)\n",
-		             flag().c_str());
+		std::string want;
+		for (const char *c : LANG_CODES)
+			want += (want.empty() ? "" : "|") + std::string(c);
+		std::fprintf(stderr, "--lang: unknown language '%s' (want %s)\n",
+		             flag().c_str(), want.c_str());
 	}
 	std::string code;
 	if (editor_ini_lang(code) && lang_try_parse(code.c_str(), l)) {

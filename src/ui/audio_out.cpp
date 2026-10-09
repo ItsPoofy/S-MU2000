@@ -648,7 +648,7 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 					std::fill_n(out, size_t(n) * dev_ch, 0);
 					for (UINT32 i = 0; i < n; i++) {
 						out[size_t(i) * dev_ch + m_stream.left] = convert(mixbuf[i * 2]);
-						out[size_t(i) * dev_ch + m_stream.right] = convert(mixbuf[i * 2 + 1]);
+						if (dev_ch > 1) out[size_t(i) * dev_ch + m_stream.right] = convert(mixbuf[i * 2 + 1]);
 					}
 				};
 				if (fmt == devfmt::f32)
@@ -657,7 +657,7 @@ void audio_out::run(int latency_ms, bool want_exclusive)
 					route(reinterpret_cast<s32 *>(dst) + size_t(at) * dev_ch,
 					      [](float v) { return s32(std::clamp(v, -1.0f, 1.0f) * 8388607.0f) * 256; });
 				else
-					route(reinterpret_cast<s16 *>(dst) + size_t(at) * dev_ch, audio_stream_renderer::pcm16);
+					route(reinterpret_cast<s16 *>(dst) + size_t(at) * dev_ch, audio_stream_renderer::pcm16_truncate);
 				at += n;
 			}
 		};

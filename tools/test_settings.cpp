@@ -4,6 +4,8 @@
 #include "ui/font_file.h"
 #include "ui/settings_view.h"
 #include "ui/output_limiter.h"
+#include "ui/audio_output_switch.h"
+#include "ui/audio_device_watch.h"
 #include "imgui_internal.h"
 #include <iostream>
 #include <map>
@@ -23,7 +25,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *ctx, ImGuiID id, const ImRect &re
 	if (!ctx->CurrentWindow || ctx->CurrentWindow->IDStack.empty()) return;
 	// BeginCombo supplies ItemAdd but does not emit an ItemInfo hook.
 	for (const char *label : {"Resampler", "Driver", "Language", "言語", "Stream sample rate", "Left output channel", "Right output channel", "##device"})
-		if (id && id == ctx->CurrentWindow->GetID(label))
+		if (id && id == ctx->CurrentWindow->GetID(label[0] == '#' ? label : (std::string("##") + label).c_str()))
 			items.try_emplace(label, item{rectangles[id], ctx->CurrentWindow, bool(ctx->LastItemData.ItemFlags & ImGuiItemFlags_Disabled)});
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext *ctx, ImGuiID id, const char *label, ImGuiItemStatusFlags)
@@ -82,12 +84,96 @@ static void persistence()
 	ui::remembered invalid;
 	ui::apply_settings({{"audio_rate", "48000garbage"}, {"audio_buffer", "-1"}, {"audio_left", "3"}, {"audio_right", "3"}}, invalid);
 	require(ui::valid_audio_request(invalid.audio.stream) && invalid.audio.stream.sample_rate == 0 && invalid.audio.stream.left == 0, "Malformed settings validation");
+	ui::remembered corrupt;
+	ui::apply_settings({{"audio_latency", "broken"}}, corrupt);
+	require(corrupt.audio.latency_ms == ui::audio_preferences{}.latency_ms, "Corrupt latency lost the platform default");
+	ui::audio_output_config saved, runtime;
+	runtime.preferences.exclusive = true; runtime.preferences.latency_ms = 5;
+	auto edited = runtime; edited.preferences.stream.quality = ui::resampler_quality::linear;
+	ui::remember_audio_change(saved, runtime, edited);
+	require(!saved.preferences.exclusive && saved.preferences.latency_ms == ui::audio_preferences{}.latency_ms &&
+	        saved.preferences.stream.quality == ui::resampler_quality::linear, "Audio edit saved unrelated CLI overrides");
+	runtime = edited; edited.preferences.latency_ms = 40;
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.preferences.latency_ms == 40, "Explicit latency edit was not saved");
+	runtime = edited; edited.preferences.stream.driver = ui::audio_driver::asio;
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.preferences.stream.driver == ui::audio_driver::asio, "Driver choice was not saved");
+	ui::remembered unsupported;
+	ui::apply_settings({{"audio_driver", "2"}, {"audio_out", "ASIO synth"}, {"audio_rate", "96000"}, {"audio_left", "6"}, {"audio_right", "7"}}, unsupported);
+	if (!ui::supported_audio_driver(ui::audio_driver::asio))
+		require(unsupported.audio_out.empty() && unsupported.audio.stream.driver == ui::audio_driver::native &&
+		        unsupported.audio.stream.sample_rate == 0 && unsupported.audio.stream.left == 0 && unsupported.audio.stream.right == 1,
+		        "Unavailable driver kept its incompatible device or format");
 	ui::menu_state menu;
 	for (const auto &groups : {ui::menu_ports(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
 		const auto &last = groups.back();
 		require(last.title.empty() && last.items.size() == 2 && last.items[0].separator
 			&& last.items[1].id == ui::ID_SETTINGS && last.items[1].enabled, "Quick menu lacks a separated Settings shortcut");
 	}
+}
+
+struct fake_output {
+	ui::audio_stream_options stream;
+	int opens = 0;
+	bool shared = false, fail = false;
+	bool control_panel = false;
+	int panels = 0;
+	void set_control_panel(bool on) { control_panel = on; }
+	void stop() {}
+	void set_stream_options(ui::audio_stream_options s) { stream = s; }
+	template <typename Fill> bool start(int, Fill, std::string &error, bool exclusive, const std::string &, bool, bool)
+	{
+		opens++; if (control_panel) panels++;
+		if (fail || ui::custom_audio_format(stream) || stream.buffer_frames || (exclusive && stream.strict)) {
+			error = "Unsupported format or access mode"; return false;
+		}
+		shared = exclusive; return true;
+	}
+};
+
+static void startup_and_recovery()
+{
+	const auto fill = [](s16 *, u32) {};
+	{
+		fake_output panel; ui::audio_output_config request; std::string error;
+		request.control_panel = true; request.preferences.stream.sample_rate = 96000;
+		require(ui::start_audio_stream(panel, fill, request, error) && panel.panels == 1 && !request.control_panel,
+		        "Driver control panel request repeated during fallback");
+		require(ui::start_audio_stream(panel, fill, request, error) && panel.panels == 1,
+		        "Driver control panel request leaked into the next change");
+	}
+	std::string error;
+	fake_output out;
+	ui::audio_output_config config;
+	config.preferences.exclusive = true;
+	require(ui::start_audio_stream(out, fill, config, error) && out.shared && out.opens == 1,
+	        "Startup blocked exclusive-to-shared fallback");
+	config.preferences.stream = {96000, 256, 4, 5}; out.opens = 0;
+	require(ui::start_audio_stream(out, fill, config, error) && !ui::custom_audio_format(config.preferences.stream) && out.opens == 2,
+	        "Obsolete saved format did not fall back to Auto");
+	auto bad = config; bad.preferences.stream.sample_rate = 96000; bad.preferences.stream.strict = true;
+	config.preferences.exclusive = false; out.opens = 0;
+	const auto result = ui::switch_audio_output(out, fill, bad, config);
+	require(!result.selected && result.restored && out.opens == 2, "Explicit edit did not fail and restore its prior stream");
+	out.fail = true; out.opens = 0;
+	const auto lost = ui::switch_audio_output(out, fill, config, config, false);
+	require(!lost.selected && !lost.restored && out.opens == 1, "Lost-device recovery reopened the same failed stream twice");
+	ui::audio_device_watch devices;
+	require(devices.changed({"Speakers"}, "Speakers"), "First device snapshot was ignored");
+	for (int i = 0; i < 100; i++)
+		require(!devices.changed({"Speakers"}, "Speakers"), "Unchanged devices triggered endless retries");
+	require(devices.changed({"Speakers", "USB"}, "USB") && !devices.changed({"Speakers", "USB"}, "USB"), "Device change did not permit exactly one retry");
+	require(!ui::custom_audio_format({}) && ui::custom_audio_format({48000, 0, 0, 1}) && ui::custom_audio_format({0, 0, 2, 3}),
+	        "CoreAudio Auto/default no longer selects the original path");
+	require(ui::valid_audio_route({}, 1) && !ui::valid_audio_route({0, 0, 2, 3}, 1), "Mono output route validation");
+	ui::audio_stream_renderer renderer; renderer.configure(44100);
+	std::array<s16, 8> mono;
+	renderer.render(mono.data(), 8, 1, 0, 1, [](s16 *dst, u32 n) {
+		for (u32 i = 0; i < n; i++) { dst[i * 2] = 10000; dst[i * 2 + 1] = -20000; }
+	}, ui::audio_stream_renderer::pcm16);
+	for (s16 sample : mono) require(sample == 10000, "Mono output did not keep the left channel");
+	require(ui::audio_stream_renderer::pcm16_truncate(10000.0f / 32768) == 9999, "WASAPI 16-bit conversion changed");
 }
 
 static void lazy_fonts()
@@ -98,19 +184,19 @@ static void lazy_fonts()
 	auto *primary = atlas->AddFontDefaultVector(&cfg);
 	cfg.MergeMode = true; cfg.GlyphRanges = cjk_fullwidth_ranges;
 	atlas->AddFontDefaultVector(&cfg);
-	cfg.MergeMode = false; cfg.GlyphRanges = nullptr;
+	cfg.MergeMode = false; cfg.GlyphRanges = cjk_english_ranges;
 	auto *other = atlas->AddFontDefaultVector(&cfg);
 	const int english_sources = atlas->Sources.Size;
 	ensure_cjk_ui_fonts(atlas);
 	require(atlas->Sources.Size == english_sources, "English startup loaded Japanese ranges");
 	ui::set_lang(ui::lang::ja);
 	ensure_cjk_ui_fonts(atlas);
-	require(atlas->Sources.Size == english_sources + 1 && primary->Sources.Size == 3 && other->Sources.Size == 1,
+	require(atlas->Sources.Size == english_sources + 2 && primary->Sources.Size == 3 && other->Sources.Size == 2,
 		"Language change did not merge Japanese into the original UI font");
 	ensure_cjk_ui_fonts(atlas);
 	ui::set_lang(ui::lang::en); ensure_cjk_ui_fonts(atlas);
 	ui::set_lang(ui::lang::ja); ensure_cjk_ui_fonts(atlas);
-	require(atlas->Sources.Size == english_sources + 1, "Language changes loaded duplicate fonts");
+	require(atlas->Sources.Size == english_sources + 2, "Language changes loaded duplicate fonts");
 	atlas->Build();
 	ImGui::DestroyContext();
 	ui::set_lang(ui::lang::en);
@@ -136,7 +222,9 @@ static void interface()
 	actions.language = [](int value) { ui::set_lang(ui::lang(value)); };
 	actions.command = [&](int id) { command = id; };
 	actions.input = [](auto) {};
-	actions.volume = [](float) {};
+	int volume_updates = 0, volume_saves = 0;
+	actions.volume = [&](float gain) { state.gain = gain; volume_updates++; };
+	actions.save_volume = [&] { volume_saves++; };
 	actions.limiter = [](bool) {};
 	ui::settings_view view(state, actions);
 	xg::model model;
@@ -194,6 +282,17 @@ static void interface()
 	click("言語"); click("English");
 	require(ui::get_lang() == ui::lang::en, "English language selection");
 	click("Audio"); frame();
+	// Volume changes sound during a drag, but persistence happens once on release.
+	auto volume = items.at("##volume");
+	ImGui::SetScrollY(volume.window, volume.window->Scroll.y + volume.rect.Min.y - volume.window->ClipRect.Min.y - 20);
+	frame(); volume = items.at("##volume");
+	const auto volume_center = volume.rect.GetCenter();
+	io.AddMousePosEvent(volume_center.x, volume_center.y); frame();
+	io.AddMouseButtonEvent(0, true); frame();
+	for (int i = 0; i < 5; i++) { io.AddMousePosEvent(volume_center.x + i * 12, volume_center.y); frame(); }
+	require(volume_updates > 1 && volume_saves == 0, "Volume drag did not update live or saved before release");
+	io.AddMouseButtonEvent(0, false); frame(); frame();
+	require(volume_saves == 1, "Volume was not saved exactly once on release");
 	// Refreshing the list removes disconnected endpoints from the actual popup.
 	state.outputs = {"HDMI"}; click("##device");
 	require(items.contains("HDMI") && !items.contains("USB") && !items.contains("Speakers"), "Device popup did not refresh");
@@ -204,7 +303,7 @@ int main()
 {
 	try {
 		ui::init_lang("en");
-		processing(); persistence(); lazy_fonts(); interface();
+		processing(); persistence(); startup_and_recovery(); lazy_fonts(); interface();
 		std::cout << "Settings processing, persistence and ImGui interactions: PASS\n";
 	} catch (const std::exception &e) {
 		std::cerr << e.what() << '\n'; return 1;

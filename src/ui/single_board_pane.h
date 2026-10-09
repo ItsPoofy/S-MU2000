@@ -37,7 +37,7 @@ namespace ui {
 class single_board_pane
 {
 public:
-	// 1 コマに 1 度。差込口 3 つの様子を音声の糸に置いてもらう（答えは次のコマから読める）
+	// 1 コマに 1 度。差込口（PLG-1〜6）の様子を音声の糸に置いてもらう（答えは次のコマから読める）
 	void poll(bridge &br)
 	{
 		br.post([info = m_info](mu2000 &mu) {
