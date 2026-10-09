@@ -235,7 +235,14 @@ bool ios_audio_out::start(const request &r, fill_fn fill, std::string &err)
 			if (im->cap && want > 0)
 				im->cap->insert(im->cap->end(), im->scratch.data(),
 				                im->scratch.data() + size_t(want) * 2);
-			im->produced.fetch_add(n, std::memory_order_relaxed);
+			// want, not n: produced() is a count of 44100 Hz machine frames, which
+		// is what every consumer divides by AUDIO_RATE to get seconds (live.cpp
+		// does, in its progress and its CPU-per-second at the end). n is the
+		// device's frame count, so counting it says 48 kHz frames and reads 8.9%
+		// long on a 48 kHz output - which is what every iOS device runs at. The
+		// machine frames are already worked out above, one fill() per callback
+		// with no drift, so this is the same number the audio left the machine in.
+		im->produced.fetch_add(u64(want > 0 ? want : 0), std::memory_order_relaxed);
 			if (isSilence)
 				*isSilence = NO;
 			return noErr;
