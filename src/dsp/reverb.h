@@ -1,5 +1,10 @@
 // license:BSD-3-Clause
 //
+// A reverb: pre-delay, early reflections, then eight delay lines mixed through a
+// Householder matrix (a feedback delay network), with damping and a high-pass in
+// the loop. Parameters are in seconds, milliseconds and Hz (struct params).
+// Standard library only. (English overview: src/dsp/README.md.)
+//
 // C++ で書いたリバーブ（軽量モードの試作。doc/native-dsp.md）。
 //
 // **これは MEG（実機のエフェクト DSP）の置き換えではなく、別物の近似**。

@@ -1,5 +1,10 @@
 // license:BSD-3-Clause
 //
+// The small parts every effect here is built from: a delay line with fractional
+// reads, one-pole and biquad filters, a table-lookup LFO, a DC blocker, soft and
+// hard clipping, an envelope follower. Standard library only. (English overview:
+// src/dsp/README.md.)
+//
 // C++ で書くエフェクト（軽量モード。doc/native-dsp.md）の土台。
 // 遅延の線、1 次のフィルタ、双 2 次のフィルタ、揺らし（LFO）、歪ませ方など、
 // どのエフェクトでも使う小物だけを置く。全部 float で、1 サンプルずつ処理する。
