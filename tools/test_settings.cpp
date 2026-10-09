@@ -97,6 +97,19 @@ static void persistence()
 	runtime = edited; edited.preferences.latency_ms = 40;
 	ui::remember_audio_change(saved, runtime, edited);
 	require(saved.preferences.latency_ms == 40, "Explicit latency edit was not saved");
+	saved.preferences.stream = {96000, 1024, 6, 7};
+	runtime.preferences.stream = {};
+	edited = runtime; edited.device = "New stereo output";
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.device == edited.device && saved.preferences.stream.sample_rate == 0 &&
+	        saved.preferences.stream.buffer_frames == 0 && saved.preferences.stream.left == 0 && saved.preferences.stream.right == 1,
+	        "Device change retained an obsolete saved format after recovery");
+	saved.preferences.stream = {96000, 1024, 6, 7};
+	runtime = edited; edited.preferences.stream.sample_rate = 48000;
+	ui::remember_audio_change(saved, runtime, edited);
+	require(saved.preferences.stream.sample_rate == 48000 && saved.preferences.stream.buffer_frames == 0 &&
+	        saved.preferences.stream.left == 0 && saved.preferences.stream.right == 1,
+	        "Rate change retained an obsolete saved channel route");
 	const auto general = ui::menu_ports({});
 	bool settings = false;
 	for (const auto &group : general) for (const auto &entry : group.items) {

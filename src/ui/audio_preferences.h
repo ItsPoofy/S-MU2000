@@ -45,10 +45,14 @@ inline void remember_audio_change(audio_output_config &saved, const audio_output
 	const auto &a = before.preferences, &b = after.preferences;
 	if (a.latency_ms != b.latency_ms) s.latency_ms = b.latency_ms;
 	if (a.exclusive != b.exclusive) s.exclusive = b.exclusive;
-	if (a.stream.sample_rate != b.stream.sample_rate) s.stream.sample_rate = b.stream.sample_rate;
-	if (a.stream.buffer_frames != b.stream.buffer_frames) s.stream.buffer_frames = b.stream.buffer_frames;
-	if (a.stream.left != b.stream.left) s.stream.left = b.stream.left;
-	if (a.stream.right != b.stream.right) s.stream.right = b.stream.right;
+	// Rate, buffer and channels describe one validated format.
+	if (before.device != after.device || a.stream.sample_rate != b.stream.sample_rate ||
+	    a.stream.buffer_frames != b.stream.buffer_frames || a.stream.left != b.stream.left || a.stream.right != b.stream.right) {
+		s.stream.sample_rate = b.stream.sample_rate;
+		s.stream.buffer_frames = b.stream.buffer_frames;
+		s.stream.left = b.stream.left;
+		s.stream.right = b.stream.right;
+	}
 	if (a.stream.quality != b.stream.quality) s.stream.quality = b.stream.quality;
 }
 } // namespace ui
