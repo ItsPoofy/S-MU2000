@@ -159,9 +159,7 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	self.window.rootViewController = vc;
 	[self.window makeKeyAndVisible];
 
-	// The shared state and the app, laid out exactly as src/gui.cpp does: a
-	// bridge, four MIDI inputs (mu2000::MIDI_PORTS of them) and three outputs
-	// (THRU A, THRU B, and the machine's own OUT), then the app over them.
+	// The app owns its MIDI routes, as it does in src/gui.cpp.
 	static ui::bridge br;
 	static ui::gui_app gui(br);
 	ui::g_gui = &gui;
