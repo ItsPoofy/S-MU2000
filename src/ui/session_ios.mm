@@ -149,24 +149,34 @@ static void call_registers()
 
 // Installed on whichever call comes first, since both halves need both
 // notifications and a route change stops whichever engine is running.
+//
+// On the main queue, not queue:nil. AVAudioSession posts these on whichever
+// thread changed the route, and with queue:nil the block runs there - so
+// call_registers() would touch s_output_change / s_input_change (a
+// std::function being assigned by stop() on the main thread) and the restart it
+// starts, on a thread that is not the one holding the engines. The main queue is
+// where the engines were made and are stopped.
 static void install_observers()
 {
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
+		NSOperationQueue *main = [NSOperationQueue mainQueue];
 		[[NSNotificationCenter defaultCenter]
 		    addObserverForName:AVAudioSessionRouteChangeNotification
 		                    object:nil
-		                     queue:nil
+		                     queue:main
 		                usingBlock:^(NSNotification *note) {
 			            (void)note;
 			            call_registers();
 		            }];
 		// Only an interruption that ended and may be resumed is worth restarting
 		// for: one that began, or one the system will not resume, stays silent.
+		// The one that ends without it leaves the engine stopped and nothing to
+		// restart it - the app's foreground handler is what covers that.
 		[[NSNotificationCenter defaultCenter]
 		    addObserverForName:AVAudioSessionInterruptionNotification
 		                    object:nil
-		                     queue:nil
+		                     queue:main
 		                usingBlock:^(NSNotification *note) {
 			            NSNumber *type = note.userInfo[AVAudioSessionInterruptionTypeKey];
 			            NSNumber *opts = note.userInfo[AVAudioSessionInterruptionOptionKey];

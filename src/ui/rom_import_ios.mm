@@ -204,9 +204,17 @@ static const void *kImporterKey = &kImporterKey;
 	if (scoped)
 		[url stopAccessingSecurityScopedResource];
 	// A caller that skipped the boot because there were no ROMs boots here, so
-	// the panel is already alive behind the message that follows.
-	if (g_rom_import_done)
-		g_rom_import_done();
+	// the panel is already alive behind the message that follows. Moved out and
+	// cleared first: the menu item is still there for a second install, and this
+	// hook is boot-once work - run twice it would load_machine and eng.boot() from
+	// the main thread while the render thread is inside engine::fill, which is
+	// not a sequence anything else on this platform takes (engine::restart drops
+	// the state and waits for in_fill; this did neither).
+	if (g_rom_import_done) {
+		auto once = std::move(g_rom_import_done);
+		g_rom_import_done = nullptr;
+		once();
+	}
 	__weak SMURomImporter *weakSelf = self;
 	say(view, ns(UI_TEXT(menu_roms_title, "ROM files")),
 	    ns(UI_TEXT(dlg_roms_installed, "The ROM files were imported.")), nil, nil,

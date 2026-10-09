@@ -22,11 +22,19 @@
 
 namespace ui {
 
-// The view's own controller, found by walking up to the view whose next
-// responder is one. Else the foreground scene's key window's root - iOS has more
-// than one window, and the right one is the foreground scene's, which is the rule
-// pc_window_ios.mm already follows. Nil when there is nothing to present from,
-// which callers report rather than assume.
+// The controller to present from: the view's own, walked up to the view whose
+// next responder is one, and from there to the topmost of whatever it is already
+// presenting. Else the foreground scene's key window's root, same walk - iOS has
+// more than one window, and the right one is the foreground scene's, which is the
+// rule pc_window_ios.mm already follows. Nil when there is nothing to present
+// from, which callers report rather than assume.
+//
+// The walk to the top is not a refinement: UIKit refuses to present on a
+// controller that is already presenting, and the editors are presented modally
+// from the window's root. Presenting from the view's own controller is therefore
+// refused exactly when an editor is open, and a file request is made from inside
+// one. pc_window_ios.mm's top_presenter() is the same walk, for the presenters it
+// opens editors from.
 UIViewController *presenter_for(UIView *view);
 
 } // namespace ui

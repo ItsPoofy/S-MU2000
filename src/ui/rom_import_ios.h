@@ -58,6 +58,13 @@ enum : int {
 // and skipped the boot can do it now. Not called on cancel or failure. One
 // process-wide hook, replaced by the last setter (the app sets one, the plug-in
 // sets none).
+//
+// The hook is cleared before it is called, so it runs at most once. It is
+// boot-once work by nature - a launch with no ROMs has nothing running, and the
+// install is what starts it - and the menu item stays available afterwards, so
+// without this a second install in the same session would call it again, from
+// the main thread and with the machine up, which is not a path anything else
+// takes.
 void set_rom_import_done(std::function<void()> on_done);
 
 // Where an import lands: config_dir()/roms, the shared search's first candidate

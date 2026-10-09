@@ -240,9 +240,17 @@ void service_file_asks(UIView *view)
 	const ui::xgui::file_ask ask = ui::xgui::take_file_ask(bytes);
 	if (ask == ui::xgui::file_ask::none)
 		return;
+	// Asked before the flow is claimed, so a request that cannot be presented is
+	// left pending rather than taken and lost: the editor waits for an answer, and
+	// take_file_ask() is one-shot. The check that matters is the second one -
+	// presenter_for() returns something even mid-presentation, and presenting on a
+	// controller that is already presenting is refused by UIKit with only a log
+	// line, which is how a request used to leave g_flow set with no delegate ever
+	// called and every later request skipped by the guard above.
 	UIViewController *presenter = presenter_for(view);
-	if (!presenter) {
-		std::fprintf(stderr, "[ios] file: nowhere to present a picker from\n");
+	if (!presenter || presenter.presentedViewController ||
+	    presenter.isBeingDismissed || presenter.isBeingPresented) {
+		std::fprintf(stderr, "[ios] file: nothing to present a picker from; still pending\n");
 		return;
 	}
 	SMUFileAskDelegate *delegate = [[SMUFileAskDelegate alloc] init];

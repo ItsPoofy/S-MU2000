@@ -289,8 +289,23 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 
 // Coming back with the machine still up means the screen stays on; if the
 // engine never booted (no ROMs) or failed, the device can sleep as it likes.
+//
+// And the machine is checked here, because an interruption that ends without
+// "should resume" leaves AVAudioEngine stopped and nothing to restart it: the
+// session's own observer ignores that case on purpose (a call the system will
+// not resume is not one to restart for), and the panel freezes with it - it is
+// still up, still state 1, but pump_realtime() has stood down now that the
+// device has produced, so nothing advances the machine until a relaunch.
+// do_restart() is the shared power-cycle path: it drops the state, waits for
+// in_fill and re-boots on its own thread, which is the discipline this needs and
+// boot_machine() from the main thread would not have.
+//
+// Off the idle timer either way: this runs whether or not the machine is up, and
+// keep_screen_awake() is the last word on it.
 - (void)sceneWillEnterForeground:(UIScene *)scene
 {
+	if (ui::g_gui && s_machine_up)
+		ui::g_gui->do_restart();
 	keep_screen_awake();
 }
 
