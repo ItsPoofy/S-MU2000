@@ -1662,12 +1662,8 @@ public:
 
 	// ---- the program itself (both mains end here)
 
-	// Everything after the machine is loaded: put the window up, boot on a
-	// thread, pump events, close down. The mains keep the argument parsing
-	// and the object construction; what still differs is only the shell
-	// below (window creation, the event pump, the audio say-lines)
-	int run(tool_args &a, const engine_options &eo, const output_options &oo,
-	        const window_options &wo)
+	// iOS has its own event loop, but shares the saved audio startup choices.
+	remembered initialize_audio_settings(const tool_args &a, const output_options &oo)
 	{
 		keep_settings = a.nomidi;
 		const remembered saved = load_remembered(settings_path(), !keep_settings);
@@ -1679,6 +1675,14 @@ public:
 		audio_settings.stream.strict = false;
 		audio_routes = saved.audio_routes;
 		startup_song = a.play_path;
+		return saved;
+	}
+
+	// Put up the window, boot, pump events, and close down.
+	int run(tool_args &a, const engine_options &eo, const output_options &oo,
+	        const window_options &wo)
+	{
+		const remembered saved = initialize_audio_settings(a, oo);
 		setup_for_window(a, wo, oo.factory);
 
 		// The remembered ports open on this thread, while the machine boots

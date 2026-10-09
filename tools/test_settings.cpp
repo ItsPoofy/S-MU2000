@@ -24,7 +24,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *ctx, ImGuiID id, const ImRect &re
 	rectangles[id] = data ? data->NavRect : rect;
 	if (!ctx->CurrentWindow || ctx->CurrentWindow->IDStack.empty()) return;
 	// BeginCombo supplies ItemAdd but does not emit an ItemInfo hook.
-	for (const char *label : {"Resampler", "Driver", "Language", "言語", "Stream sample rate", "Left output channel", "Right output channel", "##device"})
+	for (const char *label : {"Resampler", "Driver", "Language", "言語", "Stream sample rate", "Left output channel", "Right output channel", "Requested buffer/period (frames)", "##device"})
 		if (id && id == ctx->CurrentWindow->GetID(label[0] == '#' ? label : (std::string("##") + label).c_str()))
 			items.try_emplace(label, item{rectangles[id], ctx->CurrentWindow, bool(ctx->LastItemData.ItemFlags & ImGuiItemFlags_Disabled)});
 }
@@ -300,6 +300,10 @@ static void interface()
 	require(volume_updates > 1 && volume_saves == 0, "Volume drag did not update live or saved before release");
 	io.AddMouseButtonEvent(0, false); frame(); frame();
 	require(volume_saves == 1, "Volume was not saved exactly once on release");
+	state.stream.manual_buffer = false; state.stream.channels.clear(); frame();
+	require(items.at("Requested buffer/period (frames)").disabled && items.at("Left output channel").disabled &&
+	        items.at("Right output channel").disabled, "System-controlled format offers unavailable routing or buffer controls");
+	state.stream.manual_buffer = true; state.stream.channels = {"Output 1", "Output 2"}; frame();
 	// Refreshing the list removes disconnected endpoints from the actual popup.
 	state.outputs = {"HDMI"}; click("##device");
 	require(items.contains("HDMI") && !items.contains("USB") && !items.contains("Speakers"), "Device popup did not refresh");

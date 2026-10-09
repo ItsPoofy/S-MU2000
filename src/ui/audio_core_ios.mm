@@ -144,7 +144,7 @@ bool ios_audio_out::start(const request &r, fill_fn fill, std::string &err)
 	// source node at AUDIO_RATE, let the engine convert, and keep ui::resampler
 	// for the input side.
 	m->dev_rate = rate;
-	m->resamp.configure(double(AUDIO_RATE), rate);
+	m->resamp.configure(double(AUDIO_RATE), rate, r.quality);
 	if (!m->resamp.direct())
 		std::fprintf(stderr, "[audio] resampling %.0f -> %.0f Hz\n",
 		             double(AUDIO_RATE), rate);
@@ -735,6 +735,14 @@ std::vector<std::string> audio_out::list()
 	return ios_audio::output_list();
 }
 
+std::string audio_out::default_device_name()
+{
+	const auto names = ios_audio::output_list();
+	return names.empty() ? std::string() : names.front();
+}
+
+bool audio_out::running() const { return m_impl->core->running(); }
+
 bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclusive,
                       const std::string &device, bool raw, bool exact)
 {
@@ -742,8 +750,14 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	// does the format conversion rather than a driver mixer. It is in the
 	// signature only so every back end takes the same call.
 	(void)raw;
+	if (!valid_audio_request(m_stream) || custom_audio_format(m_stream) || m_stream.buffer_frames ||
+	    (exclusive && m_stream.strict)) {
+		err = "iOS controls the output format, buffer and access mode";
+		return false;
+	}
 	ios_audio_out::request r;
 	r.latency_ms = latency_ms;
+	r.quality = m_stream.quality;
 	r.device = device;
 	r.exact = exact;
 	// exclusive asks for the device outright. macOS has hog mode and the core
@@ -757,6 +771,9 @@ bool audio_out::start(int latency_ms, fill_fn fill, std::string &err, bool exclu
 	// Watch the session while we are running (see watch_output_session): the
 	// engine stops itself when headphones appear or a call arrives.
 	ios_audio::watch_output_session([core = m_impl->core.get()] { core->restart(); });
+	m_info = {};
+	m_info.rate = int(AVAudioSession.sharedInstance.sampleRate);
+	m_info.manual_buffer = false;
 	return true;
 }
 

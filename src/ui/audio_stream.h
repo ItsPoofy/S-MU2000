@@ -24,6 +24,7 @@ struct audio_stream_info {
 	int rate = 44100;
 	std::vector<int> buffers;
 	int buffer_rate = 0; // 0: stream rate; CoreAudio periods use the hardware clock
+	bool manual_buffer = true;
 };
 
 inline bool custom_audio_format(const audio_stream_options &s)
