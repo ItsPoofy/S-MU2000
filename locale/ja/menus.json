@@ -1,0 +1,113 @@
+{
+	// Top strip buttons (toolbar.h)
+	"bar_list": "一覧",
+	"bar_editor": "エディタ",
+	"bar_shapes": "音色",
+	"bar_fx": "エフェクト",
+	"bar_master": "マスター",
+
+	// Popup menus (menu.h). menu_in_* also names the ports in the
+	// startup report (app.h).
+	"menu_in_a": "MIDI IN A（パート 1-16）",
+	"menu_in_b": "MIDI IN B（パート 17-32）",
+	"menu_in_c": "MIDI IN C（パート 33-48）",
+	"menu_in_d": "MIDI IN D（パート 49-64）",
+	"menu_in_e": "MIDI IN E（マルチパートのプラグインボード）",
+	"menu_unused": "使わない",
+	"menu_no_devices": "（機器が無い）",
+	"menu_ain_title": "A/D INPUT（サンプリングで録る音）",
+	"menu_no_ain": "（録音デバイスが無い）",
+	"menu_audio_title": "音声の出力デバイス",
+	"menu_audio_default": "システムの既定",
+	"menu_no_audio": "（再生デバイスが無い）",
+	"menu_bt_title": "Bluetooth とネットワーク MIDI",
+	"menu_bt_connect": "Bluetooth MIDI に接続...",
+	"menu_bt_advertise": "このデバイスを公開...",
+	"menu_net_midi": "ネットワーク MIDI",
+	"menu_roms_title": "ROM ファイル",
+	"menu_roms_install": "ROM ファイルを入れる...",
+	"menu_out_mu": "MIDI OUT（MU2000 が送り出すもの）",
+	"menu_thru_a": "MIDI THRU A（A で受けたものを外へ）",
+	"menu_thru_b": "MIDI THRU B（B で受けたものを外へ）",
+	"menu_open_list": "一覧を開く",
+	"menu_open_editor": "エディタを開く",
+	"menu_native_fx": "エフェクトを C++ で鳴らす（軽い・音は実機と違う）",
+	"menu_native_engine": "firmware を走らせずに鳴らす（速い・まだ音が違う）",
+	"menu_factory": "工場出荷状態に戻す...",
+	"menu_restart": "MU を起動し直す（電源の入れ直し）",
+	"menu_card_new": "新しい SmartMedia を作って差す",
+	"menu_card_open": "SmartMedia を差す...",
+	"menu_card_eject": "SmartMedia を抜く",
+
+	// %s: the file in the slot
+	"menu_card_eject_fmt": "SmartMedia を抜く（%s）",
+	"menu_play_file": "MIDI ファイルを再生...",
+	"menu_stop": "止める",
+
+	// %s: the song playing
+	"menu_stop_fmt": "止める（%s）",
+	"menu_fold34": "口 3・4 を A・B に重ねて鳴らす（DIN の口のとき）",
+	"menu_drop34": "口 3・4 は鳴らさない（DIN の口のとき）",
+	"menu_thin_bends": "重い MIDI を軽くする（ピッチベンドの間引き・Roland の液晶のデータ。実機とは違う鳴り方）",
+	"menu_out_title": "音の出口",
+	"menu_out_digital": "デジタル（S/PDIF。DPCM の直流も残る）",
+	"menu_out_analog": "アナログ（LINE OUT・PHONES。直流を切る）",
+
+	// File dialogs, confirmations and error notes (app_win.h, app_mac.h,
+	// app_linux.h, window_mac.mm, view_win.cpp, view_mac.mm, view.cpp,
+	// pc_window.cpp, pc_window_mac.mm, pc_window_linux.cpp). One wording
+	// serves every backend; the identical console twins in app.h share
+	// these fields rather than duplicating them.
+	"dlg_card_open": "差す SmartMedia",
+	"dlg_card_save": "新しい SmartMedia の保存先",
+	"dlg_midi_open": "流す MIDI ファイル",
+	"dlg_sysex_desc": "SysEx",
+	"dlg_smartmedia_desc": "SmartMedia の中身",
+	"dlg_all_files": "すべて",
+	"dlg_midi_desc": "MIDI ファイル",
+
+	// may contain \n
+	"dlg_factory_text": "MU2000 を工場出荷状態に戻して、電源を入れ直します。\nユーティリティの設定や、覚えている音量・音色の設定はすべて消えます。",
+	"dlg_factory_ok": "戻す",
+
+	// %s: what failed
+	"dlg_cannot_fmt": "開けない: %s",
+	"dlg_window_fail": "窓を出せない",
+	"dlg_editor_fail": "エディタの窓を出せない",
+	"dlg_metal_fail": "Metal を使えない",
+
+	// 0x%08lx: the HRESULT
+	"dlg_d3d_fail_fmt": "Direct3D 11 を使えない（0x%08lx）",
+	"dlg_card_create_fail": "SmartMedia を作れない",
+
+	// may contain \n
+	"dlg_fresh_card": "新しい SmartMedia を差しました。\n本体の UTIL → CARD → Format と同じ書式化を済ませてあるので、すぐに保存できます。",
+	"dlg_roms_needed": "S-MU2000 を動かすには、自分の MU2000 から吸い出した ROM が要ります。\n吸い出し方: https://github.com/tarboh/S-MU2000#roms\n\n用意できたら、mu2000_flash.bin と dump フォルダが入っているフォルダを選んでください。場所は覚えるので、次からは gui もプラグインも ROM を見つけます。",
+	"dlg_roms_bad_fmt": "%s には ROM が揃っていません（足りないもの: %s）。\nmu2000_flash.bin と dump フォルダが入っているフォルダを選んでください。",
+	"dlg_roms_installed": "ROM ファイルを入れました。",
+	"dlg_roms_pick": "ROM のフォルダを選ぶ...",
+	"dlg_roms_quit": "終わる",
+	"dlg_roms_ok_cancel": "OK: フォルダを選ぶ。キャンセル: 終わる。",
+	"dlg_cancel": "キャンセル",
+
+	// .syx file notes, shown in the master editor (produced by the
+	// pc_window backends and master_editor.cpp).
+	// %zu
+	"note_exported_fmt": "書き出した（%zu バイト）",
+	"note_export_fail": "書き出せない",
+	"note_imported": "読み込んだ",
+	"note_import_fail": "読めなかった",
+	"note_kept_fmt": "%s に入れた（Files の「On My iPhone > S-MU2000」で見える・消せる）",
+
+	// %zu
+	"note_sysex_busy_fmt": "読み込み中（SysEx %zu 通）",
+	"note_sysex_idle": "SysEx が入っていない",
+	"dlg_dls_desc": "DLS の音色集",
+
+	// Sampling window (sampling_editor.cpp) and its toolbar button.
+	"bar_sampling": "サンプリング",
+	"bar_player": "プレイヤー",
+	"bar_board": "ボード",
+	"dlg_wav_desc": "WAV の音か SysEx",
+	"dlg_card_or_m2a_desc": "SmartMedia の中身か M2A のファイル"
+}

@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANG_H = ROOT / "src/ui/lang.h"
+LANG_H = ROOT / "src/ui/lang_list.inc"      # generated from locale/languages.json (tools/locale_tool.py)
+TABLES_INC = ROOT / "src/ui/texts_tables.inc"
 TEXTS_H = ROOT / "src/ui/texts.h"
 
 FIELD_RE = re.compile(r"const\s+char\s*\*\s*(\w+)\s*;")
@@ -47,11 +48,11 @@ def lang_codes():
                 body.append(lines[j])
             break
     if not body:
-        print("FAIL: UI_LANG_LIST not found in src/ui/lang.h")
+        print("FAIL: UI_LANG_LIST not found in src/ui/lang_list.inc")
         sys.exit(1)
     codes = re.findall(r"X\(\s*(\w+)\s*,", "\n".join(body))
     if not codes:
-        print("FAIL: UI_LANG_LIST has no X(code, ...) entries in src/ui/lang.h")
+        print("FAIL: UI_LANG_LIST has no X(code, ...) entries in src/ui/lang_list.inc")
         sys.exit(1)
     return codes
 
@@ -200,13 +201,13 @@ def main():
     # (which drives the enum and the texts() switch), and its table function.
     # The switch itself derives from the list, so a missing table is a
     # compile error; what is checked here is presence on both sides.
-    dispatch = TEXTS_H.read_text(encoding="utf-8")
+    dispatch = TEXTS_H.read_text(encoding="utf-8") + TABLES_INC.read_text(encoding="utf-8")
     lang_h = LANG_H.read_text(encoding="utf-8")
     for code in codes:
         if f'texts_{code}.h' not in dispatch:
-            fail(f"src/ui/texts.h: missing #include for texts_{code}.h", errors)
+            fail(f"src/ui/texts_tables.inc: missing #include for texts_{code}.h", errors)
         if not re.search(rf"X\(\s*{code}\s*,", lang_h):
-            fail(f"src/ui/lang.h: UI_LANG_LIST has no X({code}, ...)", errors)
+            fail(f"src/ui/lang_list.inc: UI_LANG_LIST has no X({code}, ...)", errors)
     for path in sorted((ROOT / "src/ui").glob("texts_*.h")):
         code = path.stem[len("texts_"):]
         if code not in codes:
@@ -271,6 +272,13 @@ def main():
         for c in cats:
             if c not in [ja.get(f) for f in fields if f.startswith("fxcat_")]:
                 fail(f"xg category {c!r} has no fxcat_* field", errors)
+
+    # The tables are generated from locale/<code>/*.json: they must be what
+    # those files produce (someone edited one side and not the other).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import locale_tool
+    if locale_tool.cmd_gen(True) != 0:
+        fail("locale/ and the generated tables disagree (see above)", errors)
 
     if errors:
         print(f"\n{len(errors)} problem(s)")

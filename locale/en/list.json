@@ -1,0 +1,161 @@
+{
+	"ov_board_row_tip": "A channel of the plug-in board on port E (not one of the MU's parts). Right-click to choose its voice, double-click to open it in the Voice window.",
+	"ov_board_sub_fmt": "Port E ch %d   M %d  L %d",
+	"ov_board_ins_none": "Straight to the output",
+	"ov_board_no_voices": "The board has no voices yet",
+
+	// Overview list (overview.cpp). Column headers that double as help
+	// keys keep their Japanese key (see headers_with_help call sites).
+	// may start with \n
+	"ov_bighint": "\nDouble-click to edit in a big window",
+
+	// may start with \n
+	"ov_bighint_master": "\nDouble-click to edit in the master window",
+
+	// %s %s + why unused
+	"ov_var_off_fmt": "%s  %s\nVariation is connected as INSERTION, so this value is unused",
+
+	// %s %s + how to turn
+	"ov_slider_fmt": "%s  %s\nDrag sideways or up/down, wheel, or double-click to type a value",
+
+	// %s %s, display only
+	"ov_slider_ro_fmt": "%s  %s\nPlayed value (display only)",
+	"ov_ins1": "Insertion 1",
+	"ov_ins2": "Insertion 2",
+	"ov_ins3": "Insertion 3",
+	"ov_ins4": "Insertion 4",
+
+	// %s: part
+	"ov_fx_for_part_fmt": "Effects on part %s",
+
+	// %s + type
+	"ov_fx_now_sys_fmt": "%s (now SYSTEM, %s)",
+
+	// %s + part + type
+	"ov_fx_now_fmt": "%s (now %s, %s)",
+	"ov_unhook": "Remove from this part",
+	"ov_unhook_sys": "Remove from this part, back to SYSTEM",
+	"ov_hook": "Apply to this part",
+	"ov_hook_sys": "Insert on this part",
+
+	// may contain \n
+	"ov_drag_note": "Drag the mark onto another part's INS cell to move it.\nApplying it while still NO EFFECT silences the part.",
+
+	// may contain \n
+	"ov_drag_note2": "Grab it and drop it onto a part's INS cell to apply it.\nApplying it while still NO EFFECT silences the part.",
+	"ov_rclick_fx": "Right-click to apply an effect",
+	"ov_not_fx": "Not applied (right-click to apply)",
+
+	// %s %s
+	"ov_move_fmt": "Move %s (%s)",
+
+	// %s %s + help, may contain \n
+	"ov_tip_ins_fmt": "%s: %s\nDouble-click for settings, drag to another part, right-click for type and removal",
+
+	// %s %s + help, may contain \n
+	"ov_tip_var_fmt": "%s: %s\nDrag to another part, right-click for type and removal",
+
+	// may contain \n
+	"ov_peg_hint": "\nLeft dot: up/down for the starting pitch\nMiddle dot: sideways for the attack time\nRight dot: sideways for the release time, up/down for the release level",
+
+	// may contain \n
+	"ov_porta_hint": "\nDrag a dot sideways (right for longer, left for shorter)",
+	"ov_khz": "20 kHz or more",
+
+	// %s %s
+	"ov_hpf_on_fmt": "HPF : %s (%s)",
+
+	// %s
+	"ov_hpf_off_fmt": "HPF : %s (off)",
+
+	// may contain \n
+	"ov_filter_hint": "\nRight dot: sideways for cutoff (right is brighter), up/down for resonance (up is stronger)\nLeft dot: sideways for HPF (right cuts more bass)",
+	"ov_eq_pt_hint": "Drag a dot: sideways for frequency, up/down for gain (1 is bass, 2 is treble)",
+	"ov_eq_master_hint": "Drag a dot: sideways for frequency, up/down for gain. Wheel near a dot for width (Q)",
+
+	// may contain \n
+	"ov_vib_hint": "\nTop of the wave: sideways for speed, up/down for depth\nEnd of the flat part: sideways for the delay",
+
+	// %s %s
+	"ov_rcv_mute_fmt": "Receive %s (%s)",
+	"ov_mute_word": "muted",
+	"ov_solo_off_word": "not soloed",
+
+	// %s %d %d
+	"ov_rcv_fmt": "Receive %s   M %d  L %d",
+
+	// %s %s %d %d
+	"ov_range_fmt": "%s %s (%d-%d)",
+
+	// may contain \n
+	"ov_kb_audition_tip": "Left-click to play (lower is louder). Right-click to mark a key for voice audition, right-click again to clear it\nMark as many keys as you like for a chord; with no mark, changing voice plays nothing. Marks are per part and are not remembered\nPC keyboard plays too, white keys only: the A row from C3, the Q row an octave up, the number row another octave up. Hold Z to flatten or X to sharpen what you play. Shift holds the modulation wheel up. PageUp / PageDown shift the octave",
+	"ov_kb_play_tip": "Press to play (either mouse button). Lower is louder",
+
+	// %d, may contain \n
+	"ov_mod_tip_fmt": "Modulation (CC1)  %d\nWheel (Ctrl for coarse), or drag up/down",
+	"ov_off_no_part": "OFF (applies to no part)",
+	"ov_conn_sys": "SYSTEM (all parts send to it)",
+	"ov_conn_ins": "INSERTION (applies to one part)",
+	"ov_conn_tip": "Applies to the chosen part",
+
+	// %s: effect slot
+	"ov_fx_kind_fmt": "%s type",
+	"ov_rclick_kind": "Right-click to pick the type",
+
+	// %s %s %s, may contain \n
+	"ov_move_tip_fmt": "%s: %s → %s\nDouble-click for settings, right-click for type and part, drag onto a part's INS cell",
+
+	// %s %s: drag source
+	"ov_drag_to_fmt": "Drop %s (%s) onto a part's INS cell",
+	"ov_master_name_tip": "Double-click for the master window (master volume, transpose, effect returns, master EQ)",
+	"ov_part_col": "Part (right-click for voice)",
+	"ov_tip_mute": "Mute (silence this part)",
+	"ov_tip_solo": "Solo (play only soloed parts)",
+	"ov_voices_prefix": "Voices ",
+
+	// %s: native/firmware
+	"ov_engine_fmt": "Engine: %s",
+
+	// may contain \n
+	"ov_engine_tip": "Sounding engine (F4 switches)\nfirmware: the real firmware plays (effects as on hardware)\nnative: SH-2 stopped, registers built from formulas",
+
+	// may contain \n
+	"ov_voices_tip": "Voices: sounding voices, including releases. Some voices use two or more voices per note\nM is the SWP30 master (up to 64, blue), S the slave (up to 64, orange). Overflow goes to the slave",
+	"ov_cpu_tip": "CPU: audio processing time vs deadline (over 100%% breaks up)",
+	"ov_zoom_label": "Display size (double-click a small picture to enlarge)",
+	"ov_ins_section": "Insertion",
+
+	// Second-wave overview strings (upstream part-voice rework).
+	// %s %s %s + drag/wheel
+	"ov_value_tip_fmt": "%s  %s\n%s (drag or wheel)",
+	"ov_discrete": "Rel",
+	"ov_legend_combined": "Combined",
+	"ov_legend_filter": "Filter",
+
+	// Attack %.0f, Release %.0f
+	"ov_env_vol_long": "Volume  Attack %.0f ms   Decay 2000+ ms   Release %.0f ms",
+
+	// Attack/Decay/Release %.0f
+	"ov_env_vol": "Volume  Attack %.0f ms   Decay %.0f ms   Release %.0f ms",
+
+	// Init/Attack/Release/Rel %.0f
+	"ov_env_pitch": "Pitch  Init %+.0f cent   Attack %.0f ms   Release %.0f ms → %+.0f cent",
+
+	// %d, may contain \n
+	"ov_mod_wheel_hint": "MODULATION WHEEL (CC1)  %d\nModulation wheel. Drag or wheel up/down. Higher adds more of the right side's MW LFO PMOD DEPTH vibrato (sends CC1 to the receive channel)",
+
+	// %s %d %s + drag/wheel
+	"ov_param_tip_fmt": "%s  %d\n%s (drag or wheel)",
+
+	// %d %.0f
+	"ov_wheel_fmt": "Wheel %d: ±%.0f cent",
+
+	// %d %.0f
+	"ov_mw_fmt": "MW LFO PM: %d (max ±%.0f cent)",
+
+	// %.0f
+	"ov_own_fmt": "Voice wobble ±%.0f cent",
+
+	// Spectrum backdrop fallback (overview.cpp).
+	"ov_silent": "(silent)"
+}

@@ -3275,11 +3275,12 @@ void mu2000::plg_tx_byte(int chan, u8 targets, u8 byte)
 		return;
 	}
 	// 架空のボードは PLG1〜3 に挿さっている。宛て先の印（下 3 ビット）が立っている差込口ごとに、
-	// SysEx を 1 つずつ組み立てて読む
+	// SysEx を 1 つずつ組み立てて読む。増設の差込口（PLG-4〜）に firmware は話しかけてこないが、3 枚全部に宛てたもの
+	// （パネルで音色を変えたときの 4C 08 pp 01〜03、XG System On）は同じ線に乗っているものとして聞く。答えは返さない
 	if (chan != 3 || byte >= 0xf8)
 		return;
 	for (vb_slot &vs : m_vbs) {
-		if (!vs.kind || !((targets >> vs.index) & 1))
+		if (!vs.kind || !(vs.extra() ? (targets & 7) == 7 : (targets >> vs.index) & 1))
 			continue;
 		if (byte == 0xf0)
 			vs.msg.clear();
@@ -3327,6 +3328,9 @@ void mu2000::set_virtual_board(int kind, int part, int slot)
 		return;
 	vb_slot &s = m_vbs[size_t(slot)];
 	kind = kind >= VBOARD_FC && kind < VBOARD_KINDS ? kind : VBOARD_NONE;
+	// 増設の差込口（PLG-4〜）には 1 パートのボードだけ（マルチパートのボードは firmware に口 E を割り当ててもらう）
+	if (board_slot_extra(slot) && board_is_multi(kind))
+		kind = VBOARD_NONE;
 	part = std::clamp(part, 0, 63);
 	if (kind == s.kind && part == s.part && s.on)
 		return;
@@ -3385,6 +3389,23 @@ void mu2000::vb_bank_from_ram(vb_slot &s)
 	const u32 pb = xg::ram::part_base(s.part);
 	s.bank[0] = s.bank_next[0] = m_ram[pb + 0x01];
 	s.bank[1] = s.bank_next[1] = m_ram[pb + 0x02];
+	s.ram_seen[0] = m_ram[pb + 0x01];
+	s.ram_seen[1] = m_ram[pb + 0x02];
+	s.ram_seen[2] = m_ram[pb + 0x03];
+}
+
+// firmware が知らないボード（増設の差込口、起動のあとで挿したボード）は、パネルや SysEx で音色を変えても何も知らせてもらえない。
+// ワーク RAM のバンクとプログラムが**変わったとき**だけ、それに合わせる（MIDI のバンクセレクトは vb_tap が先に追っているので、
+// RAM が後から同じ値になっても何も起きない。RAM が古い間にボードを戻してしまうこともない）
+void mu2000::vb_follow_ram(vb_slot &s)
+{
+	const u32 pb = xg::ram::part_base(s.part);
+	const u8 now[3] = { m_ram[pb + 0x01], m_ram[pb + 0x02], m_ram[pb + 0x03] };
+	if (now[0] != s.ram_seen[0] || now[1] != s.ram_seen[1])
+		vb_set_bank(s, now[0], now[1]);
+	if (now[2] != s.ram_seen[2] && now[2] < 128)
+		s.program(now[2]);
+	std::copy(now, now + 3, s.ram_seen);
 }
 
 // バンクが変わった。ボードのバンクから外れたら、鳴っている音を止める
@@ -3461,7 +3482,7 @@ void mu2000::vb_from_firmware(vb_slot &s, const std::vector<u8> &m)
 	// 機種 4F: 音色の名前（7F 10 00 <MSB> <LSB> <プログラム> 08）。答えは文字数と 8 文字。液晶の音色名の所に出る
 	if ((m[2] & 0xf0) == 0x30 && m[3] == 0x4f && m.size() == 12 && m[4] == 0x7f && m[5] == 0x10 && m[6] == 0x00) {
 		std::vector<u8> r = { 0xf0, 0x43, u8(0x10 | (m[2] & 15)), 0x4f, 0x7f, 0x10, 0x00, 0x08 };
-		const char *name = s.kind == VBOARD_USER ? s.user.program_name(m[9]) : smu2000::vboard::fc_program_name(m[9]);
+		const char *name = s.kind == VBOARD_USER ? s.user.program_name(m[9]) : s.fc.name(m[9]);
 		r.insert(r.end(), name, name + 8);
 		reply(std::move(r));
 		return;
@@ -3495,7 +3516,7 @@ void mu2000::vb_from_firmware(vb_slot &s, const std::vector<u8> &m)
 	else if (m[4] == 0x08 && m[5] == s.part && s.part < 16 && m[6] == 0x02)
 		vb_set_bank(s, s.bank[0], m[7]);
 	else if (m[4] == 0x08 && m[5] == s.part && s.part < 16 && m[6] == 0x03)
-		s.midi(0xc0, m[7], 0);
+		s.program(m[7]);
 	// XG System On。firmware は起動の終わりにこれをボードへ送るが、パートの音色は電源を切る前のものを
 	// 持ち越していて、それをボードへは知らせてこない（起動し直した直後、液晶はボードの音色なのに
 	// ボードが鳴らなかった）。少し待ってから、firmware が持っているバンクに合わせる
@@ -3524,8 +3545,10 @@ void mu2000::vb_tap(vb_slot &s, u8 byte, int port)
 			if (xg && sx[4] == 0x70 && sx[5] == s.assign_mid() && sx[6] == 0x00)
 				vb_assign(s, sx[7]);
 			else if ((xg && sx[4] == 0x00 && sx[5] == 0x00 && sx[6] == 0x7e) ||
-			         (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01))
+			         (sx.size() == 5 && sx[1] == 0x7e && sx[3] == 0x09 && sx[4] == 0x01)) {
 				vb_set_bank(s, 0, 0);
+				s.fc.clear_edits();
+			}
 			sx.clear();
 		} else if ((byte & 0x80) || sx.size() >= 8) {
 			sx.clear();
@@ -3757,8 +3780,9 @@ std::vector<mu2000::board_voice> mu2000::board_voices() const
 			for (const smu2000::vboard::dls_instrument &i : bank->instruments)
 				add(i.drum, i.msb, i.lsb, i.program, i.name.c_str());
 	} else if (kind == VBOARD_FC16) {
-		for (int i = 0; i < 16; i++)
-			add(false, 0, 0, u8(i), smu2000::vboard::fc_program_name(i));
+		// 初期の音色は 16 個（17 以降はそのくり返し）。音色の組を開いていれば 128 個とも自分の音色
+		for (int i = 0; i < (m_vb_fc_bank[FC_BANK_MULTI] ? 128 : 16); i++)
+			add(false, 0, 0, u8(i), m_vb16[0].fc.name(i));
 	} else if (kind == VBOARD_FM16) {
 		// プログラム番号は GM の並び（分類ごとに 2 つの音色を 4 つずつ）。ドラムは 1 つ
 		for (int i = 0; i < 128; i++)
@@ -3814,7 +3838,7 @@ void mu2000::board_parts(board_part out[16])
 			name = m_vb_user16.program_name(o.program);
 		} else if (multi_kind() == VBOARD_FC16) {
 			o.program = c.fc.program();
-			name = smu2000::vboard::fc_program_name(o.program);
+			name = c.fc.name(o.program);
 		}
 		std::snprintf(o.name, sizeof(o.name), "%s", name);
 	}
@@ -3904,6 +3928,9 @@ bool mu2000::vb1_mix(vb_slot &s, float bus[][2])
 {
 	if (s.resync && !--s.resync)
 		vb_bank_from_ram(s);
+	// firmware が知らないボードは、ワーク RAM を 256 サンプル（6ms）ごとに見て音色の変更を追う
+	if (!s.known && s.on && !(++s.poll & 255))
+		vb_follow_ram(s);
 	const bool user = s.kind == VBOARD_USER;
 	if (!(user ? s.user.sounding() : s.fc.sounding()))
 		return false;

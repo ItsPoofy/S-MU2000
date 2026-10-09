@@ -1,0 +1,199 @@
+{
+	// Part voice window (part_shapes.cpp).
+	"ps_graph": "グラフ",
+	"ps_knobs": "つまみ",
+
+	// may contain \n
+	"ps_hint_knobs": "いまは「つまみ」（値の棒で触る）。クリックで「グラフ」（絵で触る）に切り替える",
+
+	// may contain \n
+	"ps_hint_graph": "いまは「グラフ」（絵で触る）。クリックで「つまみ」（値の棒で触る）に切り替える",
+	"ps_tab_shape": "形",
+	"ps_tab_all": "すべて",
+	"ps_tab_drum": "ドラム",
+	"ps_out_label": "送り先",
+	"ps_out_label_ctrl": "Ctrl＋右クリックの送り先",
+	"ps_out_panel": "パネルの設定",
+	"ps_out_hint": "Ctrl＋右クリックで送る先。つまみやスライダーを普通に動かした変更は、ここへは行かない（内蔵の音源に入る）\n値の棒・フェーダー・鍵の項目の上で Ctrl＋右クリックすると、そのパラメータだけを今の値で送る（音源には入れない）。シーケンサーに記録させるため。区画の見出しの上なら区画ごと、MW のホイールは CC1、ベンドのホイールはピッチベンド、音色やキットの面の上ならバンクセレクトとプログラムチェンジ。エディタのドラムの面は、項目ならその項目、鍵や名前なら 1 鍵ぶん。パネルの設定は、口 A のパートを THRU A、B のパートを THRU B へ",
+	"ps_out_sent_fmt": "%s を送った（%d 通）",
+	"ps_out_no_rcv": "送らなかった: パートの受信チャンネルが OFF",
+	"ps_drum_not": "このパートはパートモードが DRUMS1-4 のドラムではない。ドラムキットを選ぶか、パートモードを DRUMS1-4 にすると、ここで鍵ごとに触れる",
+	"ps_drum_plain": "パートモード DRUM（番号なし）はどのドラムセットアップも受けない。DRUMS1-4 にすると、ここで鍵ごとに触れる",
+	"ps_drum_mode_hint": "このパートが使うドラムセットアップ（DRUMS1-4）。DRUM（番号なし）はどの組も使わない。キットを選び直すと、使っている組は既定値に戻る",
+	"ps_drum_play": "鳴らす",
+	"ps_drum_follow": "弾いた鍵を追う",
+	"ps_drum_title_mix": "高さ・音量・パン・送り",
+	"ps_drum_title_filter": "フィルタと EQ（この鍵）",
+	"ps_drum_title_env": "EG（この鍵）",
+	"ps_drum_no_shape": "この鍵は絵が出ない（このキットでは音が無い）",
+	"ps_drum_env_fmt": "立ち上がり %.0f ms   減衰 1 %.0f ms   減衰 2 → %.0f dB",
+	"ps_drum_pitch_fmt": "高さ %+.2f 半音",
+	"ps_title_vib": "ビブラート（VIB）",
+	"ps_title_wobble": "ゆれ（VIB・MW・BEND）",
+	"ps_about_wobble": "音の揺れを 1 枚にまとめた絵。横はモジュレーションホイールの位置（左 0・右 127）、縦はセント。背景の波がビブラートそのもので、右へ行くほど深くなる。橙の点線が音色自身の揺れの深さ（Vib Depth で上下する）で、曲線がそこを超えた所からホイールのぶんが勝つ＝効き始め。下の段は Rate・Depth・Delay・MW LFO PM と、生の MW（CC1）とピッチベンド。ベンドは離すと真ん中へ戻る（Ctrl を押しながら離すと残る）",
+	"ps_bend_hint_fmt": "ピッチベンド  %+d（%+.2f 半音）\nつまんで左右に動かすと曲がる（Shift で細かく、ホイールで 1 目盛り）。離すと真ん中へ戻る（Ctrl を押しながら離すと残る）。受信チャンネルへピッチベンドを流す",
+	"ps_title_mod": "モジュレーション（MW）",
+	"ps_title_filterenv": "フィルタと EQ（FILTER・EQ）",
+	"ps_title_env": "EG とピッチ EG（EG・PEG）",
+
+	// may contain \n
+	"ps_about_vib": "音色の揺れ（ビブラート）。絵は Depth 込みの実際の揺れ（薄い灰色の線は Depth を既定の 64 にしたときの音色自身の揺れ）。右のフェーダーで速さ（Rate）・深さ（Depth）・掛かり始めるまでの時間（Delay）を変える",
+
+	// may contain \n
+	"ps_about_mod": "モジュレーションホイールを上げたときに足すビブラート。横がホイールの位置、縦が揺れの深さ。左のホイールが CC1、右のホイールが MW LFO PM。音色自身の揺れ（背景の帯）とは足さず、深いほうが効く",
+
+	// may contain \n
+	"ps_about_filterenv": "音の明るさ。横は実際の周波数で、緑がこのパートの今の音のスペクトラム。太線がフィルタとパートの EQ を合わせた実際の特性（細線がフィルタだけ、点線が EQ だけ）。どちらも声ごとに掛かり、EQ はフィルタのすぐ後ろ（インサーションより前）。下のフェーダーで Cutoff・Resonance・HPF と、EQ の低音・高音のゲインと周波数を変える",
+
+	// may contain \n
+	"ps_about_env": "音量の形（青。立ち上がり → 落ち着き → 伸ばし → 離して消える）と音程の動き（橙）を、同じ実際の時間の目盛り・同じ離す時刻で 1 枚に。縦は左が音量（dB）、右が音程（セント）。下のフェーダーで EG の Attack・Decay・Release とピッチ EG の Init・Attack・Rel Lv・Rel Tm を変える。緑の背景は EG を通したあとの音のスペクトラム（横は周波数。インサーションの前）。",
+
+	// %d %d
+	"ps_fx_ins_fmt": "インサーション %d（INS %d）",
+	"ps_fx_var_ins": "バリエーション（VAR・インサーション接続）",
+	"ps_fx_var": "バリエーション（VAR）",
+	"ps_fx_cho": "コーラス（CHO）",
+	"ps_fx_rev": "リバーブ（REV）",
+
+	// may contain \n
+	"ps_about_fx_part": "このパートに掛かっているエフェクト。上の段は、通したあと（緑）と通す前（灰）のこのパートの音のスペクトラム（同じ目盛り）。下の段で種類とパラメータを変える。「詳しく」で設定の窓",
+
+	// may contain \n
+	"ps_about_fx_var": "バリエーション。見出しの行の [INS] [PART] を両方入れると、このパートに掛けて種類とパラメータを触れる。そうでない間は、種類の欄の右の棒でこのパートの送り（Var Send）だけを変える（つまみは見るだけ）。上の段は出口（緑）と入口（灰）のスペクトラム",
+
+	// may contain \n
+	"ps_about_fx_sys": "このパートが送っているシステムエフェクト。上の段は、出口（緑）と入口（灰）のスペクトラムで、全パートの送りを混ぜた音。下の段で種類・戻り（Return）・パン・パラメータを変える。「詳しく」で設定の窓",
+	"ps_title_route": "つなぎ（送りと順序）",
+
+	// may contain \n
+	"ps_about_route": "このパートの音がどのエフェクトを通って出ていくか。上の絵の数字（送りの量）を上下にドラッグ・ホイール・ダブルクリックで変える。XG の並びは VAR → CHO → REV に決まっていて、「つなぎ方」で前から後ろへの送りを開け閉めして順序（並列・直列）を選ぶ。横に送るのは Shift + ホイール",
+	"ps_tab_matrix": "マトリクス",
+	"ps_hint_bar": "項目にカーソルを載せると、ここに説明が出る（「説明を出す」を切るとこの欄は消える）",
+	"ps_board_note": "これは口 E のプラグインボードのチャンネルで、MU のパートではありません。音色は左で選びます。上の行では、音量・エクスプレッション・パン・ピッチベンド・モジュレーションと、バリエーション／コーラス／リバーブへの送りを棒で動かせます。INS を押すとインサーションに通せます。鍵盤を押すか、PC のキーボードで弾くと鳴ります。鍵盤を右クリックして印を付けておくと、音色を選ぶたびにその鍵が 1 秒鳴ります。\n\nビブラート・フィルター・エンベロープ・EQ の絵は MU の内蔵音源のものなので、ボードのチャンネルにはありません。",
+
+	// Modulation matrix (part_shapes.cpp): row/column labels rebuilt per
+	// call (cheap, always current); keys stay in the static tables.
+	"mx_src_mw_name": "モジュレーション",
+	"mx_src_mw_about": "モジュレーションホイール（CC1）",
+	"mx_src_bend_name": "ピッチベンド",
+	"mx_src_bend_about": "ピッチベンド（中央から離した量。向きは問わない）",
+	"mx_src_cat_name": "チャンネル AT",
+	"mx_src_cat_about": "チャンネルアフタータッチ（鍵盤を押し込む強さ。チャンネルに 1 つ）",
+	"mx_src_pat_name": "ポリ AT",
+	"mx_src_pat_about": "ポリアフタータッチ（鍵ごとの押し込む強さ）",
+	"mx_src_ac1_name": "AC1",
+	"mx_src_ac1_about": "AC1（AC1 CC No で選んだコントロールチェンジ）",
+	"mx_src_ac2_name": "AC2",
+	"mx_src_ac2_about": "AC2（AC2 CC No で選んだコントロールチェンジ）",
+	"mx_dst_pitch_name": "音程",
+	"mx_dst_pitch_sub": "Pitch",
+	"mx_dst_filter_name": "音色",
+	"mx_dst_filter_sub": "Filter",
+	"mx_dst_amp_name": "音量",
+	"mx_dst_amp_sub": "Amp",
+	"mx_dst_lfo_pmod_name": "LFO 音程",
+	"mx_dst_lfo_pmod_sub": "ビブラート",
+	"mx_dst_lfo_fmod_name": "LFO 音色",
+	"mx_dst_lfo_fmod_sub": "ワウ",
+	"mx_dst_lfo_amod_name": "LFO 音量",
+	"mx_dst_lfo_amod_sub": "トレモロ",
+
+	// %s %s + row help
+	"mx_hint_cc_fmt": "%s\n%s。この行の 6 つのマスが、この操作子で動かす量。見出しの上でマウスホイールを回すと CC の番号が変わる",
+
+	// %s + row help
+	"mx_hint_row_fmt": "%s\nこの行の 6 つのマスが、この操作子で動かす量",
+
+	// %s %s %s %s %s %s
+	"mx_hint_cell_fmt": "%s  %s\n%s → %s。%s（上下にドラッグ・マウスホイール・ダブルクリックで既定の %s）",
+
+	// %s %s
+	"mx_dst_sub_fmt": "%s（%s）",
+
+	// Variation switches, fx panels, flow graphics (upstream part-voice
+	// rework). Node names resolve through ps_flow_node().
+	// %s
+	"ps_var_part_hint": "%s\nオンでバリエーションをこのパートに掛ける（切るとどのパートにも掛けない）。インサーション接続（INS）のときだけ意味があり、触れる。INS と PART の両方が入っていれば、この区画で種類とパラメータを触れる",
+
+	// %s
+	"ps_var_ins_hint": "%s\nオンでインサーション接続（掛けたパートの音を丸ごと通してから、乾いた音とリバーブ・コーラスへの送りに分かれる）、オフでシステム接続（全パートの Var Send を集めて掛け、戻りで混ぜる）。バリエーションは 1 つしか無いので、ほかのパートとは取り合いになる。INS と PART の両方が入っていない間は、この区画ではこのパートの Send だけを触れる",
+	"ps_var_cap_sys": "SYSTEM（全パートの Send）",
+	"ps_fx_legend_part": "緑: 通したあと  灰: 通す前（このパートだけ）",
+	"ps_fx_legend_sys": "緑: 出口  灰: 入口（全パートの送りを混ぜた音）",
+
+	// %s: part
+	"ps_fx_other_part_fmt": "ほかのパート（%s）のインサーション。このパートの Var Send は効かない",
+	"ps_fx_other_none": "インサーション接続で、どのパートにも掛かっていない。このパートの Var Send は効かない",
+
+	// EQ overlay caption (may contain ±)
+	"ps_fx_eq_title": "EQ・フィルタ（目安）  ±18 dB",
+
+	// %s: top frequency
+	"ps_fx_wah_touch_fmt": "強く弾くと → %s",
+
+	// %s: top frequency
+	"ps_fx_wah_lfo_fmt": "LFO → %s",
+	"ps_fx_type_fallback": "エフェクトの種類",
+	"ps_fx_details": "詳しく",
+
+	// may contain \n
+	"ps_fx_details_hint": "エフェクトの設定の窓\nこのエフェクトを大きなつまみと説明で触る窓を開く",
+
+	// %s %s
+	"ps_fx_viewonly_fmt": "%s  %s\nこのパートのインサーションにしていないので、ここでは見るだけ（上の INS と PART を両方入れると触れる）",
+
+	// %s %s %s
+	"ps_fx_param_fmt": "%s  %s\n%s（上下にドラッグ・ホイール・ダブルクリックで数を打つ）",
+	"ps_node_part": "パート",
+	"ps_node_var": "バリエーション",
+	"ps_node_cho": "コーラス",
+	"ps_node_rev": "リバーブ",
+	"ps_node_out": "出力",
+
+	// %s: part or OFF
+	"ps_node_ins_fmt": "（インサーション接続。%s）",
+	"ps_node_part_hint": "このパートの音（インサーションを通したあと）",
+	"ps_node_dry_hint": "乾いた音と戻りを混ぜて、マスター EQ へ",
+
+	// %s %d + why idle
+	"ps_var_send_idle_fmt": "%s  %d（効いていない）\nバリエーションがインサーション接続なので、パートからの送りは効かない。値は動かせて、システム接続（INS を切る）に戻すとこの値で送る",
+	"ps_why_0_mine": "このパートの音は丸ごとバリエーションを通る（Var Send の値は使わない）",
+	"ps_why_0_other": "バリエーションはほかのパートに掛かっていて（または OFF）、このパートの音は通らない",
+	"ps_why_3_mine": "このパートの音は丸ごとバリエーションを通るので、横を通る乾いた音は無い（Dry Level の値は使わない）",
+	"ps_why_3_other": "インサーション接続の間は、どのパートも Dry Level が効かず、乾いた音はいつも最大",
+	"ps_why_45": "インサーション接続の間は、バリエーションからコーラス・リバーブへの送りは効かない。バリエーションを通した音は、パートの Cho Send・Rev Send で送られる",
+	"ps_why_7_mine": "バリエーションを通した音がそのまま出力へ行く（Var Return の値は使わない）",
+	"ps_why_7_other": "バリエーションはこのパートの音を通していない",
+
+	// %s %s %s
+	"ps_badge_fixed_fmt": "%s（インサーション接続で固定）\n%s。値は%sで動かせて、システム接続に戻すと効く。バリエーションの区画の [INS] で切り替える",
+	"ps_where_dialog": "設定の窓（バリエーションの「詳しく」）",
+	"ps_where_fader": "下のフェーダー",
+
+	// %s %d %s
+	"ps_badge_fmt": "%s  %d\n%s（上下にドラッグ・ホイール・ダブルクリックで 0 と既定を行き来）",
+	"ps_pre_parallel": "並列",
+	"ps_pre_parallel_about": "3 つを別々に鳴らす（前から後ろへの送りを全部 0）",
+	"ps_pre_vcr": "V-C-R",
+	"ps_pre_vcr_about": "バリエーションの出口をコーラスへ、コーラスの出口をリバーブへ（直列）",
+	"ps_pre_vr": "V-R",
+	"ps_pre_vr_about": "バリエーションの出口だけをリバーブへ",
+	"ps_pre_cr": "C-R",
+	"ps_pre_cr_about": "コーラスの出口だけをリバーブへ",
+	"ps_flow_ways": "つなぎ方",
+
+	// %s %s, may contain \n
+	"ps_flow_ways_hint": "つなぎ方: %s\n%s。XG の並びは VAR → CHO → REV に決まっていて、後ろから前へは送れない。パートからの送りと戻りはそのまま",
+
+	// Variation send slider + folding voice pane (upstream rework).
+	// %s %d
+	"ps_var_send_hint": "%s  %d\nこのパートからバリエーションへの送り（システム接続のとき効く）。ドラッグで変える",
+
+	// may contain \n
+	"ps_fold_open_hint": "音色を選ぶ面を開く\n分類・音色・バンク違いの列を左に出す",
+
+	// may contain \n
+	"ps_fold_close_hint": "音色を選ぶ面を畳む\n分類・音色・バンク違いの列を左端に畳んで、その幅を右のタブに回す",
+	"ps_fold_char1": "音",
+	"ps_fold_char2": "色"
+}

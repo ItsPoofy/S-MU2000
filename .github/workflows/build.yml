@@ -21,18 +21,19 @@ jobs:
     # still needs them, like everywhere else).
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: make -j$(sysctl -n hw.ncpu) all
       - run: make auv3 AUV3_ROMS=none clap
       - run: make check-audio-output
       - run: make check-audio-input
+      - run: make check-fx
       - run: python3 tools/check_texts.py
       - run: make test
 
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: >
           sudo apt-get update -qq &&
           sudo apt-get install -y -qq build-essential pkg-config cmake ninja-build git
@@ -47,6 +48,7 @@ jobs:
           key: sdl3-3.4.16-ubuntu24
       - run: make check-audio-output
       - run: make check-audio-input
+      - run: make check-fx
       - name: Build SDL3
         run: |
           test -f ~/sdl3/lib/libSDL3.so -o -f ~/sdl3/lib/x86_64-linux-gnu/libSDL3.so && exit 0
@@ -79,7 +81,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
@@ -87,6 +89,7 @@ jobs:
           install: mingw-w64-x86_64-toolchain mingw-w64-x86_64-make mingw-w64-x86_64-python make
       - run: make check-audio-output
       - run: make check-audio-input
+      - run: make check-fx
       - run: make -j$(nproc) all
       - run: python3 tools/check_texts.py
       - run: make test
@@ -97,7 +100,7 @@ jobs:
     # （英語のつづり直しのような、片方で足りる変更も普通にあるため）。
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: README の両言語が揃っているか
@@ -128,7 +131,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: msys2/setup-msys2@v2
         with:
           msystem: mingw32

@@ -210,6 +210,19 @@ $(BUILD)/audio_input_test$(EXE): tools/test_audio_input.cpp $(AUDIO_INPUT_TEST_S
 check-audio-input: $(BUILD)/audio_input_test$(EXE)
 	$(WINE) $(BUILD)/audio_input_test$(EXE) $(if $(AUDIO_DEVICES),--devices)
 
+# The native effects on their own (src/dsp/README.md): a small tool and worked
+# example that includes nothing of the emulator. check-fx runs every effect type
+# at the ends and the middle of its parameter ranges and fails on NaN, infinity
+# or a blow-up. No ROM needed.
+$(BUILD)/fxdemo$(EXE): tools/fxdemo/fxdemo.cpp $(wildcard src/dsp/*.h) src/xg/fx_params.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ tools/fxdemo/fxdemo.cpp $(LDFLAGS)
+
+.PHONY: fxdemo check-fx
+fxdemo: $(BUILD)/fxdemo$(EXE)
+check-fx: $(BUILD)/fxdemo$(EXE)
+	$(WINE) $(BUILD)/fxdemo$(EXE) --selftest
+
 # The per-user data directory -- the same place compat/paths.h's config_dir()
 # points at, where roms/, nvram/ and the .ini files already live. The panel art
 # goes in a panel/ beside them, and find_default() looks there (step 3), which
