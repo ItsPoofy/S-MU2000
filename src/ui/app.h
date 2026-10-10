@@ -1129,7 +1129,7 @@ public:
 	// boots at once would both be writing the machine)
 	void do_factory_reset()
 	{
-		if (!eng || !state || state->load() != 1)
+		if (!eng || !state || state->load() != 1 || midi_job.busy())
 			return;
 		if (!confirm_factory_reset())
 			return;
@@ -1143,7 +1143,7 @@ public:
 	// also when it looks for plug-in boards
 	void do_restart()
 	{
-		if (!eng || !state || state->load() != 1)
+		if (!eng || !state || state->load() != 1 || midi_job.busy())
 			return;
 		play.stop();
 		join_reboot();
