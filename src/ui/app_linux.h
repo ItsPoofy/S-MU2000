@@ -41,9 +41,7 @@ class linux_app : public app
 {
 public:
 	// mi is MIDI IN A-D, mu2000::MIDI_PORTS of them
-	linux_app(bridge &b, midi_in *mi,
-	          midi_out &tha, midi_out &thb, midi_out &muo)
-	    : app(b, mi, tha, thb, muo) {}
+	explicit linux_app(bridge &b) : app(b) {}
 
 	// ---- the SDL window the pump in gui_linux.cpp maintains
 

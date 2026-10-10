@@ -75,9 +75,7 @@ int main(int argc, char **argv)
 		return parsed;
 
 	static ui::bridge br;
-	static ui::midi_in  midi_ports[mu2000::MIDI_PORTS + 1];   // A-D and port E (the plug-in board)
-	static ui::midi_out mout, mout_b, mout_mu;
-	static win_app gui(br, midi_ports, mout, mout_b, mout_mu);
+	static win_app gui(br);
 	g_win = &gui;
 
 	// 絵だけ欲しい場合。ROM が無くても中身が空の画面は出せる
@@ -93,7 +91,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	static ui::engine eng(br, midi_ports[0]);
+	static ui::engine eng(br, gui.midi);
 	gui.wire_engine(eng, eng_opts);
 	gui.eng = &eng;
 	gui.state = &eng.state;

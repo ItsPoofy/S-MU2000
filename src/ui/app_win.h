@@ -29,9 +29,7 @@ std::string settings_file_path();
 class win_app : public app
 {
 public:
-	win_app(bridge &b, midi_in *mi,
-	        midi_out &tha, midi_out &thb, midi_out &muo)
-	    : app(b, mi, tha, thb, muo) {}
+	explicit win_app(bridge &b) : app(b) {}
 
 	HWND hwnd = nullptr;             // set at WM_CREATE, for message boxes
 	// 描画の外で行う仕事（app::defer_outside_paint）。WM_APP_DEFERRED を受けた wnd_proc が実行する

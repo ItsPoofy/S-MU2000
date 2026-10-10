@@ -58,6 +58,7 @@
 #include "ui/settings.h"
 #include "ui/settings_view.h"
 #include "ui/audio_session.h"
+#include "ui/midi_session.h"
 #include "ui/shot.h"
 #include "ui/snapshot.h"
 #include "ui/status.h"
@@ -83,8 +84,7 @@ class audio_in;
 class app
 {
 public:
-	app(bridge &b, midi_in *mi, midi_out &tha, midi_out &thb, midi_out &muo)
-	    : br(b), midi(mi), thru_a(tha), thru_b(thb), mu_out(muo)
+	explicit app(bridge &b) : br(b)
 	{
 		// The Sampling window asks the bridge which recording device is open;
 		// the answer is ours, and it changes from two places (that window's
@@ -109,8 +109,13 @@ public:
 	// ---- shared state (both windows keep the same)
 
 	bridge   &br;
-	midi_in  *midi;                  // MIDI IN A-D (mu2000::MIDI_PORTS of them)
-	midi_out &thru_a, &thru_b, &mu_out; // THRU A, THRU B, the machine's own OUT
+	midi_router midi;
+	midi_routing midi_routes, pending_midi;
+	midi_session midi_job;
+	std::string midi_error, pending_edit_out;
+	bool pending_midi_menu = false;
+	std::vector<std::string> midi_menu_inputs, midi_menu_outputs;
+	audio_device_watch midi_inputs_watch, midi_outputs_watch;
 
 	// The qualified type: a bare `panel panel;` member is an error under
 	// GCC's -Wchanges-meaning (the native Linux build compiles this file)
@@ -138,17 +143,8 @@ public:
 	bool lcd_only = false;           // --lcd: the LCD on its own
 	std::string layout_path;
 
-	// The remembered ports, by name (empty = default/unused). *_keep is the
-	// name to fall back on when a port is not there (yet). Four entries,
-	// like ui::SET_IN_KEYS (both front ends run 4 MIDI ports)
-	std::string in_name[IN_PORTS];
-	std::string in_keep[IN_PORTS];
-	std::string out_name, out_name_b, out_name_mu;
-	// 音色の窓の送り先（Ctrl＋右クリックで送るもの）。空ならパネルの設定（A → THRU A、B → THRU B）。
-	// THRU A・B と同じ機器を選んだときはそちらの出力を使い、ほかの機器なら edit_out を開く
-	std::string edit_out_name, edit_out_keep;
-	midi_out    edit_out;
-	std::string out_keep, out_keep_b, out_keep_mu;
+	// Editor sending shares physical endpoints with the routing matrix.
+	std::string edit_out_name;
 	std::string audio_name;          // the audio device, by name
 	std::vector<std::string> audio_menu_devices;
 	std::atomic<bool> audio_ready{false};
@@ -174,8 +170,6 @@ public:
 
 	// Device indices being opened (-1 unused). Names above outlive them:
 	// unplugging USB shifts numbers, so reconnects look the names up again
-	int in_dev[IN_PORTS] = { -1, -1, -1, -1, -1 };
-	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
 	int ain_dev = -1;
 	u64 reported_drops = 0;          // MIDI drops the UI thread last reported
 
@@ -246,8 +240,8 @@ public:
 			                   s.voices_master + s.voices_slave,
 			                   out->cpu_percent(), out->worst_ms(),
 			                   middle,
-			                   in_name[0].empty() ? UI_TEXT(status_none, "none") : in_name[0].c_str(),
-			                   out_name.empty() ? UI_TEXT(status_none, "none") : out_name.c_str());
+			                   midi_status(midi_routes.inputs, 0).c_str(),
+			                   midi_status(midi_routes.outputs, 0).c_str());
 		}
 		else
 			std::snprintf(status, sizeof(status), "%s", UI_TEXT(status_booting, "Starting..."));
@@ -523,11 +517,11 @@ public:
 		if (path.empty())
 			return;
 		remembered r;
-		for (int p = 0; p < IN_PORTS; p++)
-			r.in[p] = in_name[p].empty() ? in_keep[p] : in_name[p];
-		r.out       = out_name.empty()    ? out_keep    : out_name;
-		r.out_b     = out_name_b.empty()  ? out_keep_b  : out_name_b;
-		r.out_mu    = out_name_mu.empty() ? out_keep_mu : out_name_mu;
+		r.midi = midi_routes;
+		for (int p = 0; p < IN_PORTS; p++) r.in[p] = midi_primary(midi_routes.inputs, p);
+		r.out = midi_primary(midi_routes.outputs, 0);
+		r.out_b = midi_primary(midi_routes.outputs, 1);
+		r.out_mu = midi_primary(midi_routes.outputs, 2);
 		r.audio_out = persisted_audio.device;
 		r.audio = persisted_audio.preferences;
 		r.audio_routes = audio_routes;
@@ -540,7 +534,7 @@ public:
 		r.fold34    = play.fold_extra_ports();
 		r.thin_bends = play.thin_bends();
 		r.analog    = eng && eng->analog.load();
-		r.edit_out  = edit_out_name.empty() ? edit_out_keep : edit_out_name;
+		r.edit_out  = edit_out_name;
 		// the imaginary plug-in board stays plugged in, like a real one
 		r.board      = eng ? eng->mu.virtual_board_kind() : 0;
 		r.board_part = eng ? eng->mu.virtual_board_part() + 1 : 1;
@@ -575,74 +569,67 @@ public:
 
 	// ---- ports (the menus pick these)
 
-	// Open what the menu picked, falling back to "unused". keep is true
-	// only while starting up: the asked-for name is then kept even if the
-	// port is not there yet. Failures print to stderr always and reach
-	// menu_error only for menu picks (never boot-time).
-	bool choose_in(int port, int dev, bool keep = false)
+	static std::string midi_primary(const std::vector<midi_route> &routes, int column)
 	{
-		if (port < 0 || port >= IN_PORTS)
-			return false;
-		if (!keep)
-			in_keep[port].clear();
-		std::string err;
-		if (!midi[port].open(dev, err)) {
-			std::fprintf(stderr, "%s: %s\n", in_label(port), err.c_str());
-			if (!keep)
-				menu_error(err);
-			midi[port].open(-1, err);
-			dev = -1;
+		for (const auto &r : routes) if (r.ports & (1u << column)) return r.device;
+		return {};
+	}
+	static std::string midi_status(const std::vector<midi_route> &routes, int column)
+	{
+		const auto name = midi_column_name(routes, column);
+		return name.empty() ? UI_TEXT(status_none, "none") : name;
+	}
+	std::string midi_startup_status(const std::vector<midi_route> &routes, int column, bool output) const
+	{
+		std::string text;
+		for (const auto &route : routes) if (route.ports & (1u << column)) {
+			if (!text.empty()) text += ", ";
+			text += route.device;
+			if (!midi.connected(output, route.device)) text += CLI_T(" (not found; remembered)", " (見つからない; 記憶を保持)");
 		}
-		in_dev[port]  = midi[port].is_open() ? dev : -1;
-		in_name[port] = midi[port].device_name();
-		save_settings();
-		return dev >= 0;
+		return text.empty() ? UI_TEXT(status_none, "none") : text;
 	}
-
-	bool choose_out(int dev, bool keep = false)
+	void request_midi(midi_routing routes, std::string editor, bool missing_ok = false, bool menu_pick = false)
 	{
-		return open_out(thru_a, out_dev, out_name, out_keep,
-		                CLI_T("MIDI output", "MIDI 出力"), dev, keep);
+		if (!audio_ready.load() || audio_job.busy() || midi_job.busy() || !eng || !state || state->load() == 2) return;
+		if (state->load() != 1 && !audio_failed) return;
+		join_reboot();
+		pending_midi_menu = menu_pick;
+		pending_midi = std::move(routes);
+		pending_edit_out = std::move(editor);
+		midi_job.begin(*eng, midi_routes_with_editor(pending_midi, pending_edit_out), missing_ok);
 	}
-
-	bool choose_out_b(int dev, bool keep = false)
+	void finish_midi_change(const midi_change_result &result)
 	{
-		return open_out(thru_b, out_dev_b, out_name_b, out_keep_b,
-		                CLI_T("MIDI output B", "MIDI 出力 B"), dev, keep);
-	}
-
-	// 音色の窓の送り先。dev が負ならパネルの設定
-	void choose_edit_out(int dev, bool keep = false)
-	{
-		if (!keep)
-			edit_out_keep.clear();
-		edit_out.close();
-		edit_out_name.clear();
-		if (dev >= 0) {
-			const std::vector<std::string> names = midi_out::list();
-			if (dev < int(names.size())) {
-				const std::string &name = names[size_t(dev)];
-				std::string err;
-				// THRU A・B に使っている機器は開き直さない（同じ機器を 2 度は開けない）
-				if (name == out_name || name == out_name_b || edit_out.open(dev, err))
-					edit_out_name = name;
-				else
-					std::fprintf(stderr, CLI_T("Send to %s: %s\n", "送り先 %s: %s\n"), name.c_str(), err.c_str());
-			}
+		midi_error = result.error;
+		if (pending_midi_menu && !midi_error.empty())
+			defer_outside_paint([this, text = midi_error] { menu_error(text); });
+		if (result.selected) {
+			midi_routes = std::move(pending_midi);
+			edit_out_name = std::move(pending_edit_out);
+			save_settings();
 		}
-		save_settings();
 	}
-	// 口（0-3）→ 送る行き先（bridge::send_out の dest）
-	int edit_dest(int port) const
+	void choose_midi(bool output, int column, int device)
 	{
-		if (edit_out_name.empty())
-			return port == 1 ? 1 : 0;            // パネルの設定。C・D は外へ出す端子が無いので A へ
-		if (edit_out_name == out_name)
-			return 0;
-		if (edit_out_name == out_name_b)
-			return 1;
-		return 2;
+		const auto &names = output ? midi_menu_outputs : midi_menu_inputs;
+		if (device >= 0 && size_t(device) >= names.size()) return;
+		auto routes = midi_routes;
+		auto &rows = output ? routes.outputs : routes.inputs;
+		if (device < 0) clear_midi_column(rows, column);
+		else {
+			const auto &name = names[size_t(device)];
+			set_midi_route(rows, name, midi_route_mask(rows, name) ^ (1u << column));
+		}
+		request_midi(std::move(routes), edit_out_name, false, true);
 	}
+	void choose_edit_out(int dev)
+	{
+		const auto names = midi_out::list();
+		if (dev >= 0 && size_t(dev) >= names.size()) return;
+		request_midi(midi_routes, dev < 0 ? std::string() : names[size_t(dev)], false, true);
+	}
+	int edit_dest(int port) const { return edit_out_name.empty() ? (port == 1 ? 1 : 0) : 2; }
 	// 音色の窓に、送り先の品書きと送る道を渡す
 	void wire_send_out()
 	{
@@ -650,18 +637,11 @@ public:
 		h.devices = [] { return midi_out::list(); };
 		h.chosen = [this] { return edit_out_name; };
 		h.panel_desc = [this] {
-			return "A: " + (out_name.empty() ? std::string("-") : out_name) +
-			       " / B: " + (out_name_b.empty() ? std::string("-") : out_name_b);
+			return "A: " + midi_status(midi_routes.outputs, 0) + " / B: " + midi_status(midi_routes.outputs, 1);
 		};
 		h.choose = [this](int dev) { choose_edit_out(dev); };
 		h.dest = [this](int port) { return edit_dest(port); };
 		xgui::set_out_hooks(std::move(h));
-	}
-
-	bool choose_out_mu(int dev, bool keep = false)
-	{
-		return open_out(mu_out, out_dev_mu, out_name_mu, out_keep_mu,
-		                CLI_T("MIDI output (the unit's OUT)", "MIDI 出力（本体の OUT）"), dev, keep);
 	}
 
 	// サンプリングの窓の録音デバイスの欄（bridge::set_ain_devices / request_ain）。
@@ -973,7 +953,7 @@ public:
 
 	void request_audio(audio_output_config wanted, bool user = true)
 	{
-		if (!audio_ready.load() || audio_job.busy() || !out || !eng || !state) return;
+		if (!audio_ready.load() || audio_job.busy() || midi_job.busy() || !out || !eng || !state) return;
 		if (state->load() != 1 && !audio_failed) return;
 		if (reboot.joinable()) join_reboot();
 		if (wanted.device != audio_name) {
@@ -1049,18 +1029,19 @@ public:
 	void poll_audio_settings()
 	{
 		if (!audio_ready.load()) return;
+		if (const auto result = midi_job.poll()) finish_midi_change(*result);
 		if (const auto result = audio_job.poll()) finish_audio_change(*result);
-		if (!audio_job.busy() && !out->running() && !audio_failed) {
+		if (!audio_job.busy() && !midi_job.busy() && !out->running() && !audio_failed) {
 			audio_failed = true;
 			audio_error = CLI_T("Audio output disconnected", "音声出力が切断された");
 			report_audio_failure();
 			audio_recovery_pending = true;
 		}
-		if (audio_recovery_pending && !audio_job.busy()) {
+		if (audio_recovery_pending && !audio_job.busy() && !midi_job.busy()) {
 			audio_recovery_pending = false;
 			defer_outside_paint([this] { request_audio({audio_name, audio_settings}, false); });
 		}
-		if (!audio_startup_completed && !audio_failed && !audio_job.busy())
+		if (!audio_startup_completed && !audio_failed && !audio_job.busy() && !midi_job.busy())
 			defer_outside_paint([this] { complete_audio_startup(); });
 		const auto now = std::chrono::steady_clock::now();
 		if (!settings_win.visible() || now < next_devices) return;
@@ -1070,9 +1051,18 @@ public:
 
 	void refresh_audio_devices()
 	{
-		if (audio_job.busy()) return;
+		if (audio_job.busy() || midi_job.busy()) return;
 		preferences_state.outputs = audio_out::list();
 		preferences_state.inputs = audio_in::list();
+		preferences_state.midi_inputs = midi_in::list();
+		preferences_state.midi_outputs = midi_out::list();
+		const bool midi_changed = midi_inputs_watch.changed(preferences_state.midi_inputs, {}) |
+		                          midi_outputs_watch.changed(preferences_state.midi_outputs, {});
+		if (midi_changed && state->load() == 1 &&
+		    midi.needs_refresh(midi_routes_with_editor(midi_routes, edit_out_name), preferences_state.midi_inputs, preferences_state.midi_outputs)) {
+			request_midi(midi_routes, edit_out_name, true);
+			return;
+		}
 		// Hog mode can move macOS's system default away from the device we hold.
 		const bool follows_default = audio_name.empty() && !out->exclusive();
 		const std::string default_name = follows_default ? audio_out::default_device_name() : std::string();
@@ -1094,7 +1084,7 @@ public:
 	{
 		auto &s = preferences_state;
 		s.ready = audio_ready.load();
-		s.busy = audio_job.busy();
+		s.busy = audio_job.busy() || midi_job.busy();
 		if (!s.ready) return; // all boot-thread writes precede this handshake
 		s.audio = {audio_name, audio_settings};
 		s.input = ain_name.empty() ? ain_keep : ain_name;
@@ -1103,6 +1093,8 @@ public:
 		if (!s.busy && out) {
 			s.stream = out->stream_info();
 		}
+		s.midi = midi_routes;
+		s.midi_error = midi_error;
 		s.gain = br.gain();
 		s.analog = eng->analog.load();
 		s.limiter = eng->limit_output.load();
@@ -1123,6 +1115,9 @@ public:
 				if (name.empty() || dev >= 0) choose_ain(dev);
 			});
 		};
+		preferences_actions.midi = [this](midi_routing routes) {
+			defer_outside_paint([this, routes = std::move(routes)] { request_midi(routes, edit_out_name); });
+		};
 		preferences_actions.command = [this](int id) { defer_outside_paint([this, id] { menu_chosen(id); }); };
 		preferences_actions.volume = [this](float gain) { br.set_gain(gain); };
 		preferences_actions.save_volume = [this] { save_settings(); };
@@ -1134,7 +1129,7 @@ public:
 	// boots at once would both be writing the machine)
 	void do_factory_reset()
 	{
-		if (!eng || !state || state->load() != 1)
+		if (!eng || !state || state->load() != 1 || midi_job.busy())
 			return;
 		if (!confirm_factory_reset())
 			return;
@@ -1148,7 +1143,7 @@ public:
 	// also when it looks for plug-in boards
 	void do_restart()
 	{
-		if (!eng || !state || state->load() != 1)
+		if (!eng || !state || state->load() != 1 || midi_job.busy())
 			return;
 		play.stop();
 		join_reboot();
@@ -1192,8 +1187,8 @@ public:
 	menu_state menu_snapshot()
 	{
 		menu_state s;
-		s.midi_ins = midi_in::list();
-		s.midi_outs = midi_out::list();
+		s.midi_ins = midi_menu_inputs = midi_in::list();
+		s.midi_outs = midi_menu_outputs = midi_out::list();
 		s.audio_ins = audio_in::list();
 		s.audio_outs = audio_out::list();
 		audio_menu_devices = s.audio_outs;
@@ -1202,18 +1197,14 @@ public:
 			s.audio_name = audio_name;
 		}
 		if (!audio_ready.load()) return s;
-		for (int p = 0; p < IN_PORTS; p++)
-			s.in_dev[p] = in_dev[p];
-		s.out_dev = out_dev;
-		s.out_dev_b = out_dev_b;
-		s.out_dev_mu = out_dev_mu;
+		s.midi = midi_routes;
 		s.ain_name = ain_name;
 		s.card_path = card_path;
 		s.playing = play.playing();
 		s.play_name = play.name();
 		s.fold34 = play.fold_extra_ports();
 		s.thin_bends = play.thin_bends();
-		s.ready = audio_ready.load() && !audio_job.busy() && eng && state && state->load() == 1;
+		s.ready = audio_ready.load() && !audio_job.busy() && !midi_job.busy() && eng && state && state->load() == 1;
 		s.native_fx = eng && eng->native_fx.load();
 		s.native_engine = eng && eng->native_engine.load();
 		s.analog = eng && eng->analog.load();
@@ -1228,15 +1219,15 @@ public:
 		for (int p = 0; p < IN_PORTS; p++) {
 			const int none = p == 4 ? int(ID_INE_NONE) : ID_IN_NONE + p * ID_IN_STRIDE;
 			const int base = p == 4 ? int(ID_INE_BASE) : ID_IN_BASE + p * ID_IN_STRIDE;
-			if (id == none)                    { choose_in(p, -1); return; }
-			if (id >= base && id < base + 256) { choose_in(p, id - base); return; }
+			if (id == none)                    { choose_midi(false, p, -1); return; }
+			if (id >= base && id < base + 256) { choose_midi(false, p, id - base); return; }
 		}
-		if (id == ID_OUT_NONE)                                        choose_out(-1);
-		else if (id >= ID_OUT_BASE && id < ID_OUT_BASE + 256)         choose_out(id - ID_OUT_BASE);
-		else if (id == ID_OUTMU_NONE)                                 choose_out_mu(-1);
-		else if (id >= ID_OUTMU_BASE && id < ID_OUTMU_BASE + 256)     choose_out_mu(id - ID_OUTMU_BASE);
-		else if (id == ID_OUTB_NONE)                                  choose_out_b(-1);
-		else if (id >= ID_OUTB_BASE && id < ID_OUTB_BASE + 256)       choose_out_b(id - ID_OUTB_BASE);
+		if (id == ID_OUT_NONE)                                        choose_midi(true, 0, -1);
+		else if (id >= ID_OUT_BASE && id < ID_OUT_BASE + 256)         choose_midi(true, 0, id - ID_OUT_BASE);
+		else if (id == ID_OUTMU_NONE)                                 choose_midi(true, 2, -1);
+		else if (id >= ID_OUTMU_BASE && id < ID_OUTMU_BASE + 256)     choose_midi(true, 2, id - ID_OUTMU_BASE);
+		else if (id == ID_OUTB_NONE)                                  choose_midi(true, 1, -1);
+		else if (id >= ID_OUTB_BASE && id < ID_OUTB_BASE + 256)       choose_midi(true, 1, id - ID_OUTB_BASE);
 		else if (id == ID_AIN_NONE)                                   choose_ain(-1);
 		else if (id >= ID_AIN_BASE && id < ID_AIN_BASE + 256)         choose_ain(id - ID_AIN_BASE);
 		else if (id == ID_AUDIO_DEFAULT)                              choose_audio(-1);
@@ -1268,12 +1259,6 @@ public:
 			o.voicecache = 1;
 		apply_engine_options(eng.mu, o);
 		eng.native_fx.store(o.native_fx);
-		for (int p = 1; p <= mu2000::MIDI_PORTS; p++)        // the last one is port E (the plug-in board)
-			eng.midi_p[p] = &midi[p];
-		eng.mout_b = &thru_b;
-		eng.mout_edit = &edit_out;
-		eng.mout_mu = &mu_out;
-		eng.mout = &thru_a;
 	}
 
 	// Switches the booted machine to the native engine on request (the
@@ -1431,24 +1416,12 @@ public:
 			std::printf(CLI_T("Starting from factory defaults (the remembered settings are overwritten on exit)\n", "工場出荷状態で起動する（覚えていた設定は終わるときに上書きされる）\n"));
 	}
 
-	// A found port prints by name; a missing one keeps showing its
-	// remembered name until it is picked again
-	static void show_port(const char *label, const std::string &now,
-	                      const std::string &keep)
-	{
-		if (!now.empty())
-			std::printf("%s: %s\n", label, now.c_str());
-		else if (!keep.empty())
-			std::printf(CLI_T("%s: none (\"%s\" was not found or could not be opened; it stays remembered)\n", "%s: なし（「%s」が見つからないか開けない。覚えたままにしてある）\n"),
-			            label, keep.c_str());
-		else
-			std::printf(CLI_T("%s: none\n", "%s: なし\n"), label);
-	}
-
 	// Opens the remembered MIDI ports by name (--midi and friends win).
-	// Reports what is and is not there
+	// Reports the configured routing
 	void open_remembered_ports(tool_args &a, const output_options &o)	{
 		remembered want = load_remembered(settings_path(), !keep_settings);
+		midi_routes = want.midi;
+		edit_out_name = want.edit_out;
 		ain_name = want.audio_in;
 		ain_keep = want.audio_in;
 		if (!want.card.empty())
@@ -1459,34 +1432,24 @@ public:
 		// (empty is off). Opened by start_ad once the firmware is up
 		if (o.audio_in_dev)
 			ain_name = o.audio_in_dev;
-		for (int p = 0; p < IN_PORTS; p++)
-			if (a.in_dev[p] == -2)
-				a.in_dev[p] = find_device(midi_in::list(), want.in[p]);
-		if (a.mout_dev == -2)   a.mout_dev   = find_device(midi_out::list(), want.out);
-		if (a.moutb_dev == -2)  a.moutb_dev  = find_device(midi_out::list(), want.out_b);
-		if (a.moutmu_dev == -2) a.moutmu_dev = find_device(midi_out::list(), want.out_mu);
-		// A port that is not there yet keeps its name in the settings
-		for (int p = 0; p < IN_PORTS; p++)
-			in_keep[p] = want.in[p];
-		out_keep    = want.out;
-		out_keep_b  = want.out_b;
-		out_keep_mu = want.out_mu;
-		for (int p = 0; p < IN_PORTS; p++)
-			choose_in(p, a.in_dev[p], true);
-		choose_out(a.mout_dev, true);
-		choose_out_b(a.moutb_dev, true);
-		choose_out_mu(a.moutmu_dev, true);
-		// 音色の窓の送り先。無い機器なら名前だけ覚えておく
-		edit_out_keep = want.edit_out;
-		if (!want.edit_out.empty())
-			choose_edit_out(find_device(midi_out::list(), want.edit_out), true);
-		// A port that would not open keeps showing its remembered name
-		// until it is picked again
-		for (int p = 0; p < IN_PORTS; p++)
-			show_port(in_label(p), in_name[p], in_keep[p]);
-		show_port("MIDI OUT", out_name_mu, out_keep_mu);
-		show_port("MIDI THRU A", out_name, out_keep);
-		show_port("MIDI THRU B", out_name_b, out_keep_b);
+		const auto inputs = midi_in::list(), outputs = midi_out::list();
+		const auto override_column = [](auto &routes, const auto &names, int column, int device) {
+			if (device == -2) return; // no CLI override
+			clear_midi_column(routes, column);
+			if (device >= 0 && size_t(device) < names.size()) {
+				const auto &name = names[size_t(device)];
+				set_midi_route(routes, name, midi_route_mask(routes, name) | (1u << column));
+			}
+		};
+		for (int p = 0; p < IN_PORTS; p++) override_column(midi_routes.inputs, inputs, p, a.in_dev[p]);
+		override_column(midi_routes.outputs, outputs, 0, a.mout_dev);
+		override_column(midi_routes.outputs, outputs, 1, a.moutb_dev);
+		override_column(midi_routes.outputs, outputs, 2, a.moutmu_dev);
+		std::string error;
+		midi.apply(midi_routes_with_editor(midi_routes, edit_out_name), true, error);
+		if (!error.empty()) std::fprintf(stderr, "MIDI: %s\n", error.c_str());
+		for (int p = 0; p < IN_PORTS; p++) std::printf("%s: %s\n", in_label(p), midi_startup_status(midi_routes.inputs, p, false).c_str());
+		for (int p = 0; p < 3; p++) std::printf("%s: %s\n", p == 2 ? "MIDI OUT" : p == 1 ? "MIDI THRU B" : "MIDI THRU A", midi_startup_status(midi_routes.outputs, p, true).c_str());
 		std::fflush(stdout);
 	}
 
@@ -1582,6 +1545,7 @@ public:
 		if (m_shut)
 			return;
 		m_shut = true;
+		if (const auto result = midi_job.join()) finish_midi_change(*result);
 		if (const auto result = audio_job.join()) finish_audio_change(*result);
 		pc_shutdown_all(list, pc, fx, shapes, master, sampling, br);
 		{
@@ -1608,14 +1572,8 @@ public:
 		// Leaving the THRU ports open with notes still held would leave them
 		// stuck on whatever is listening, so all sound off and all notes off
 		// go out first
-		for (midi_out *thru : { &thru_a, &thru_b }) {
-			if (!thru->is_open())
-				continue;
-			for (int ch = 0; ch < 16; ch++) {
-				for (u8 v : { u8(0xb0 | ch), u8(120), u8(0), u8(0xb0 | ch), u8(123), u8(0) })
-					thru->send(v);
-			}
-		}
+		for (int source = 0; source < 2; source++) for (int ch = 0; ch < 16; ch++)
+			for (u8 v : { u8(0xb0 | ch), u8(120), u8(0), u8(0xb0 | ch), u8(123), u8(0) }) midi.send(source, v);
 		join_reboot();
 		flush_card();      // the sound has stopped; keep what was on the card
 		save_settings();   // the ports, the A/D input and the VOLUME knob
@@ -1636,12 +1594,7 @@ public:
 			}
 		}
 		play.stop();
-		for (int p = 0; p < IN_PORTS; p++)
-			midi[p].close();
-		thru_a.close();
-		thru_b.close();
-		mu_out.close();
-		edit_out.close();
+		midi.close();
 	}
 
 	// How the run ended up sounding, when it sounded at all. drops is what
@@ -1771,28 +1724,6 @@ public:
 	virtual bool confirm_factory_reset() = 0;
 
 protected:
-	// One MIDI OUT opener for the three (A/B/MU): same calls, different
-	// slots and labels. Failures print always and reach menu_error for
-	// menu picks (never boot-time, which passes keep)
-	bool open_out(midi_out &port, int &dev_slot, std::string &name_slot,
-	              std::string &keep_slot, const char *label, int dev, bool keep)
-	{
-		if (!keep)
-			keep_slot.clear();
-		std::string err;
-		if (!port.open(dev, err)) {
-			std::fprintf(stderr, "%s: %s\n", label, err.c_str());
-			if (!keep)
-				menu_error(err);
-			port.open(-1, err);
-			dev = -1;
-		}
-		dev_slot  = port.is_open() ? dev : -1;
-		name_slot = port.device_name();
-		save_settings();
-		return dev >= 0;
-	}
-
 	u64 last_flush = 0;                // card file last written back
 	u64 last_drop_report = 0;          // MIDI drops last said out loud
 	bool pressed = false;            // a panel press is in flight (drag/up)

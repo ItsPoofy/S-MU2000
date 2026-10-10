@@ -73,6 +73,7 @@ static void persistence()
 {
 	ui::remembered in, out;
 	in.audio_out = "USB = audio";
+	in.midi = {{{"Keyboard", 3}, {"Pads", 17}}, {{"Synth", 5}, {"Recorder", 4}}};
 	in.audio.exclusive = true;
 	in.audio.stream = {96000, 256, 4, 5};
 	in.audio_routes = {{"USB = audio", 4, 5}, {"HDMI", 1, 0}};
@@ -80,6 +81,10 @@ static void persistence()
 	in.limiter = true; in.native_fx = 2; in.native_engine = 1;
 	ui::apply_settings(ui::collect_settings(in), out);
 	require(out.audio == in.audio && out.audio_out == in.audio_out && out.limiter && out.native_fx == 2 && out.native_engine == 1, "Audio preferences round trip");
+	require(out.midi == in.midi, "MIDI routing round trip");
+	ui::remembered legacy;
+	ui::apply_settings({{"midi_in", "Keyboard"}, {"midi_in_b", "Keyboard"}, {"midi_out", "Synth"}, {"midi_out_mu", "Synth"}}, legacy);
+	require(ui::midi_route_mask(legacy.midi.inputs, "Keyboard") == 3 && ui::midi_route_mask(legacy.midi.outputs, "Synth") == 5, "Legacy MIDI routing migration");
 	require(out.audio_routes.size() == 2 && out.audio_routes[0].device == in.audio_out && out.audio_routes[0].left == 4 && out.audio_routes[1].right == 0, "Per-device routing round trip");
 	in.board = 1; in.board_part = 17; in.board_more[0] = 2;
 	in.card = "prepared-card.img"; in.board_file = "voices.ini"; in.board_fc[0] = "fc.ini";
@@ -221,6 +226,8 @@ static void interface()
 	ui::settings_state state;
 	state.ready = state.connected = true;
 	state.outputs = {"Speakers", "USB"};
+	state.midi_inputs = {"Keyboard", "Pads"};
+	state.midi_outputs = {"Synth", "Recorder"};
 	state.stream = {{44100, 48000}, {"Output 1", "Output 2", "Output 3", "Output 4"}, 44100};
 	ui::audio_output_config applied;
 	int calls = 0, command = 0;
@@ -229,6 +236,7 @@ static void interface()
 	actions.language = [](int value) { ui::set_lang(ui::lang(value)); };
 	actions.command = [&](int id) { command = id; };
 	actions.input = [](auto) {};
+	actions.midi = [&](ui::midi_routing routes) { state.midi = std::move(routes); };
 	int volume_updates = 0, volume_saves = 0;
 	actions.volume = [&](float gain) { state.gain = gain; volume_updates++; };
 	actions.save_volume = [&] { volume_saves++; };
@@ -270,6 +278,27 @@ static void interface()
 	click("Resampler"); click("Linear");
 	require(calls == 3 && applied.preferences.stream.quality == ui::resampler_quality::linear, "Resampler selection did not apply immediately");
 	state.audio = applied; frame();
+	click("MIDI");
+	require(state.page == ui::settings_page::midi, "MIDI page navigation");
+	require(!items.contains("XG"), "MIDI reset remained in Settings");
+	click("A##Keyboard"); click("B##Keyboard"); click("A##Pads");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 3 && ui::midi_route_mask(state.midi.inputs, "Pads") == 1, "Input matrix lost multiple selections");
+	click("THRU A##Synth"); click("MU OUT##Synth"); click("MU OUT##Recorder");
+	require(ui::midi_route_mask(state.midi.outputs, "Synth") == 5 && ui::midi_route_mask(state.midi.outputs, "Recorder") == 4, "Output matrix lost multiple selections");
+	state.busy = true; frame(); click("A##Keyboard");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 3, "Routing controls active during reconfiguration");
+	state.busy = false; state.midi_inputs = {"Pads", "New controller"}; frame(); frame();
+	require(items.contains("A##New controller") && items.contains("B##Keyboard"), "Device refresh lost remembered routes or new devices");
+	click("A##Keyboard"); click("B##Keyboard");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 0, "Disconnected route could not be disabled");
+	ui::menu_state quick; quick.ready = true; quick.midi = state.midi; quick.midi_ins = state.midi_inputs; quick.midi_outs = state.midi_outputs;
+	const auto menus = ui::menu_ports(quick);
+	const auto checked = [&](int id) {
+		for (const auto &group : menus) for (const auto &entry : group.items) if (entry.id == id) return entry.checked;
+		return false;
+	};
+	require(checked(ui::ID_IN_BASE) && checked(ui::ID_OUT_BASE) && checked(ui::ID_OUTMU_BASE)
+		&& checked(ui::ID_OUTMU_BASE + 1), "Quick menu does not reflect routing matrix");
 	click("Emulation");
 	for (const char *label : {"Play effects in C++", "Lighten heavy MIDI", "Play without the firmware"}) {
 		const auto center = items.at(label).rect.GetCenter();

@@ -17,9 +17,11 @@
 
 namespace ui {
 
-class midi_split
+template <size_t Capacity = 8192>
+class basic_midi_split
 {
 public:
+	basic_midi_split(bool complete_only = false) : m_complete_only(complete_only) {}
 	// 溜まりきったメッセージを渡す先
 	using emit_fn = void (*)(void *ctx, const uint8_t *bytes, size_t n);
 
@@ -43,6 +45,7 @@ private:
 		}
 		switch (status) {
 		case 0xf1: case 0xf3: return 1;   // MTC クォーターフレーム、ソングセレクト
+		case 0xf5: return 1;              // MU cable selection: F5 nn
 		case 0xf2: return 2;              // ソングポジション
 		default: return 0;                // F6 / F7 と、F8 以上
 		}
@@ -79,12 +82,14 @@ private:
 			if (m_sysex) {
 				if (b == 0xf7)
 					put(b);           // 正しく終わった
-				flush(emit, ctx);
+				if (!m_complete_only || b == 0xf7) flush(emit, ctx);
+				else { m_n = 0; m_over = false; }
 				m_sysex = false;
 				if (b == 0xf7)
 					return;
 			} else if (m_n) {
-				flush(emit, ctx);     // 足りないまま次が来た。捨てずに出す
+				if (!m_complete_only) flush(emit, ctx);
+				else { m_n = 0; m_over = false; }
 			}
 
 			if (b == 0xf0) {
@@ -119,7 +124,8 @@ private:
 	}
 
 	// バルクダンプが通るくらい。MU2000 の TX の溜めは 4096 バイト
-	static constexpr size_t SIZE = 8192;
+	static constexpr size_t SIZE = Capacity;
+	bool m_complete_only = false;
 	uint8_t m_buf[SIZE] = {};
 	size_t  m_n = 0;
 	int     m_want = 0;
@@ -127,6 +133,8 @@ private:
 	bool    m_sysex = false;
 	bool    m_over = false;
 };
+
+using midi_split = basic_midi_split<>;
 
 } // namespace ui
 
