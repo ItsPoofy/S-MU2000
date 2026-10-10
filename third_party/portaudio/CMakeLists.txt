@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(PortAudio VERSION 19.8)
 
+# S-MU2000 vendors only the Windows DirectSound and ASIO backends.
+if(NOT WIN32)
+  message(FATAL_ERROR "This PortAudio subset supports Windows DirectSound and ASIO only")
+endif()
+
 #
 # General PortAudio stuff
 #
@@ -137,36 +142,7 @@ endif()
 # Host APIs
 #
 
-option(PA_USE_SKELETON "Use skeleton host API" OFF)
-if(PA_USE_SKELETON)
-  target_sources(portaudio PRIVATE src/hostapi/skeleton/pa_hostapi_skeleton.c)
-  target_compile_definitions(portaudio PRIVATE PA_USE_SKELETON=1)
-endif()
-
-include(CMakeDependentOption)
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
-
-# JACK is most commonly used on Linux, but it is cross platform, so allow building it on any OS
-# if the FindJACK.cmake module finds POSIX headers.
-find_package(JACK)
-cmake_dependent_option(PA_USE_JACK "Enable support for JACK Audio Connection Kit" ON JACK_FOUND OFF)
-if(PA_USE_JACK)
-  target_link_libraries(portaudio PRIVATE JACK::jack)
-  target_sources(portaudio PRIVATE
-    src/hostapi/jack/pa_jack.c
-    src/os/unix/pa_pthread_util.c
-    src/os/unix/pa_pthread_util.h
-  )
-  set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_jack.h)
-  target_include_directories(portaudio PRIVATE src/os/unix) # for pa_pthread_util.h
-  target_compile_definitions(portaudio PUBLIC PA_USE_JACK=1)
-  set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_JACK=1")
-  set(PKGCONFIG_REQUIRES_PRIVATE "${PKGCONFIG_REQUIRES_PRIVATE} jack")
-
-  # needed for PortAudioConfig.cmake so `find_package(PortAudio)` works in downstream projects
-  install(FILES cmake/modules/FindRegex.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/portaudio/modules")
-  install(FILES cmake/modules/FindJACK.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/portaudio/modules")
-endif()
 
 if(WIN32)
   target_sources(portaudio PRIVATE
@@ -259,38 +235,8 @@ if(WIN32)
     endif()
   endif()
 
-  option(PA_USE_WMME "Enable support for WMME" ON)
-  if(PA_USE_WMME)
-    target_sources(portaudio PRIVATE src/hostapi/wmme/pa_win_wmme.c)
-    set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_win_wmme.h)
-    target_compile_definitions(portaudio PUBLIC PA_USE_WMME=1)
-    set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_WMME=1")
-    target_link_libraries(portaudio PRIVATE ole32 uuid)
-  else()
-    set(DEF_EXCLUDE_WMME_SYMBOLS ";")
-  endif()
-
-  option(PA_USE_WASAPI "Enable support for WASAPI" ON)
-  if(PA_USE_WASAPI)
-    target_sources(portaudio PRIVATE src/hostapi/wasapi/pa_win_wasapi.c)
-    set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_win_wasapi.h)
-    target_compile_definitions(portaudio PUBLIC PA_USE_WASAPI=1)
-    set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_WASAPI=1")
-    target_link_libraries(portaudio PRIVATE ole32 uuid)
-  else()
-    set(DEF_EXCLUDE_WASAPI_SYMBOLS ";")
-  endif()
-
-  option(PA_USE_WDMKS "Enable support for WDMKS" ON)
-  if(PA_USE_WDMKS)
-    target_sources(portaudio PRIVATE
-      src/hostapi/wdmks/pa_win_wdmks.c
-    )
-    set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_win_wdmks.h)
-    target_compile_definitions(portaudio PUBLIC PA_USE_WDMKS=1)
-    set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_WDMKS=1")
-    target_link_libraries(portaudio PRIVATE setupapi ole32 uuid)
-  endif()
+  set(DEF_EXCLUDE_WMME_SYMBOLS ";")
+  set(DEF_EXCLUDE_WASAPI_SYMBOLS ";")
 
   option(PA_USE_WDMKS_DEVICE_INFO "Use WDM/KS API for device info" ON)
   if(PA_USE_WDMKS_DEVICE_INFO)
@@ -300,118 +246,6 @@ if(WIN32)
   if(PA_BUILD_SHARED_LIBS)
     configure_file(cmake/portaudio.def.in "${CMAKE_CURRENT_BINARY_DIR}/portaudio.def" @ONLY)
     target_sources(portaudio PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/portaudio.def")
-  endif()
-elseif(UNIX)
-  target_sources(portaudio PRIVATE
-    src/os/unix/pa_unix_hostapis.c
-    src/os/unix/pa_unix_util.c
-    src/os/unix/pa_unix_util.h
-    src/os/unix/pa_pthread_util.c
-    src/os/unix/pa_pthread_util.h
-  )
-  target_include_directories(portaudio PRIVATE src/os/unix)
-  target_link_libraries(portaudio PRIVATE m)
-  set(PKGCONFIG_LDFLAGS_PRIVATE "${PKGCONFIG_LDFLAGS_PUBLIC} -lm -lpthread")
-  set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -pthread")
-
-  if(APPLE)
-    set(CMAKE_MACOSX_RPATH 1)
-    target_sources(portaudio PRIVATE
-      src/hostapi/coreaudio/pa_mac_core.c
-      src/hostapi/coreaudio/pa_mac_core_blocking.c
-      src/hostapi/coreaudio/pa_mac_core_blocking.h
-      src/hostapi/coreaudio/pa_mac_core_internal.h
-      src/hostapi/coreaudio/pa_mac_core_utilities.c
-      src/hostapi/coreaudio/pa_mac_core_utilities.h
-    )
-    target_include_directories(portaudio PRIVATE src/hostapi/coreaudio)
-    set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_mac_core.h)
-
-    target_link_libraries(portaudio
-      PRIVATE
-        -Wl,-framework,CoreAudio
-        -Wl,-framework,AudioToolbox
-        -Wl,-framework,AudioUnit
-        -Wl,-framework,CoreFoundation
-        -Wl,-framework,CoreServices
-    )
-    target_compile_definitions(portaudio PUBLIC PA_USE_COREAUDIO=1)
-    set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_COREAUDIO=1")
-
-    # Use C11 so that we can make use of atomic library and avoid deprecation errors.
-    set_property(TARGET portaudio PROPERTY C_STANDARD 11)
-
-    set(PKGCONFIG_LDFLAGS_PRIVATE
-      "${PKGCONFIG_LDFLAGS_PRIVATE} -framework CoreAudio -framework AudioToolbox -framework AudioUnit -framework CoreFoundation -framework CoreServices")
-  else()
-    # Some BSDs have a reimplementation of alsalib, so do not explicitly check for Linux.
-    find_package(ALSA)
-    cmake_dependent_option(PA_USE_ALSA "Enable support for ALSA" ON ALSA_FOUND OFF)
-    if(PA_USE_ALSA)
-      target_sources(portaudio PRIVATE src/hostapi/alsa/pa_linux_alsa.c)
-      set(PORTAUDIO_PUBLIC_HEADERS "${PORTAUDIO_PUBLIC_HEADERS}" include/pa_linux_alsa.h)
-      target_compile_definitions(portaudio PUBLIC PA_USE_ALSA=1)
-      set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_ALSA=1")
-
-      option(PA_ALSA_DYNAMIC "Enable dynamically loading libasound with dlopen using PaAlsa_SetLibraryPathName" OFF)
-      if(PA_ALSA_DYNAMIC)
-        target_compile_definitions(portaudio PRIVATE PA_ALSA_DYNAMIC)
-        target_link_libraries(portaudio PRIVATE "${CMAKE_DL_LIBS}")
-        set(PKGCONFIG_LDFLAGS_PRIVATE "${PKGCONFIG_LDFLAGS_PRIVATE} -l${CMAKE_DL_LIBS}")
-      else()
-        target_link_libraries(portaudio PRIVATE "${ALSA_LIBRARIES}")
-        set(PKGCONFIG_REQUIRES_PRIVATE "${PKGCONFIG_REQUIRES_PRIVATE} alsa")
-      endif()
-    endif()
-
-    # OSS is intentionally off by default to avoid confusing users of PortAudio
-    # applications. OSS builds but there are no devices available on modern
-    # Linux systems.
-    find_package(OSS)
-    cmake_dependent_option(PA_USE_OSS "Enable support for OSS" OFF "OSS_FOUND" OFF)
-    if(PA_USE_OSS)
-      target_sources(portaudio PRIVATE src/hostapi/oss/pa_unix_oss.c)
-      target_compile_definitions(portaudio PUBLIC PA_USE_OSS=1)
-      set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_OSS=1")
-      target_link_libraries(portaudio PRIVATE OSS::oss)
-      # The FindOSS.cmake module does not need to be installed like the JACK modules because it
-      # does not link any library; it only adds an include directory and compile definition.
-    endif()
-
-    check_include_file(sys/audioio.h HAVE_SYS_AUDIOIO_H)
-    cmake_dependent_option(AUDIOIO "Enable support for Solaris/NetBSD audio" ON "HAVE_SYS_AUDIOIO_H" AUDIOIO)
-    if(AUDIOIO AND HAVE_SYS_AUDIOIO_H)
-      target_sources(portaudio PRIVATE src/hostapi/audioio/pa_unix_audioio.c)
-      target_compile_definitions(portaudio PUBLIC PA_USE_AUDIOIO=1)
-      set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_AUDIOIO=1")
-    endif()
-
-    find_package(PulseAudio)
-    cmake_dependent_option(PA_USE_PULSEAUDIO "Enable support for PulseAudio general purpose sound server" ON PulseAudio_FOUND OFF)
-    if(PA_USE_PULSEAUDIO)
-      target_link_libraries(portaudio PRIVATE PulseAudio::PulseAudio)
-      target_sources(portaudio PRIVATE
-        src/hostapi/pulseaudio/pa_linux_pulseaudio_block.c
-        src/hostapi/pulseaudio/pa_linux_pulseaudio.c
-        src/hostapi/pulseaudio/pa_linux_pulseaudio_cb.c)
-
-      target_compile_definitions(portaudio PUBLIC PA_USE_PULSEAUDIO=1)
-      set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_PULSEAUDIO=1")
-      set(PKGCONFIG_REQUIRES_PRIVATE "${PKGCONFIG_REQUIRES_PRIVATE} libpulse")
-
-      # needed for PortAudioConfig.cmake so `find_package(PortAudio)` works in downstream projects
-      install(FILES cmake/modules/FindPulseAudio.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/portaudio/modules")
-    endif()
-
-    pkg_check_modules(SNDIO sndio)
-    cmake_dependent_option(PA_USE_SNDIO "Enable support for sndio" ON SNDIO_FOUND OFF)
-    if(PA_USE_SNDIO)
-      target_link_libraries(portaudio PRIVATE "${SNDIO_LIBRARIES}")
-      target_sources(portaudio PRIVATE src/hostapi/sndio/pa_sndio.c)
-      target_compile_definitions(portaudio PUBLIC PA_USE_SNDIO=1)
-      set(PKGCONFIG_CFLAGS "${PKGCONFIG_CFLAGS} -DPA_USE_SNDIO=1")
-      set(PKGCONFIG_REQUIRES_PRIVATE "${PKGCONFIG_REQUIRES_PRIVATE} sndio")
-    endif()
   endif()
 endif()
 

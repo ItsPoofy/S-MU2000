@@ -48,17 +48,8 @@
 #endif
 #include <winioctl.h>                       // MinGW32 does not define this automatically
 
-#if defined(__GNUC__)
-
-#include "../../hostapi/wasapi/mingw-include/ks.h"
-#include "../../hostapi/wasapi/mingw-include/ksmedia.h"
-
-#else
-
 #include <ks.h>
 #include <ksmedia.h>
-
-#endif
 
 #include <stdio.h>                          // just for some development printfs
 

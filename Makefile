@@ -181,10 +181,9 @@ CMAKE ?= cmake
 PORTAUDIO_LIB := $(BUILD)/portaudio/libportaudio.a
 CXXFLAGS += -DSMU2000_ASIO=1 -I third_party/portaudio/include
 PORTAUDIO_SRC := src/ui/audio_out_portaudio.cpp
-PORTAUDIO_OBJ := $(BUILD)/src/ui/audio_out_portaudio.o
 PORTAUDIO_LIBS := -ldsound -luuid -lwinmm -lole32
 $(PORTAUDIO_LIB): third_party/portaudio/CMakeLists.txt third_party/portaudio/cmake/modules/FindASIO.cmake
-	$(CMAKE) -S third_party/portaudio -B $(BUILD)/portaudio -G "$(if $(CROSS_WINDOWS),Unix Makefiles,MinGW Makefiles)" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER="$(subst g++,gcc,$(CXX))" -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_SHARED_LIBS=OFF -DPA_USE_ASIO=ON -DPA_USE_WASAPI=OFF -DPA_USE_WMME=OFF -DPA_USE_WDMKS=OFF
+	$(CMAKE) -S third_party/portaudio -B $(BUILD)/portaudio -G "$(if $(CROSS_WINDOWS),Unix Makefiles,MinGW Makefiles)" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER="$(subst g++,gcc,$(CXX))" -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_SHARED_LIBS=OFF -DPA_USE_ASIO=ON -DPA_USE_DS=ON
 	$(CMAKE) --build $(BUILD)/portaudio --parallel 4
 $(BUILD)/ASIO-GPL-3.0.txt: third_party/portaudio/ASIO-GPL-3.0.txt
 	@mkdir -p $(dir $@)
@@ -480,10 +479,19 @@ $(BUILD)/rec$(EXE): $(BUILD)/src/smf.o $(BUILD)/src/rec.o $(BUILD)/src/compat/co
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lwinmm -lole32 -luuid
 
-# live は Windows の MIDI 入力と音声出力を使う
-$(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(BUILD)/src/ui/midi_in.o $(BUILD)/src/ui/audio_out.o $(PORTAUDIO_OBJ) $(BUILD)/src/live.o $(PORTAUDIO_LIB)
+# live uses only WASAPI, including in an ASIO=1 build.
+LIVE_AUDIO_OBJ := $(BUILD)/src/ui/audio_out.o
+LIVE_MAIN_OBJ := $(BUILD)/src/live.o
+ifeq ($(ASIO),1)
+LIVE_AUDIO_OBJ := $(BUILD)/native/src/ui/audio_out.o
+LIVE_MAIN_OBJ := $(BUILD)/native/src/live.o
+$(BUILD)/native/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lwinmm -lole32 -luuid -lavrt $(PORTAUDIO_LIBS)
+	$(CXX) $(filter-out -DSMU2000_ASIO=1,$(CXXFLAGS)) -c -o $@ $<
+endif
+$(BUILD)/live$(EXE): $(OBJS) $(BUILD)/src/mu2000.o $(BUILD)/src/ui/midi_in.o $(LIVE_AUDIO_OBJ) $(LIVE_MAIN_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lwinmm -lole32 -luuid -lavrt
 
 # ---- VST3 プラグイン
 #

@@ -118,7 +118,8 @@ private:
 		// Labels sit above their controls, so translations fit narrow windows too.
 		ImGui::PushItemWidth(-1);
 		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
-		if (combo(UI_TEXT(settings_driver, "Driver"), audio_driver_name(m_draft.preferences.stream.driver))) {
+		if ((supported_audio_driver(audio_driver::directsound) || supported_audio_driver(audio_driver::asio)) &&
+		    combo(UI_TEXT(settings_driver, "Driver"), audio_driver_name(m_draft.preferences.stream.driver))) {
 			for (int d = 0; d < 3; d++) if (supported_audio_driver(audio_driver(d))) {
 				if (ImGui::Selectable(audio_driver_name(audio_driver(d)), m_draft.preferences.stream.driver == audio_driver(d))) {
 					m_draft.preferences.stream.driver = audio_driver(d);

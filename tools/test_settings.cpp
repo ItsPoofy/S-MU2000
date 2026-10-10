@@ -263,6 +263,7 @@ static void interface()
 		require(ImGui::GetDrawData()->TotalVtxCount > 0, "Settings window produced no drawing");
 	};
 	frame(); frame();
+	require(items.contains("Driver") == (ui::supported_audio_driver(ui::audio_driver::directsound) || ui::supported_audio_driver(ui::audio_driver::asio)), "Driver selector visibility does not match supported backends");
 	const auto click = [&](const std::string &label) {
 		require(items.contains(label), ("Missing widget: " + label).c_str());
 		auto target = items.at(label);
