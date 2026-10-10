@@ -51,12 +51,15 @@ public:
 
 	// From the audio thread: push one byte at a time, drop it when not open
 	void send(u8 v);
+	// Whole-message enqueue; false leaves the queue unchanged.
+	bool send(const u8 *bytes, size_t n);
 
 private:
 	void run();                       // the sender thread
 	void emit(const u8 *p, size_t n); // send one assembled message to CoreMIDI
 
-	static constexpr size_t SIZE = 8192, MASK = SIZE - 1;
+	static constexpr size_t SIZE = 65536, MASK = SIZE - 1;
+	bool enqueue(const u8 *bytes, size_t n);
 	u8 m_buf[SIZE] = {};
 	std::atomic<size_t> m_read{0}, m_write{0};
 
@@ -100,6 +103,8 @@ public:
 
 	// 音声スレッドから。1 バイトずつ積む。開いていなければ捨てる
 	void send(u8 v);
+	// Whole-message enqueue; false leaves the queue unchanged.
+	bool send(const u8 *bytes, size_t n);
 
 	// 相手が受け取らなくなった（送り終わらないまま時間切れになった）
 	bool stuck() const { return m_stuck.load(std::memory_order_acquire); }
@@ -108,7 +113,8 @@ private:
 	void run(unsigned gen, void *handle);  // 送りスレッド
 	void emit(void *handle, const u8 *p, size_t n); // 組み上がった 1 通を Windows へ
 
-	static constexpr size_t SIZE = 8192, MASK = SIZE - 1;
+	static constexpr size_t SIZE = 65536, MASK = SIZE - 1;
+	bool enqueue(const u8 *bytes, size_t n);
 	u8 m_buf[SIZE] = {};
 	std::atomic<size_t> m_read{0}, m_write{0};
 
@@ -137,6 +143,19 @@ private:
 };
 
 #endif // _WIN32
+
+// One producer, one consumer. Publish or reject the whole framed message so
+// queue pressure never splices a partial SysEx into another sender's data.
+inline bool midi_out::enqueue(const u8 *bytes, size_t n)
+{
+	if (!m_open.load(std::memory_order_acquire) || n >= SIZE) return false;
+	const size_t w = m_write.load(std::memory_order_relaxed);
+	const size_t free = (m_read.load(std::memory_order_acquire) - w - 1) & MASK;
+	if (n > free) return false;
+	for (size_t i = 0; i < n; i++) m_buf[(w + i) & MASK] = bytes[i];
+	m_write.store((w + n) & MASK, std::memory_order_release);
+	return true;
+}
 
 } // namespace ui
 

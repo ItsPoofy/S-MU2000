@@ -159,13 +159,9 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	self.window.rootViewController = vc;
 	[self.window makeKeyAndVisible];
 
-	// The shared state and the app, laid out exactly as src/gui.cpp does: a
-	// bridge, four MIDI inputs (mu2000::MIDI_PORTS of them) and three outputs
-	// (THRU A, THRU B, and the machine's own OUT), then the app over them.
+	// The app owns its MIDI routes, as it does in src/gui.cpp.
 	static ui::bridge br;
-	static ui::midi_in  midi_ports[ui::IN_PORTS];
-	static ui::midi_out mout, mout_b, mout_mu;
-	static ui::gui_app gui(br, midi_ports, mout, mout_b, mout_mu);
+	static ui::gui_app gui(br);
 	ui::g_gui = &gui;
 	gui.eng = nullptr;
 	// Network MIDI endpoints only exist while the session is enabled, so apply
@@ -185,7 +181,7 @@ static bool boot_machine_once(ui::gui_app &gui, ui::engine &eng, ui::tool_args &
 	const std::string dir = rom_dir();
 	std::fprintf(stderr, "[ios] ROM dir: %s\n", dir.c_str());
 
-	static ui::engine eng(br, midi_ports[0]);
+	static ui::engine eng(br, gui.midi);
 	gui.eng = &eng;
 	gui.state = &eng.state;
 

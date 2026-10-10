@@ -1402,9 +1402,14 @@ $(BUILD)/settings_test$(EXE): tools/test_settings.cpp $(IMGUI_CORE) $(wildcard s
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -DIMGUI_ENABLE_TEST_ENGINE -I third_party/imgui -o $@ tools/test_settings.cpp $(IMGUI_CORE) $(LDFLAGS)
 
+$(BUILD)/midi_routing_test$(EXE): tools/test_midi_routing.cpp src/ui/midi_router.h src/ui/midi_routes.h src/ui/midi_split.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+
 .PHONY: check-settings
-check-settings: $(BUILD)/settings_test$(EXE)
+check-settings: $(BUILD)/settings_test$(EXE) $(BUILD)/midi_routing_test$(EXE)
 	$(WINE) $(BUILD)/settings_test$(EXE)
+	$(WINE) $(BUILD)/midi_routing_test$(EXE)
 
 clean:
 	rm -rf $(BUILD)

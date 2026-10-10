@@ -3,6 +3,7 @@
 
 #include "audio_preferences.h"
 #include "menu.h"
+#include "midi_routing_view.h"
 #include "xg_ui.h"
 #include "imgui.h"
 #include <array>
@@ -12,14 +13,16 @@
 #endif
 
 namespace ui {
-enum class settings_page { general, audio, emulation };
+enum class settings_page { general, audio, midi, emulation };
 
 struct settings_state {
 	settings_page page = settings_page::audio;
 	audio_output_config audio;
 	audio_stream_info stream;
 	std::array<std::vector<std::string>, 3> driver_outputs;
-	std::vector<std::string> outputs, inputs;
+	std::vector<std::string> outputs, inputs, midi_inputs, midi_outputs;
+	midi_routing midi;
+	std::string midi_error;
 	std::string input, error;
 	bool ready = false, busy = false, connected = false;
 	bool analog = false, limiter = false, native_fx = false, native_engine = false, thin_bends = false;
@@ -30,6 +33,7 @@ struct settings_actions {
 	std::function<void(audio_output_config)> audio;
 	std::function<void()> control_panel;
 	std::function<void(std::string)> input;
+	std::function<void(midi_routing)> midi;
 	std::function<void(int)> command, language;
 	std::function<void(float)> volume;
 	std::function<void()> save_volume;
@@ -61,9 +65,10 @@ public:
 		                                ImGuiWindowFlags_NoSavedSettings);
 		const float fs = ImGui::GetFontSize();
 		ImGui::BeginChild("categories", ImVec2(fs * 8, 0), ImGuiChildFlags_Borders);
-		for (const auto &[page, label] : std::array<std::pair<settings_page, const char *>, 3>{
+		for (const auto &[page, label] : std::array<std::pair<settings_page, const char *>, 4>{
 		         {{settings_page::general, UI_TEXT(settings_general, "General")},
 		          {settings_page::audio, UI_TEXT(settings_audio, "Audio")},
+		          {settings_page::midi, UI_TEXT(settings_midi, "MIDI")},
 		          {settings_page::emulation, UI_TEXT(settings_emulation, "Emulation")}}}) {
 			if (ImGui::Selectable(label, m_state.page == page)) m_state.page = page;
 		}
@@ -72,6 +77,7 @@ public:
 		ImGui::BeginChild("page", ImVec2(0, 0));
 		if (m_state.page == settings_page::general) draw_general();
 		else if (m_state.page == settings_page::audio) draw_audio();
+		else if (m_state.page == settings_page::midi) draw_midi();
 		else draw_emulation();
 		ImGui::EndChild();
 		ImGui::End();
@@ -228,6 +234,17 @@ private:
 		if (ImGui::Checkbox(UI_TEXT(settings_limiter, "Limit output peaks"), &limiter)) m_actions.limiter(limiter);
 		ImGui::EndDisabled();
 		ImGui::PopItemWidth();
+	}
+	void draw_midi()
+	{
+		ImGui::SeparatorText(UI_TEXT(settings_midi_inputs, "MIDI inputs"));
+		ImGui::BeginDisabled(!m_state.ready || m_state.busy);
+		const float available = ImGui::GetContentRegionAvail().y;
+		draw_midi_device_list(m_state.midi, m_state.midi_inputs, false, std::max(100.0f, available * 0.55f), m_actions.midi);
+		ImGui::SeparatorText(UI_TEXT(settings_midi_outputs, "MIDI outputs"));
+		draw_midi_device_list(m_state.midi, m_state.midi_outputs, true, std::max(80.0f, ImGui::GetContentRegionAvail().y - (m_state.midi_error.empty() ? 0.0f : ImGui::GetFrameHeightWithSpacing() * 2)), m_actions.midi);
+		ImGui::EndDisabled();
+		if (!m_state.midi_error.empty()) ImGui::TextWrapped("%s", m_state.midi_error.c_str());
 	}
 	void draw_emulation()
 	{

@@ -30,10 +30,7 @@ std::string settings_file_path();
 class gui_app : public app
 {
 public:
-	// mi is MIDI IN A-D, mu2000::MIDI_PORTS of them
-	gui_app(bridge &b, midi_in *mi,
-	        midi_out &tha, midi_out &thb, midi_out &muo)
-	    : app(b, mi, tha, thb, muo) {}
+	explicit gui_app(bridge &b) : app(b) {}
 
 	// ---- settings
 

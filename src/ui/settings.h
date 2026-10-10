@@ -14,6 +14,7 @@
 #pragma once
 
 #include "audio_preferences.h"
+#include "midi_routes.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -99,9 +100,10 @@ inline const std::string *find_setting(const settings_map &m, const char *key)
 // Everything gui.ini remembers, both directions. The two front ends keep
 // these in different shapes (globals vs members, partial vs full loads),
 // so each fills or reads one of these and collect()/apply() below do the
-// file mapping once. in[] has 4 entries, like SET_IN_KEYS (both front ends
-// run 4 MIDI ports).
+// file mapping once. The legacy in[]/out keys remain for migration and for
+// opening the same configuration with an older build.
 struct remembered {
+	midi_routing midi;
 	std::string in[IN_PORTS];
 	std::string out, out_b, out_mu;
 	std::string audio_out;
@@ -145,6 +147,15 @@ inline settings_map collect_settings(const remembered &r)
 	kv.emplace_back(SET_OUT, r.out);
 	kv.emplace_back(SET_OUT_B, r.out_b);
 	kv.emplace_back(SET_OUT_MU, r.out_mu);
+	kv.emplace_back("midi_routes", "1");
+	for (int side = 0; side < 2; side++) {
+		const auto &routes = side ? r.midi.outputs : r.midi.inputs;
+		for (size_t i = 0; i < routes.size(); i++) {
+			const std::string prefix = std::string(side ? "midi_output_" : "midi_input_") + std::to_string(i);
+			kv.emplace_back(prefix + "_device", routes[i].device);
+			kv.emplace_back(prefix + "_ports", std::to_string(routes[i].ports));
+		}
+	}
 	kv.emplace_back(SET_AUDIO_OUT, r.audio_out);
 	kv.emplace_back(SET_AUDIO_IN, r.audio_in);
 	kv.emplace_back("audio_latency", std::to_string(r.audio.latency_ms));
@@ -208,6 +219,23 @@ inline void apply_settings(const settings_map &kv, remembered &r)
 		const long n = std::strtol(v->c_str(), &end, 10);
 		return end == v->c_str() || *end || n < min || n > max ? fallback : int(n);
 	};
+	r.midi = {};
+	if (find_setting(kv, "midi_routes")) {
+		for (int side = 0; side < 2; side++) {
+			auto &routes = side ? r.midi.outputs : r.midi.inputs;
+			for (const auto &[key, device] : kv) {
+				if (!key.starts_with(side ? "midi_output_" : "midi_input_") || !key.ends_with("_device")) continue;
+				const std::string ports = key.substr(0, key.size() - 7) + "_ports";
+				const unsigned mask = unsigned(integer(ports.c_str(), 0, 0, side ? 7 : 31));
+				set_midi_route(routes, device, midi_route_mask(routes, device) | mask);
+			}
+		}
+	} else {
+		// Migrate single-device settings without losing shared destinations.
+		for (int p = 0; p < IN_PORTS; p++) set_midi_route(r.midi.inputs, r.in[p], midi_route_mask(r.midi.inputs, r.in[p]) | (1u << p));
+		const std::string names[] = {r.out, r.out_b, r.out_mu};
+		for (int p = 0; p < 3; p++) set_midi_route(r.midi.outputs, names[p], midi_route_mask(r.midi.outputs, names[p]) | (1u << p));
+	}
 	r.audio.latency_ms = integer("audio_latency", r.audio.latency_ms, 0, 200);
 	r.audio.exclusive = integer("audio_exclusive", 0, 0, 1) != 0;
 	r.audio.stream.quality = resampler_quality(integer("audio_resampler", 0, 0, 2));
