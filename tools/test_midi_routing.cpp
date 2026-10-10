@@ -12,6 +12,7 @@ static void require(bool condition, const char *message)
 	if (!condition) throw std::runtime_error(message);
 }
 
+static bool paused = false, driver_during_pause = false;
 template <int Side> struct fake_port {
 	inline static std::vector<std::string> names;
 	inline static std::map<std::string, fake_port *> active;
@@ -20,10 +21,11 @@ template <int Side> struct fake_port {
 	inline static std::string fail;
 	std::string name;
 	std::deque<u8> queued;
-	~fake_port() { if (!name.empty()) active.erase(name); }
+	~fake_port() { if (!name.empty()) { driver_during_pause |= paused; active.erase(name); } }
 	static auto list() { return names; }
 	bool open(int index, std::string &error)
 	{
+		driver_during_pause |= paused;
 		const auto &selected = names.at(size_t(index));
 		if (selected == fail) { error = "open failed"; return false; }
 		require(!active.contains(selected), "Physical device opened twice");
@@ -106,6 +108,50 @@ static void recovery()
  require(attempts == 2 && output::active.contains("Unavailable"), "Changed device list did not allow MIDI recovery");
  r->close(); output::opens.clear();
 }
+static void publication()
+{
+	input::names = {"One", "Two"}; output::names = {"Out"};
+	auto r = std::make_unique<router>(); std::string error;
+	int pauses = 0;
+	const auto publish = [&](auto &&commit) { pauses++; paused = true; commit(); paused = false; };
+	ui::midi_routing routes{{{"One", 1}}, {{"Out", 1}}};
+	require(r->apply(routes, false, error, publish), "Opening routes failed");
+	require(pauses == 1 && !driver_during_pause, "Driver opened while audio was paused");
+	routes.inputs[0].ports = 3; routes.outputs[0].ports = 5;
+	require(r->apply(routes, false, error, publish) && pauses == 1, "Column-only edit paused audio");
+	push("One", {0x90, 60, 100}); const auto received = drain(*r);
+	require(received[0] == received[1] && received[1].size() == 1, "Column-only edit did not change delivery");
+	input::fail = "Two"; routes.inputs.push_back({"Two", 1});
+	require(!r->apply(routes, false, error, publish) && pauses == 1, "Failed open paused audio");
+	input::fail.clear(); routes.inputs.clear(); routes.outputs.clear();
+	require(r->apply(routes, false, error, publish) && pauses == 2 && !driver_during_pause, "Driver closed while audio was paused");
+	r->close(); input::opens.clear(); output::opens.clear();
+}
+static void cable_and_limits()
+{
+	input::names = {"Cable"}; output::names = {"Thru"};
+	auto r = std::make_unique<router>(); std::string error;
+	require(r->apply({{{"Cable", 1}}, {{"Thru", 1}}}, false, error), "Cable test routing failed");
+	push("Cable", {0xf5}); require(drain(*r)[0].empty(), "Cable command emitted without its number");
+	push("Cable", {0xf8, 2, 0x90, 60, 127, 61, 100}); const auto received = drain(*r);
+	require(received[0] == std::vector<std::vector<u8>>{{0xf8}, {0xf5, 2}, {0x90, 60, 127}, {0x90, 61, 100}}, "Cable selection or following running status was lost");
+	for (const auto &message : received[0]) for (u8 byte : message) r->send(0, byte);
+	require(output::sent["Thru"] == std::vector<u8>({0xf8, 0xf5, 2, 0x90, 60, 127, 0x90, 61, 100}), "THRU lost the cable number");
+	output::sent.clear();
+	auto &queue = input::active.at("Cable")->queued;
+	for (size_t length : {size_t(65536), size_t(65537)}) {
+		queue.push_back(0xf0); r->send(0, 0xf0);
+		for (size_t i = 2; i < length; i++) { queue.push_back(1); r->send(0, 1); }
+		queue.push_back(0xf7); r->send(0, 0xf7);
+		auto first = drain(*r); auto second = drain(*r);
+		if (length == 65536) require(first[0].size() == 1 && first[0][0].size() == length && output::sent["Thru"].size() == length, "64 KiB message was rejected");
+		else require(first[0].empty() && second[0].empty() && output::sent["Thru"].empty(), "Oversized SysEx leaked fragments");
+		output::sent.clear();
+	}
+	push("Cable", {0xf5, 3, 0x90, 62, 100});
+	require(drain(*r)[0] == std::vector<std::vector<u8>>{{0xf5, 3}, {0x90, 62, 100}}, "Oversized SysEx corrupted the next message");
+	r->close(); output::sent.clear(); input::opens.clear(); output::opens.clear();
+}
 static void run()
 {
 	input::names = {"Keyboard", "Pads", "Third"}; output::names = {"Synth", "Recorder", "Bad"};
@@ -179,6 +225,6 @@ static void run()
 }
 int main()
 {
-	try { migration(); recovery(); run(); std::cout << "MIDI fan-in/out, framing, rollback, hotplug and endpoint lifetime: PASS\n"; }
+	try { migration(); recovery(); publication(); cable_and_limits(); run(); std::cout << "MIDI fan-in/out, framing, rollback, hotplug and endpoint lifetime: PASS\n"; }
 	catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }

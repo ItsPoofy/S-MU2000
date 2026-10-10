@@ -45,6 +45,7 @@ private:
 		}
 		switch (status) {
 		case 0xf1: case 0xf3: return 1;   // MTC クォーターフレーム、ソングセレクト
+		case 0xf5: return 1;              // MU cable selection: F5 nn
 		case 0xf2: return 2;              // ソングポジション
 		default: return 0;                // F6 / F7 と、F8 以上
 		}

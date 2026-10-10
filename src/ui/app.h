@@ -113,6 +113,7 @@ public:
 	midi_routing midi_routes, pending_midi;
 	midi_session midi_job;
 	std::string midi_error, pending_edit_out;
+	bool pending_midi_menu = false;
 	std::vector<std::string> midi_menu_inputs, midi_menu_outputs;
 	audio_device_watch midi_inputs_watch, midi_outputs_watch;
 
@@ -578,11 +579,22 @@ public:
 		const auto name = midi_column_name(routes, column);
 		return name.empty() ? UI_TEXT(status_none, "none") : name;
 	}
-	void request_midi(midi_routing routes, std::string editor, bool missing_ok = false)
+	std::string midi_startup_status(const std::vector<midi_route> &routes, int column, bool output) const
+	{
+		std::string text;
+		for (const auto &route : routes) if (route.ports & (1u << column)) {
+			if (!text.empty()) text += ", ";
+			text += route.device;
+			if (!midi.connected(output, route.device)) text += CLI_T(" (not found; remembered)", " (見つからない; 記憶を保持)");
+		}
+		return text.empty() ? UI_TEXT(status_none, "none") : text;
+	}
+	void request_midi(midi_routing routes, std::string editor, bool missing_ok = false, bool menu_pick = false)
 	{
 		if (!audio_ready.load() || audio_job.busy() || midi_job.busy() || !eng || !state || state->load() == 2) return;
 		if (state->load() != 1 && !audio_failed) return;
 		join_reboot();
+		pending_midi_menu = menu_pick;
 		pending_midi = std::move(routes);
 		pending_edit_out = std::move(editor);
 		midi_job.begin(*eng, midi_routes_with_editor(pending_midi, pending_edit_out), missing_ok);
@@ -590,6 +602,8 @@ public:
 	void finish_midi_change(const midi_change_result &result)
 	{
 		midi_error = result.error;
+		if (pending_midi_menu && !midi_error.empty())
+			defer_outside_paint([this, text = midi_error] { menu_error(text); });
 		if (result.selected) {
 			midi_routes = std::move(pending_midi);
 			edit_out_name = std::move(pending_edit_out);
@@ -607,13 +621,13 @@ public:
 			const auto &name = names[size_t(device)];
 			set_midi_route(rows, name, midi_route_mask(rows, name) ^ (1u << column));
 		}
-		request_midi(std::move(routes), edit_out_name);
+		request_midi(std::move(routes), edit_out_name, false, true);
 	}
 	void choose_edit_out(int dev)
 	{
 		const auto names = midi_out::list();
 		if (dev >= 0 && size_t(dev) >= names.size()) return;
-		request_midi(midi_routes, dev < 0 ? std::string() : names[size_t(dev)]);
+		request_midi(midi_routes, dev < 0 ? std::string() : names[size_t(dev)], false, true);
 	}
 	int edit_dest(int port) const { return edit_out_name.empty() ? (port == 1 ? 1 : 0) : 2; }
 	// 音色の窓に、送り先の品書きと送る道を渡す
@@ -1434,8 +1448,8 @@ public:
 		std::string error;
 		midi.apply(midi_routes_with_editor(midi_routes, edit_out_name), true, error);
 		if (!error.empty()) std::fprintf(stderr, "MIDI: %s\n", error.c_str());
-		for (int p = 0; p < IN_PORTS; p++) std::printf("%s: %s\n", in_label(p), midi_status(midi_routes.inputs, p).c_str());
-		for (int p = 0; p < 3; p++) std::printf("%s: %s\n", p == 2 ? "MIDI OUT" : p == 1 ? "MIDI THRU B" : "MIDI THRU A", midi_status(midi_routes.outputs, p).c_str());
+		for (int p = 0; p < IN_PORTS; p++) std::printf("%s: %s\n", in_label(p), midi_startup_status(midi_routes.inputs, p, false).c_str());
+		for (int p = 0; p < 3; p++) std::printf("%s: %s\n", p == 2 ? "MIDI OUT" : p == 1 ? "MIDI THRU B" : "MIDI THRU A", midi_startup_status(midi_routes.outputs, p, true).c_str());
 		std::fflush(stdout);
 	}
 
