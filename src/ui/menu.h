@@ -20,6 +20,7 @@
 #define S_MU2000_UI_MENU_H
 
 #pragma once
+#include "midi_routes.h"
 
 #include <cstdio>
 #include <string>
@@ -162,8 +163,7 @@ struct menu_state {
 	bool limiter = false;
 	std::string audio_name;  // empty selects the system default
 	bool audio_ready = false; // startup has released the output to the UI
-	int in_dev[5] = { -1, -1, -1, -1, -1 };
-	int out_dev = -1, out_dev_b = -1, out_dev_mu = -1;
+	midi_routing midi;
 	std::string ain_name;
 	std::string card_path;
 	bool playing = false;
@@ -231,19 +231,17 @@ inline std::string basename(const std::string &path)
 
 // One input/output picker for the quick MIDI menu.
 inline menu_group menu_port_group(const char *title, const std::vector<std::string> &names,
-                                  int now, int id_none, int id_base)
+                                  const std::vector<midi_route> &routes, int column, int id_none, int id_base, bool ready)
 {
 	using namespace menu_detail;
 	menu_group g;
 	g.title = title;
-	g.items.push_back(text(UI_TEXT(menu_unused, "Unused"), id_none, now < 0, true));
+	const bool selected = std::any_of(routes.begin(), routes.end(), [&](const auto &r) { return (r.ports & (1u << column)) != 0; });
+	g.items.push_back(text(UI_TEXT(menu_unused, "Unused"), id_none, !selected, ready));
 	g.items.push_back(separator());
-	if (names.empty()) {
-		g.items.push_back(text(UI_TEXT(menu_no_devices, "(No devices)"), 0, false, false));
-		return g;
-	}
-	for (size_t i = 0; i < names.size(); i++)
-		g.items.push_back(text(names[i].c_str(), id_base + int(i), int(i) == now, true));
+	if (names.empty()) g.items.push_back(text(UI_TEXT(menu_no_devices, "(No devices)"), 0, false, false));
+	for (size_t i = 0; i < names.size() && i < 256; i++)
+		g.items.push_back(text(names[i].c_str(), id_base + int(i), (midi_route_mask(routes, names[i]) & (1u << column)) != 0, ready));
 	return g;
 }
 
@@ -282,12 +280,14 @@ inline menu_group menu_audio_output(const menu_state &s)
 	return g;
 }
 
-// The general right-click menu opens settings.
-// Device and emulation controls live in the standalone settings window.
+// The general right-click menu opens the editors and settings.
 inline std::vector<menu_group> menu_ports(const menu_state &s)
 {
 	using namespace menu_detail;
-	return { settings_shortcut(false) };
+	menu_group editors;
+	editors.items.push_back(text(UI_TEXT(menu_open_list, "Open the list"), ID_OVERVIEW, false, true, "F3"));
+	editors.items.push_back(text(UI_TEXT(menu_open_editor, "Open the editor"), ID_PC_EDITOR, false, true, "F2"));
+	return { editors, settings_shortcut() };
 }
 
 // MIDI IN A is the quick menu for all MIDI ports and mode resets.
@@ -295,26 +295,17 @@ inline std::vector<menu_group> menu_midi(const menu_state &s)
 {
 	using namespace menu_detail;
 	std::vector<menu_group> groups;
-	for (int p = 0; p < 4; p++)
-		groups.push_back(menu_port_group(in_label(p), s.midi_ins, s.in_dev[p],
-		                                 ID_IN_NONE + p * ID_IN_STRIDE,
-		                                 ID_IN_BASE + p * ID_IN_STRIDE));
-	// Port E: heard only by a multi-part plug-in board (the 16-part FC board)
-	groups.push_back(menu_port_group(in_label(4), s.midi_ins, s.in_dev[4], ID_INE_NONE, ID_INE_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_out_mu, "MIDI OUT (what the MU2000 sends)"), s.midi_outs,
-	                                 s.out_dev_mu, ID_OUTMU_NONE, ID_OUTMU_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_thru_a, "MIDI THRU A (sends out what A receives)"), s.midi_outs,
-	                                 s.out_dev, ID_OUT_NONE, ID_OUT_BASE));
-	groups.push_back(menu_port_group(UI_TEXT(menu_thru_b, "MIDI THRU B (sends out what B receives)"), s.midi_outs,
-	                                 s.out_dev_b, ID_OUTB_NONE, ID_OUTB_BASE));
+	for (int p = 0; p < 5; p++)
+		groups.push_back(menu_port_group(in_label(p), s.midi_ins, s.midi.inputs, p,
+		    p == 4 ? ID_INE_NONE : ID_IN_NONE + p * ID_IN_STRIDE, p == 4 ? ID_INE_BASE : ID_IN_BASE + p * ID_IN_STRIDE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_out_mu, "MIDI OUT (what the MU2000 sends)"), s.midi_outs, s.midi.outputs, 2, ID_OUTMU_NONE, ID_OUTMU_BASE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_thru_a, "MIDI THRU A (sends out what A receives)"), s.midi_outs, s.midi.outputs, 0, ID_OUT_NONE, ID_OUT_BASE, s.ready));
+	groups.push_back(menu_port_group(UI_TEXT(menu_thru_b, "MIDI THRU B (sends out what B receives)"), s.midi_outs, s.midi.outputs, 1, ID_OUTB_NONE, ID_OUTB_BASE, s.ready));
 	menu_group reset;
 	reset.title = UI_TEXT(settings_reset, "Reset MIDI mode");
 	reset.items = {text("GM", ID_RESET_GM, false, s.ready), text("GS / TG300B", ID_RESET_GS, false, s.ready),
 	    text("XG", ID_RESET_XG, false, s.ready), text(UI_TEXT(settings_panic, "Panic"), ID_MIDI_PANIC, false, s.ready)};
 	groups.push_back(reset);
-	menu_group processing;
-	processing.items.push_back(text(UI_TEXT(menu_thin_bends, "Lighten heavy MIDI"), ID_THIN_BENDS, s.thin_bends, s.ready));
-	groups.push_back(processing);
 	groups.push_back(settings_shortcut());
 	return groups;
 }
@@ -351,6 +342,7 @@ inline std::vector<menu_group> menu_card(const menu_state &s)
 	else
 		std::snprintf(stop, sizeof(stop), "%s", UI_TEXT(menu_stop, "Stop"));
 	g.items.push_back(text(stop, ID_STOP_FILE, false, s.playing));
+	g.items.push_back(text(UI_TEXT(menu_thin_bends, "Lighten heavy MIDI: thin pitch bends, drop Roland display data (unlike the real unit)"), ID_THIN_BENDS, s.thin_bends, true));
 	// What to do with a MIDI file that uses ports 3 and 4
 	g.items.push_back(separator());
 	g.items.push_back(text(UI_TEXT(menu_fold34, "Fold ports 3+4 onto A and B (DIN ports only)"), ID_PORTS34_FOLD, s.fold34, true));
@@ -377,6 +369,7 @@ inline std::vector<menu_group> menu_phones(const menu_state &s)
 		const std::string label = std::to_string(s.audio_rates[i]) + " Hz";
 		rates.items.push_back(text(label.c_str(), ID_RATE_BASE + int(i), s.audio_rate == s.audio_rates[i], s.audio_ready));
 	}
+	g.items.push_back(separator());
 	g.items.push_back(text(UI_TEXT(settings_limiter, "Limit output peaks"), ID_OUTPUT_LIMITER, s.limiter, s.audio_ready));
 	return { menu_audio_output(s), rates, g, settings_shortcut() };
 }
@@ -398,6 +391,8 @@ inline std::vector<menu_group> menu_ain_only(const std::vector<std::string> &nam
 	using namespace menu_detail;
 	menu_group head = menu_ain_group(names, ain_name);
 	menu_group g;
+	g.items.push_back(text(head.title.c_str(), 0, false, false));
+	g.items.push_back(separator());
 	for (const menu_item &item : head.items)
 		g.items.push_back(item);
 	return { g, settings_shortcut() };

@@ -1571,8 +1571,6 @@ void panel::paint_front(ImDrawList *dl, const snapshot &s, u64 pressed, double v
 	if (status && status[0])
 		im::text_in(dl, im::pos_of(m_status), im::size_of(m_status), status,
 		            PANEL_INK, m_fonts.small, m_fonts.small_px, false, true, false);
-	// Removed the footer instructions as redundant AI overexplaining.
-	// If needed, this guidance can move to Help elsewhere.
 
 	draw_tabs(dl);
 }

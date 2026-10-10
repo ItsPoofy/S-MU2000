@@ -23,8 +23,7 @@
 #include "bridge.h"
 #include "driver.h"
 #include "midi_guard.h"
-#include "midi_in.h"
-#include "midi_out.h"
+#include "midi_router.h"
 #include "texts.h"
 #include "analog_out.h"
 #include "output_limiter.h"
@@ -46,16 +45,7 @@ namespace ui {
 struct engine {
 	mu2000 mu;
 	bridge   &br;
-	midi_in  &midi;        // MIDI IN A（パート 1-16）
-	// B-D。B は実機の 2 つめの DIN、C・D は USB だけの口（パート 33-64）。
-	// [0] は使わない（midi が A）
-	midi_in  *midi_p[mu2000::MIDI_PORTS + 1] = {};   // 最後は口 E（マルチパートのプラグインボード）
-	midi_out *mout = nullptr;     // MIDI THRU A（A で受けたものを外へ）
-	midi_out *mout_b = nullptr;   // MIDI THRU B（B で受けたものを外へ）
-	midi_out *mout_edit = nullptr; // 音色の窓で選んだ送り先（Ctrl＋右クリックで送るもの）
-	// MIDI OUT。MU2000 が自分で送り出すもの（XG のダンプ要求への返事など）。
-	// これを loopMIDI 越しに外のエディタへ返すと、外から読み書きできる
-	midi_out *mout_mu = nullptr;
+	midi_router &midi;
 	audio_in *ain = nullptr;          // A/D INPUT に入れる音（無ければ無音）
 
 	std::atomic<int> state{0};        // 0 起動中 / 1 準備完了 / 2 だめ
@@ -82,7 +72,7 @@ struct engine {
 
 	driver drv;
 
-	engine(bridge &b, midi_in &m) : br(b), midi(m) {}
+	engine(bridge &b, midi_router &m) : br(b), midi(m) {}
 
 	bool load(const std::string &dir)
 	{
@@ -233,38 +223,22 @@ struct engine {
 
 		drv.apply_buttons(mu, br);
 		// 画面から出したものも、外の MIDI 出力へ流す（実機の THRU）
-		drv.pump_midi(mu, br, [this](u8 v) { if (mout && guard_a.pass(v)) mout->send(v); });
+		drv.pump_midi(mu, br, [this](u8 v) { if (guard_a.pass(v)) midi.send(0, v); });
 		// 音色の窓から外へ送るもの（音源には入れない）
 		br.drain_out([this](int dest, const std::vector<u8> &msg) {
-			midi_out *o = dest == 2 ? mout_edit : dest == 1 ? mout_b : mout;
-			if (o)
-				for (u8 v : msg)
-					o->send(v);
+			for (u8 v : msg) midi.send(dest == 2 ? 3 : dest, v);
 		});
 		drv.pump_wheel(mu, br);
 
-		u8 b;
-		while (midi.pop(b)) {
-			drv.watch(b, mu.midi_in(b, 0));
-			if (mout && guard_a.pass(b)) mout->send(b);
-		}
-		// B は実機の 2 つめの DIN（内蔵 SCI ch1）。パート 17-32 に届く。
-		// THRU も口ごとに分ける。A で受けたものは MIDI OUT A、
-		// B で受けたものは MIDI OUT B へ。混ぜると、外に繋いだ音源で
-		// パートの割り振りが崩れる
-		// C・D は実機では USB だけの口で、外へ出す THRU の端子も無い
-		for (int p = 1; p < mu2000::MIDI_PORTS; p++) {
-			if (!midi_p[p])
-				continue;
-			while (midi_p[p]->pop(b)) {
-				drv.watch(b, mu.midi_in(b, p));
-				if (p == 1 && mout_b && guard_b.pass(b)) mout_b->send(b);
+		midi.drain([this](int port, const u8 *bytes, size_t n) {
+			for (size_t i = 0; i < n; i++) {
+				const u8 b = bytes[i];
+				if (port == mu2000::MIDI_PORTS) mu.board_midi_in(b);
+				else drv.watch(b, mu.midi_in(b, port));
+				if (port == 0 && guard_a.pass(b)) midi.send(0, b);
+				if (port == 1 && guard_b.pass(b)) midi.send(1, b);
 			}
-		}
-		// 口 E。本体（firmware）には行かず、マルチパートのプラグインボードだけが聞く
-		if (midi_p[mu2000::MIDI_PORTS])
-			while (midi_p[mu2000::MIDI_PORTS]->pop(b))
-				mu.board_midi_in(b);
+		});
 
 		const float g = br.gain();
 		// アナログにした最初のブロックで、前に使ったときの状態を捨てる
@@ -304,7 +278,7 @@ struct engine {
 
 		// firmware が送り出したもの。画面（パラメータの層）と MIDI OUT の口へ。
 		// 出口が無くても取り出しておく（溜めを空ける）
-		drv.pump_out(mu, br, [this](u8 v) { if (mout_mu) mout_mu->send(v); });
+		drv.pump_out(mu, br, [this](u8 v) { midi.send(2, v); });
 
 		drv.publish(mu, br, n, AUDIO_RATE, true, nullptr);
 		in_fill.store(false);

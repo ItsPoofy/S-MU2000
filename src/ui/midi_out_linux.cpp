@@ -180,17 +180,13 @@ void midi_out::close()
 	m_name.clear();
 }
 
-void midi_out::send(u8 v)
+void midi_out::send(u8 v) { send(&v, 1); }
+
+bool midi_out::send(const u8 *bytes, size_t n)
 {
-	if (!m_open.load(std::memory_order_acquire))
-		return;
-	const size_t w = m_write.load(std::memory_order_relaxed);
-	const size_t next = (w + 1) & MASK;
-	if (next == m_read.load(std::memory_order_acquire))
-		return;   // full: drop, like the machine's TX buffer
-	m_buf[w] = v;
-	m_write.store(next, std::memory_order_release);
+	if (!enqueue(bytes, n)) return false;
 	m_wake.notify_one();
+	return true;
 }
 
 void midi_out::emit(const u8 *p, size_t n)

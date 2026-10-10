@@ -74,6 +74,7 @@ static void persistence()
 {
 	ui::remembered in, out;
 	in.audio_out = "USB = audio";
+	in.midi = {{{"Keyboard", 3}, {"Pads", 17}}, {{"Synth", 5}, {"Recorder", 4}}};
 	in.audio.exclusive = true;
 	in.audio.stream = {96000, 256, 4, 5};
 	in.audio_routes = {{"USB = audio", 4, 5}, {"HDMI", 1, 0}};
@@ -81,6 +82,10 @@ static void persistence()
 	in.limiter = true; in.native_fx = 2; in.native_engine = 1;
 	ui::apply_settings(ui::collect_settings(in), out);
 	require(out.audio == in.audio && out.audio_out == in.audio_out && out.limiter && out.native_fx == 2 && out.native_engine == 1, "Audio preferences round trip");
+	require(out.midi == in.midi, "MIDI routing round trip");
+	ui::remembered legacy;
+	ui::apply_settings({{"midi_in", "Keyboard"}, {"midi_in_b", "Keyboard"}, {"midi_out", "Synth"}, {"midi_out_mu", "Synth"}}, legacy);
+	require(ui::midi_route_mask(legacy.midi.inputs, "Keyboard") == 3 && ui::midi_route_mask(legacy.midi.outputs, "Synth") == 5, "Legacy MIDI routing migration");
 	require(out.audio_routes.size() == 2 && out.audio_routes[0].device == in.audio_out && out.audio_routes[0].left == 4 && out.audio_routes[1].right == 0, "Per-device routing round trip");
 	in.board = 1; in.board_part = 17; in.board_more[0] = 2;
 	in.card = "prepared-card.img"; in.board_file = "voices.ini"; in.board_fc[0] = "fc.ini";
@@ -125,28 +130,35 @@ static void persistence()
 	        saved.preferences.stream.left == 0 && saved.preferences.stream.right == 1,
 	        "Rate change retained an obsolete saved channel route");
 	const auto general = ui::menu_ports({});
-	bool settings = false;
+	bool settings = false, list = false, editor = false;
 	for (const auto &group : general) for (const auto &entry : group.items) {
 		settings |= entry.id == ui::ID_SETTINGS;
-		require(entry.id != ui::ID_NATIVE_FX && entry.id != ui::ID_NATIVE_ENGINE && entry.id != ui::ID_OVERVIEW, "Redundant general menu entries");
+		list |= entry.id == ui::ID_OVERVIEW && entry.shortcut == "F3";
+		editor |= entry.id == ui::ID_PC_EDITOR && entry.shortcut == "F2";
+		require(entry.id != ui::ID_NATIVE_FX && entry.id != ui::ID_NATIVE_ENGINE, "Redundant general menu entries");
 	}
-	require(settings, "Settings menu entry missing");
+	require(settings && list && editor, "General menu lost editors or settings");
 	ui::menu_state menu; menu.ready = menu.audio_ready = menu.thin_bends = menu.limiter = true;
 	menu.audio_rates = {44100, 48000};
 	bool thin = false, reset = false, factory = false, rate = false, peaks = false;
 	for (const auto &g : ui::menu_midi(menu)) for (const auto &e : g.items) {
-		thin |= e.id == ui::ID_THIN_BENDS && e.checked && e.label == "Lighten heavy MIDI";
+		require(e.id != ui::ID_THIN_BENDS, "File-player lightening appeared in MIDI input menu");
 		reset |= e.id == ui::ID_RESET_XG && e.enabled;
 	}
 	for (const auto &g : ui::menu_card(menu)) for (const auto &e : g.items)
-		require(e.id != ui::ID_THIN_BENDS, "MIDI lightening remained in card menu");
+		thin |= e.id == ui::ID_THIN_BENDS && e.checked && e.label.find("unlike the real unit") != std::string::npos;
 	for (const auto &g : ui::menu_power(menu)) for (const auto &e : g.items) factory |= e.id == ui::ID_FACTORY;
 	for (const auto &g : ui::menu_phones(menu)) for (const auto &e : g.items) {
 		rate |= e.id == ui::ID_RATE_BASE + 1 && e.label == "48000 Hz";
 		peaks |= e.id == ui::ID_OUTPUT_LIMITER && e.checked;
 	}
 	require(thin && reset && factory && rate && peaks, "Quick menu control placement");
-	for (const auto &groups : {ui::menu_midi(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
+	const auto phones = ui::menu_phones(menu);
+	const auto &output = phones[2].items;
+	require(output.size() == 4 && output[2].separator && output[3].id == ui::ID_OUTPUT_LIMITER, "Peak limiter lacks a separator");
+	const auto input = ui::menu_ain_only({}, "");
+	require(input[0].items[0].label == "A/D INPUT (sound to sample)" && !input[0].items[0].enabled, "A/D INPUT heading missing");
+	for (const auto &groups : {general, ui::menu_midi(menu), ui::menu_card(menu), ui::menu_phones(menu), ui::menu_power(menu), ui::menu_ain_only({}, "")}) {
 		const auto &last = groups.back();
 		require(last.title.empty() && last.items.size() == 2 && last.items[0].separator
 			&& last.items[1].id == ui::ID_SETTINGS && last.items[1].enabled, "Quick menu lacks a separated Settings shortcut");
@@ -243,6 +255,8 @@ static void interface()
 	ui::settings_state state;
 	state.ready = state.connected = true;
 	state.outputs = {"Speakers", "USB"};
+	state.midi_inputs = {"Keyboard", "Pads"};
+	state.midi_outputs = {"Synth", "Recorder"};
 	state.stream = {{44100, 48000}, {"Output 1", "Output 2", "Output 3", "Output 4"}, 44100};
 	ui::audio_output_config applied;
 	int calls = 0, command = 0;
@@ -251,6 +265,7 @@ static void interface()
 	actions.language = [](int value) { ui::set_lang(ui::lang(value)); };
 	actions.command = [&](int id) { command = id; };
 	actions.input = [](auto) {};
+	actions.midi = [&](ui::midi_routing routes) { state.midi = std::move(routes); };
 	int volume_updates = 0, volume_saves = 0;
 	actions.volume = [&](float gain) { state.gain = gain; volume_updates++; };
 	actions.save_volume = [&] { volume_saves++; };
@@ -298,8 +313,9 @@ static void interface()
 	     {ui::ID_RESET_XG, {0xf0, 0x43, 0x10, 0x4c, 0, 0, 0x7e, 0, 0xf7}}}) {
 		ui::send_midi_command(id, bridge);
 		std::vector<u8> reset; u8 byte;
-		while (bridge.take_midi(byte)) reset.push_back(byte);
-		require(reset == expected, "Reset command emitted incorrect MIDI");
+		require(!bridge.take_midi(byte), "Mode reset reached MIDI THRU");
+		while (bridge.take_ask(byte)) reset.push_back(byte);
+		require(reset == expected, "Reset command emitted incorrect internal MIDI");
 	}
 	ui::send_midi_command(ui::ID_MIDI_PANIC, bridge);
 	for (int port = 0; port <= mu2000::MIDI_PORTS; port++) {
@@ -309,6 +325,27 @@ static void interface()
 		while (port == 0 ? bridge.take_midi(byte) : bridge.take_midi_port(port, byte)) actual.push_back(byte);
 		require(actual == expected, "Panic did not silence every channel and port");
 	}
+	click("MIDI");
+	require(state.page == ui::settings_page::midi, "MIDI page navigation");
+	require(!items.contains("XG"), "MIDI reset remained in Settings");
+	click("A##Keyboard"); click("B##Keyboard"); click("A##Pads");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 3 && ui::midi_route_mask(state.midi.inputs, "Pads") == 1, "Input matrix lost multiple selections");
+	click("THRU A##Synth"); click("MU OUT##Synth"); click("MU OUT##Recorder");
+	require(ui::midi_route_mask(state.midi.outputs, "Synth") == 5 && ui::midi_route_mask(state.midi.outputs, "Recorder") == 4, "Output matrix lost multiple selections");
+	state.busy = true; frame(); click("A##Keyboard");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 3, "Routing controls active during reconfiguration");
+	state.busy = false; state.midi_inputs = {"Pads", "New controller"}; frame(); frame();
+	require(items.contains("A##New controller") && items.contains("B##Keyboard"), "Device refresh lost remembered routes or new devices");
+	click("A##Keyboard"); click("B##Keyboard");
+	require(ui::midi_route_mask(state.midi.inputs, "Keyboard") == 0, "Disconnected route could not be disabled");
+	ui::menu_state quick; quick.ready = true; quick.midi = state.midi; quick.midi_ins = state.midi_inputs; quick.midi_outs = state.midi_outputs;
+	const auto menus = ui::menu_midi(quick);
+	const auto checked = [&](int id) {
+		for (const auto &group : menus) for (const auto &entry : group.items) if (entry.id == id) return entry.checked;
+		return false;
+	};
+	require(checked(ui::ID_IN_BASE) && checked(ui::ID_OUT_BASE) && checked(ui::ID_OUTMU_BASE)
+		&& checked(ui::ID_OUTMU_BASE + 1), "Quick menu does not reflect routing matrix");
 	click("Emulation");
 	for (const char *label : {"Play effects in C++", "Lighten heavy MIDI", "Play without the firmware"}) {
 		const auto center = items.at(label).rect.GetCenter();
